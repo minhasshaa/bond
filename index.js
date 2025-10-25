@@ -57,7 +57,7 @@ const depositRoutes = require("./routes/deposit");
 const adminRoutes = require("./routes/admin");
 const withdrawRoutes = require("./routes/withdraw");
 // >>> START KYC ADDITION <<<
-const kycRoutes = require("./routes/kyc"); // <--- RESTORED: Required for Profile page
+const kycRoutes = require("./routes/kyc"); 
 // >>> END KYC ADDITION <<<
 
 // ------------------ APP + SERVER + IO ------------------
@@ -72,14 +72,21 @@ const io = socketIo(server, {
 
 const marketData = {};
 TRADE_PAIRS.forEach(pair => {
-  marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
+  marketData[pair] = { 
+      currentPrice: 0, 
+      candles: [], 
+      currentCandle: null,
+      // FIX: Add field to hold the official 24h change
+      priceChange24h: 0 
+  };
 });
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
 // ------------------ BINANCE CLIENT ------------------
 const binance = new Binance().options({
-  APIKEY: process.env.BINANCE_API_KEY,
+  // Relying on environment variables set in Render
+  APIKEY: process.env.BINANCE_API_KEY, 
   APISECRET: process.env.BINANCE_API_SECRET
 });
 
@@ -101,18 +108,17 @@ app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORA
 app.use("/api/withdraw", withdrawRoutes);
 
 // >>> START KYC ROUTE REGISTRATION <<<
-// ⭐ User Route: RESTORED for Profile Page functionality (Handles /api/kyc/*)
+// ⭐ User Route: Handles /api/kyc/*
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME }));
 // >>> END KYC ROUTE REGISTRATION <<<
 
-// ----- DASHBOARD DATA FUNCTIONS START (UNCHANGED) -----
+// ----- DASHBOARD DATA FUNCTIONS START -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
         throw new Error('User not found.');
     }
 
-    // --- FIX TO GET CORRECT PNL ---
     // Calculate PNL from trades closed *today*
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -122,7 +128,6 @@ async function getDashboardData(userId) {
         status: 'closed',
         closeTime: { $gte: startOfToday } // Only get trades that closed today
     });
-    // --- END PNL FIX ---
 
     const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
 
@@ -131,12 +136,8 @@ async function getDashboardData(userId) {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
 
-        const lastCandle = (Array.isArray(data.candles) && data.candles[data.candles.length - 1]) || data.currentCandle;
-        if (!lastCandle || typeof lastCandle.open !== 'number' || lastCandle.open === 0) {
-            return { name: pair.replace('USDT', ''), ticker: `${pair.replace('USDT', '')}/USD`, price: data.currentPrice || 0, change: 0, candles: data.candles };
-        }
-
-        const change = ((data.currentPrice - lastCandle.open) / lastCandle.open) * 100;
+        // FIX: Use the official 24h change sourced from Binance Ticker
+        const change = data.priceChange24h;
 
         return {
             name: pair.replace('USDT', ''),
@@ -173,14 +174,11 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    // --- THIS IS THE FIX ---
     // Add the socket to the user's room, so it receives broadcasts
-    // like 'trade_result' which are sent from trade.js.
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
         console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
     }
-    // --- END OF FIX ---
 
     socket.on('request_dashboard_data', async () => {
         try {
@@ -200,32 +198,60 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (UNCHANGED) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
+    
+    // FIX 1: Use futuresAllTickers for initial 24h change data
+    let allTickers = [];
+    try {
+        allTickers = await binance.futuresAllTickers();
+    } catch (e) {
+        console.error("CRITICAL ERROR: Failed to fetch initial 24hr Tickers. Dashboard change percentage may be 0.", e.message);
+    }
+    
     for (const pair of TRADE_PAIRS) {
         try {
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
-            marketData[pair].candles = klines.map(k => ({
-                asset: pair,
-                timestamp: new Date(k[0]),
-                open: parseFloat(k[1]),
-                high: parseFloat(k[2]),
-                low: parseFloat(k[3]),
-                close: parseFloat(k[4]),
-            }));
+            
+            // FIX 2: Check if klines is an array before mapping (fixes TypeError)
+            if (Array.isArray(klines)) {
+                marketData[pair].candles = klines.map(k => ({
+                    asset: pair,
+                    timestamp: new Date(k[0]),
+                    open: parseFloat(k[1]),
+                    high: parseFloat(k[2]),
+                    low: parseFloat(k[3]),
+                    close: parseFloat(k[4]),
+                }));
+            } else {
+                 throw new Error("Binance returned non-array data for candles, connection failed.");
+            }
+            
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
+            
+            // FIX 3: Set initial 24h change from Ticker endpoint
+            const tickerData = allTickers.find(t => t.symbol === pair);
+            if (tickerData) {
+                marketData[pair].priceChange24h = parseFloat(tickerData.priceChangePercent); 
+            }
+
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err);
+            console.error(`❌ Failed to load initial candles for ${pair}:`, err.message);
         }
     }
 }
 
 async function updateMarketData() {
     try {
-        const prices = await binance.futuresPrices();
+        // FIX 4: Fetch 24hr ticker using the correct function name in the continuous update
+        const [prices, allTickers] = await Promise.all([
+            binance.futuresPrices(),
+            binance.futuresAllTickers() 
+        ]);
+
         const now = new Date();
         const currentMinuteStart = new Date(now);
         currentMinuteStart.setSeconds(0, 0);
@@ -234,6 +260,12 @@ async function updateMarketData() {
         for (const pair of TRADE_PAIRS) {
             if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
 
+            // FIX 5: Update 24h change percentage
+            const tickerData = allTickers.find(t => t.symbol === pair);
+            if (tickerData) {
+                marketData[pair].priceChange24h = parseFloat(tickerData.priceChangePercent);
+            }
+            
             const md = marketData[pair];
             const currentPrice = md.currentPrice || 0;
             if (!currentPrice) continue;
@@ -280,7 +312,7 @@ function startMarketDataPolling() {
   setInterval(updateMarketData, 1000);
 }
 
-// ------------------ FIX: SUPPORT BOTH DASHBOARD + TRADING PRICE UPDATES (UNCHANGED) ------------------
+// ------------------ FIX: SUPPORT BOTH DASHBOARD + TRADING PRICE UPDATES ------------------
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
@@ -289,17 +321,15 @@ setInterval(() => {
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
-        const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
-        let change = 0;
-        if (lastCandle && lastCandle.open !== 0) {
-            change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
-        }
-
+        
+        // FIX 6: Use the official 24h change from marketData for the broadcast
+        const change = md.priceChange24h || 0; 
+        
         // Dashboard format
         const tickerForClient = `${pair.replace('USDT', '')}/USD`;
         payloadDashboard[tickerForClient] = {
             price: md.currentPrice,
-            change: parseFloat(change.toFixed(2)),
+            change: parseFloat(change.toFixed(2)), 
             countdown: secondsUntilNextMinute
         };
 
@@ -324,8 +354,6 @@ db.once("open", async () => {
   console.log("✅ Connected to MongoDB");
 
   // >>> START CRASH PREVENTION/CLEANUP <<<
-  // This non-destructive query runs ONCE at startup to fix any corrupted documents
-  // that could cause the server to crash (CastError) later.
   try {
     const TradeModel = mongoose.model('Trade');
     const UserModel = mongoose.model('User');
@@ -334,7 +362,7 @@ db.once("open", async () => {
       { 
         status: { $ne: 'closed' },
         $or: [
-          { activationTimestamp: { $not: { $type: 9 } } }, // Not a valid BSON Date
+          { activationTimestamp: { $not: { $type: 9 } } },
           { activationTimestamp: { $exists: false } }, 
           { activationTimestamp: null } 
         ]
