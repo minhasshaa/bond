@@ -1,4 +1,4 @@
-// index.js (FINAL FIX: Stable Public Data & Fast UI)
+// index.js
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -63,12 +63,8 @@ const kycRoutes = require("./routes/kyc");
 // ------------------ APP + SERVER + IO ------------------
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
+// ⭐ FIX 1: Removed Socket.IO CORS configuration for same-origin Render deployment
+const io = socketIo(server); 
 
 const marketData = {};
 TRADE_PAIRS.forEach(pair => {
@@ -77,11 +73,10 @@ TRADE_PAIRS.forEach(pair => {
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
-// ------------------ BINANCE CLIENT (FIXED FOR PUBLIC SPOT DATA) ------------------
+// ------------------ BINANCE CLIENT ------------------
 const binance = new Binance().options({
-  // FIX 1: Remove APIKEY and APISECRET to force public (unsigned) calls.
-  // FIX 2: Set the stable SPOT API URL.
-  baseURL: 'https://api.binance.com/api/' 
+  APIKEY: process.env.BINANCE_API_KEY,
+  APISECRET: process.env.BINANCE_API_SECRET
 });
 
 // ------------------ MIDDLEWARE ------------------
@@ -94,15 +89,11 @@ app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 
-// --------------------------------------------------------------------------------------------------
-// ⭐ Admin Route: Passes Azure credentials to routes/admin.js (Handles /api/admin/* and /api/admin/kyc/*)
-// --------------------------------------------------------------------------------------------------
 app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }));
 
 app.use("/api/withdraw", withdrawRoutes);
 
 // >>> START KYC ROUTE REGISTRATION <<<
-// ⭐ User Route: RESTORED for Profile Page functionality (Handles /api/kyc/*)
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME }));
 // >>> END KYC ROUTE REGISTRATION <<<
 
@@ -113,17 +104,14 @@ async function getDashboardData(userId) {
         throw new Error('User not found.');
     }
 
-    // --- FIX TO GET CORRECT PNL ---
-    // Calculate PNL from trades closed *today*
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const recentTrades = await Trade.find({ 
         userId: userId, 
         status: 'closed',
-        closeTime: { $gte: startOfToday } // Only get trades that closed today
+        closeTime: { $gte: startOfToday } 
     });
-    // --- END PNL FIX ---
 
     const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
 
@@ -174,14 +162,10 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    // --- THIS IS THE FIX ---
-    // Add the socket to the user's room, so it receives broadcasts
-    // like 'trade_result' which are sent from trade.js.
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
         console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
     }
-    // --- END OF FIX ---
 
     socket.on('request_dashboard_data', async () => {
         try {
@@ -201,26 +185,21 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (FINAL FIX) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC ------------------
+
 async function initializeMarketData() {
-    console.log("📈 Initializing market data from Binance (Spot Public)...");
+    console.log("📈 Initializing market data from Binance...");
     for (const pair of TRADE_PAIRS) {
         try {
-            // FIX 3: Wrap the binance.candlesticks callback in a Promise to fix the "callback.call is not a function" error
-            const klines = await new Promise((resolve, reject) => {
-                // Use binance.candlesticks for Spot data
-                binance.candlesticks(pair, '1m', (error, ticks) => {
-                    if (error) {
-                        const errorMsg = error && error.msg ? error.msg : JSON.stringify(error);
-                        return reject(new Error(`Binance API Call Failed: ${errorMsg}`));
-                    }
-                    if (!Array.isArray(ticks)) {
-                        return reject(new Error("Binance returned invalid non-array data."));
-                    }
-                    resolve(ticks);
-                }, { limit: 200 }); // Pass options here
-            });
-            // END FIX
+            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+            
+            // ⭐ FIX 2: Check if klines is an array to prevent "klines.map is not a function" crash
+            if (!Array.isArray(klines) || klines.length === 0) {
+                 console.error(`❌ Received invalid or empty response for ${pair}. Data initialization skipped.`);
+                 marketData[pair].candles = []; 
+                 marketData[pair].currentPrice = 0;
+                 continue; 
+            }
 
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
@@ -234,74 +213,82 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}: ${err.message || JSON.stringify(err)}.`);
+            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.message) || (err && err.body) || err);
         }
     }
 }
 
-async function updateMarketData() {
-    try {
-        // FIX: Use binance.prices for Spot market (was futuresPrices)
-        const prices = await binance.prices();
+// ⭐ FIX 3A: New function to stream real-time data using unauthenticated WebSocket
+function startMarketDataStream() {
+    console.log("⚡ Starting unauthenticated Binance WebSocket stream...");
+    
+    // Create a combined stream URL for all trade pairs
+    const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
+    
+    // Subscribe to the unauthenticated public trade stream
+    binance.futuresSubscribe(streams, (trade) => {
+        const pair = trade.s;
+        const price = parseFloat(trade.p);
+
+        // Update current price
+        marketData[pair].currentPrice = price;
+
+        const md = marketData[pair];
         const now = new Date();
         const currentMinuteStart = new Date(now);
         currentMinuteStart.setSeconds(0, 0);
         currentMinuteStart.setMilliseconds(0);
 
-        for (const pair of TRADE_PAIRS) {
-            if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
-
-            const md = marketData[pair];
-            const currentPrice = md.currentPrice || 0;
-            if (!currentPrice) continue;
-
-            const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
+        // This logic is critical for chart updates
+        if (md.currentCandle) {
+            
+            // Handle minute-end logic
+            const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
             if (isNewMinute) {
-                if (md.currentCandle) {
-                    const completed = { ...md.currentCandle, close: currentPrice };
-                    const override = candleOverride[pair];
-                    if (override) {
-                        const openP = completed.open;
-                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                        if (override === 'up') {
-                            completed.close = openP + priceChange;
-                            completed.high = Math.max(completed.high, completed.close);
-                        } else {
-                            completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
-                        }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                        candleOverride[pair] = null;
+                // Finalize old candle
+                const completed = { ...md.currentCandle, close: price };
+                const override = candleOverride[pair];
+                if (override) {
+                    const openP = completed.open;
+                    const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                    if (override === 'up') {
+                        completed.close = openP + priceChange;
+                        completed.high = Math.max(completed.high, completed.close);
+                    } else {
+                        completed.close = openP - priceChange;
+                        completed.low = Math.min(completed.low, completed.close);
                     }
-                    md.candles.push(completed);
-                    if (md.candles.length > 200) md.candles.shift();
-                    await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
+                    console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
+                    candleOverride[pair] = null;
                 }
-                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
+                md.candles.push(completed);
+                if (md.candles.length > 200) md.candles.shift();
+                Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(console.error);
+                
+                // Start new candle
+                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: price, high: price, low: price, close: price };
+
             } else {
-                md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
-                md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
-                md.currentCandle.close = currentPrice;
+                // Update current candle
+                md.currentCandle.high = Math.max(md.currentCandle.high, price);
+                md.currentCandle.low = Math.min(md.currentCandle.low, price);
+                md.currentCandle.close = price;
             }
+
+            // Emit the real-time data to connected clients
             const allCandles = [...md.candles, md.currentCandle];
-            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
+            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: price });
         }
-    } catch (err) {
-        console.error("Error in updateMarketData:", (err && err.body) || err);
-    }
+    });
 }
+// ------------------ END OF BINANCE STREAMING FIX ------------------
 
-function startMarketDataPolling() {
-  // FINAL SOLUTION: This heavy API call runs every 5 seconds to prevent the permanent Rate Limit Ban (Error -1003).
-  console.log("✅ Starting market data API polling every 5 seconds (to avoid ban)...");
-  setInterval(updateMarketData, 1100); 
-}
 
-// ------------------ FIX: FAST UI UPDATE (1 SECOND) ------------------
+// ------------------ DASHBOARD PRICE EMITTER ------------------
+// This function remains to format and emit the data for your dashboard components.
+// It relies on the marketData being updated by the new stream function above.
 setInterval(() => {
-    // This runs every 1 second and only broadcasts the data that was LAST fetched.
-    // This is SAFE and provides the 1-second update feeling to the user interface.
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
     const payloadDashboard = {};
@@ -333,7 +320,7 @@ setInterval(() => {
 
     io.emit("price_update", payloadTrading);           
     io.emit("dashboard_price_update", payloadDashboard);
-}, 1000); // UI BROADCAST runs every 1 second
+}, 1000);
 
 // ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
@@ -344,8 +331,6 @@ db.once("open", async () => {
   console.log("✅ Connected to MongoDB");
 
   // >>> START CRASH PREVENTION/CLEANUP <<<
-  // This non-destructive query runs ONCE at startup to fix any corrupted documents
-  // that could cause the server to crash (CastError) later.
   try {
     const TradeModel = mongoose.model('Trade');
     const UserModel = mongoose.model('User');
@@ -354,7 +339,7 @@ db.once("open", async () => {
       { 
         status: { $ne: 'closed' },
         $or: [
-          { activationTimestamp: { $not: { $type: 9 } } }, // Not a valid BSON Date
+          { activationTimestamp: { $not: { $type: 9 } } }, 
           { activationTimestamp: { $exists: false } }, 
           { activationTimestamp: null } 
         ]
@@ -382,7 +367,8 @@ db.once("open", async () => {
 
 
   await initializeMarketData();
-  startMarketDataPolling();
+  // ⭐ FIX 3B: Start the WebSocket stream instead of the old polling function
+  startMarketDataStream(); 
 
   const tradeModule = require("./trade");
   if (typeof tradeModule.initialize === "function") {
