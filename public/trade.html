@@ -621,12 +621,6 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </div>
 </div>
 
-<!-- ⭐ FIX: Add temporary debug button -->
-<div class="fixed bottom-20 right-4 z-50">
-    <button onclick="forceChartUpdate()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-        Force Chart Update
-    </button>
-</div>
 
 <nav class="bottom-nav">
     <a href="dashboard.html" class="nav-link" id="nav-dashboard">
@@ -703,7 +697,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noCopyTrades = document.getElementById('noCopyTrades');
     const copyTradeStatus = document.getElementById('copyTradeStatus');
 
-    // Charting - Initialize immediately
+    // ⭐ FIXED: Chart initialization - using working chart logic from old file
     const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
     // Popup Elements
@@ -730,21 +724,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let tradeHistoryData = {};
     let assetPrices = {};
     let activeTab = 'trade';
-
-    // ⭐ FIX: Debug function for manual chart updates
-    window.forceChartUpdate = function() {
-        console.log('🔄 DEBUG: Forcing chart update');
-        if (marketData[currentAsset]) {
-            const completeCandles = [
-                ...(marketData[currentAsset].candles || []),
-                ...(marketData[currentAsset].currentCandle ? [marketData[currentAsset].currentCandle] : [])
-            ];
-            console.log('🔄 DEBUG: Complete candles for chart:', completeCandles.length);
-            updateChart(completeCandles);
-        } else {
-            console.log('🔄 DEBUG: No market data for current asset:', currentAsset);
-        }
-    };
 
     // --- Connection Status Functions ---
     function updateConnectionStatus(status, message) {
@@ -789,164 +768,80 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- Chart Functions (FIXED) ---
+    // ⭐ FIXED: Chart Functions from old working version
     function initChart(candles) {
-        if (!myChart) {
-            console.error('❌ Chart not initialized');
-            return;
-        }
-        
-        console.log('📊 Initializing chart with', candles.length, 'candles');
-        
-        // Use the complete candle data (both historical and current)
-        const allCandles = getCompleteCandleData(candles);
-        if (!allCandles || allCandles.length === 0) { 
-            // Show empty chart with message
-            myChart.setOption({
-                backgroundColor: 'transparent',
-                graphic: {
-                    type: 'text',
-                    left: 'center',
-                    top: 'middle',
-                    style: {
-                        text: 'Loading market data...',
-                        fontSize: 16,
-                        fill: '#9ca3af'
-                    }
-                }
-            }, true);
-            console.log('📊 Chart initialized with empty state');
+        if (!candles || candles.length === 0) { 
+            myChart.clear(); 
             return; 
         }
         
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => {
-            const date = new Date(c.timestamp);
-            return date.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit'
-            });
-        });
+        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit' 
+        }));
         
         const options = {
             backgroundColor: 'transparent',
-            animation: false,
             tooltip: { 
                 trigger: 'axis', 
-                axisPointer: { type: 'cross' },
-                formatter: function (params) {
-                    const data = params[0].data;
-                    return `
-                        Time: ${params[0].name}<br/>
-                        Open: $${data[0].toFixed(4)}<br/>
-                        Close: $${data[1].toFixed(4)}<br/>
-                        Low: $${data[2].toFixed(4)}<br/>
-                        High: $${data[3].toFixed(4)}
-                    `;
-                }
+                axisPointer: { type: 'cross' } 
             },
             xAxis: { 
                 type: 'category', 
                 data: chartDates, 
-                axisLine: { lineStyle: { color: '#8392A5' } },
-                axisLabel: {
-                    rotate: 45,
-                    color: '#9ca3af'
-                }
+                axisLine: { lineStyle: { color: '#8392A5' } } 
             },
             yAxis: { 
                 scale: true, 
                 axisLine: { lineStyle: { color: '#8392A5' } }, 
-                splitLine: { lineStyle: { color: '#2a2e39' } },
-                axisLabel: {
-                    color: '#9ca3af'
-                }
+                splitLine: { lineStyle: { color: '#2a2e39' } } 
             },
-            grid: { left: '10%', right: '5%', bottom: '15%', top: '10%' },
-            dataZoom: [
-                { 
-                    type: 'inside', 
-                    startValue: Math.max(0, allCandles.length - 50), 
-                    endValue: allCandles.length - 1
-                }
-            ],
-            series: [
-                { 
-                    type: 'candlestick', 
-                    data: chartData, 
-                    itemStyle: { 
-                        color: '#22c55e', 
-                        color0: '#ef4444', 
-                        borderColor: '#22c55e', 
-                        borderColor0: '#ef4444',
-                        borderWidth: 1
-                    } 
-                }
-            ]
+            grid: { left: '15%', right: '5%', bottom: '15%' },
+            dataZoom: [{ 
+                type: 'inside', 
+                startValue: Math.max(0, chartDates.length - 50), 
+                endValue: chartDates.length - 1, 
+                zoomOnMouseWheel: 'shift' 
+            }],
+            series: [{ 
+                type: 'candlestick', 
+                data: chartData, 
+                itemStyle: { 
+                    color: '#22c55e', 
+                    color0: '#ef4444', 
+                    borderColor: '#22c55e', 
+                    borderColor0: '#ef4444' 
+                } 
+            }]
         };
         
-        myChart.setOption(options, true);
-        console.log('📊 Chart initialized successfully with', allCandles.length, 'candles');
+        myChart.setOption(options, { notMerge: true });
     }
 
     function updateChart(candles) {
-        if (!myChart) {
-            console.error('❌ Chart not available for update');
-            return;
-        }
+        if (!candles || candles.length === 0) return;
         
-        console.log('📊 Updating chart with', candles.length, 'candles');
-        
-        const allCandles = getCompleteCandleData(candles);
-        if (!allCandles || allCandles.length === 0) { 
-            console.log('📊 No valid candles to update chart');
-            return; 
-        }
-
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => {
-            const date = new Date(c.timestamp);
-            return date.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit'
-            });
-        });
+        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit' 
+        }));
         
         myChart.setOption({
             xAxis: { data: chartDates },
             series: [{ data: chartData }]
         });
-        
-        console.log('📊 Chart updated successfully');
     }
 
-    // Helper function to combine historical and current candle data
-    function getCompleteCandleData(candles) {
-        if (!candles || !Array.isArray(candles)) {
-            console.log('📊 No candles array provided');
-            return [];
+    // ⭐ FIXED: Market data handler from old working version
+    socket.on('market_data', (data) => { 
+        if (data.asset === currentAsset) {
+            updateChart(data.candles); 
         }
-        
-        // Filter out invalid candles but be less aggressive
-        const validCandles = candles.filter(c => 
-            c && 
-            typeof c.open === 'number' && c.open > 0 &&
-            typeof c.close === 'number' && c.close > 0 &&
-            typeof c.high === 'number' && c.high > 0 &&
-            typeof c.low === 'number' && c.low > 0
-        );
-        
-        console.log('📊 Filtered', validCandles.length, 'valid candles from', candles.length, 'total');
-        return validCandles;
-    }
-
-    // ⭐ FIX: Initialize empty chart on page load
-    setTimeout(() => {
-        if (myChart) {
-            console.log('📊 Initializing empty chart on page load');
-            initChart([]);
-        }
-    }, 100);
+    });
 
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
@@ -1163,13 +1058,11 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('init', (data) => {
         console.log('📡 Received init data:', data);
         
-        // Initialize with empty market data structure
-        marketData = {};
+        // ⭐ FIXED: Use the market data structure from old working version
+        marketData = data.marketData || {};
         
-        // Get default assets
-        const assets = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
-                       'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'MATICUSDT'];
-        
+        // Get assets from market data
+        const assets = Object.keys(marketData);
         populateAssetSelector(assets);
 
         const lastAsset = localStorage.getItem('lastSelectedAsset');
@@ -1185,70 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
         visibleHistoryCount = 0;
         loadMoreTrades();
 
-        // Initialize chart with empty data - it will be populated by market_data events
-        initChart([]);
-    });
-
-    // ⭐ FIX: Updated market_data handler with better debugging
-    socket.on('market_data', (data) => {
-        console.log('📡 Received market_data:', {
-            asset: data.asset,
-            hasCandles: !!data.candles,
-            candlesLength: data.candles ? data.candles.length : 0,
-            hasCurrentCandle: !!data.currentCandle,
-            currentPrice: data.currentPrice,
-            currentAsset: currentAsset
-        });
-        
-        if (data.asset === currentAsset) {
-            // Update the market data structure
-            if (!marketData[data.asset]) {
-                marketData[data.asset] = { initialized: false };
-            }
-            marketData[data.asset].candles = data.candles || [];
-            marketData[data.asset].currentPrice = data.currentPrice;
-            marketData[data.asset].currentCandle = data.currentCandle;
-            
-            // Combine historical and current candle for chart
-            const completeCandles = [
-                ...(data.candles || []),
-                ...(data.currentCandle ? [data.currentCandle] : [])
-            ];
-            
-            console.log('📊 Complete candles for chart:', completeCandles.length);
-            
-            // If this is the first data for this asset, initialize chart
-            if (!marketData[data.asset].initialized) {
-                console.log('📊 Initializing chart with', completeCandles.length, 'candles');
-                initChart(completeCandles);
-                marketData[data.asset].initialized = true;
-            } else {
-                console.log('📊 Updating chart with', completeCandles.length, 'candles');
-                updateChart(completeCandles);
-            }
-            
-            // Update price display
-            if (data.currentPrice && data.currentPrice !== lastPrice) {
-                currentPriceElem.classList.remove('price-up', 'price-down');
-                currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
-                currentPriceElem.textContent = formatPrice(data.currentPrice, currentAsset);
-                lastPrice = data.currentPrice;
-            }
-        }
-    });
-
-    socket.on('market_data_initial', (initialData) => {
-        console.log('📡 Received initial market data:', initialData);
-        marketData = initialData;
-        
-        // Populate asset selector with available assets
-        const assets = Object.keys(initialData);
-        populateAssetSelector(assets);
-        
-        const lastAsset = localStorage.getItem('lastSelectedAsset');
-        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
-        setActiveAsset(currentAsset);
-        
+        // Initialize chart with current asset data
         updateUIForCurrentAsset();
     });
 
@@ -1527,35 +1357,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }); 
     }
 
+    // ⭐ FIXED: Update UI function from old working version
     function updateUIForCurrentAsset() {
-        if (marketData[currentAsset] && marketData[currentAsset].candles) {
-            // Get the complete candle data including current forming candle
-            const completeCandles = [
-                ...(marketData[currentAsset].candles || []),
-                ...(marketData[currentAsset].currentCandle ? [marketData[currentAsset].currentCandle] : [])
-            ];
-            
-            initChart(completeCandles);
+        if (marketData[currentAsset]) {
+            initChart(marketData[currentAsset].candles);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            // Show empty chart while waiting for data
-            initChart([]);
+            myChart.clear();
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
     }
 
-    // ⭐ FIX: Add resize handler and ensure chart is properly initialized
+    // ⭐ FIXED: Resize handler from old working version
     window.addEventListener('resize', () => {
-        if (myChart) {
-            try {
-                myChart.resize();
-            } catch (e) {
-                console.log('Chart resize error:', e);
-            }
-        }
+        if (myChart) myChart.resize();
     });
 
     // --- Popup & Modal Functions ---
