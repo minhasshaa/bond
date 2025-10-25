@@ -621,6 +621,12 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </div>
 </div>
 
+<!-- ⭐ FIX: Add temporary debug button -->
+<div class="fixed bottom-20 right-4 z-50">
+    <button onclick="forceChartUpdate()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+        Force Chart Update
+    </button>
+</div>
 
 <nav class="bottom-nav">
     <a href="dashboard.html" class="nav-link" id="nav-dashboard">
@@ -725,6 +731,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let assetPrices = {};
     let activeTab = 'trade';
 
+    // ⭐ FIX: Debug function for manual chart updates
+    window.forceChartUpdate = function() {
+        console.log('🔄 DEBUG: Forcing chart update');
+        if (marketData[currentAsset]) {
+            const completeCandles = [
+                ...(marketData[currentAsset].candles || []),
+                ...(marketData[currentAsset].currentCandle ? [marketData[currentAsset].currentCandle] : [])
+            ];
+            console.log('🔄 DEBUG: Complete candles for chart:', completeCandles.length);
+            updateChart(completeCandles);
+        } else {
+            console.log('🔄 DEBUG: No market data for current asset:', currentAsset);
+        }
+    };
+
     // --- Connection Status Functions ---
     function updateConnectionStatus(status, message) {
         const statusElem = document.getElementById('connection-status');
@@ -770,7 +791,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Chart Functions (FIXED) ---
     function initChart(candles) {
-        if (!myChart) return;
+        if (!myChart) {
+            console.error('❌ Chart not initialized');
+            return;
+        }
+        
+        console.log('📊 Initializing chart with', candles.length, 'candles');
         
         // Use the complete candle data (both historical and current)
         const allCandles = getCompleteCandleData(candles);
@@ -789,6 +815,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }, true);
+            console.log('📊 Chart initialized with empty state');
             return; 
         }
         
@@ -859,13 +886,20 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         
         myChart.setOption(options, true);
+        console.log('📊 Chart initialized successfully with', allCandles.length, 'candles');
     }
 
     function updateChart(candles) {
-        if (!myChart) return;
+        if (!myChart) {
+            console.error('❌ Chart not available for update');
+            return;
+        }
+        
+        console.log('📊 Updating chart with', candles.length, 'candles');
         
         const allCandles = getCompleteCandleData(candles);
         if (!allCandles || allCandles.length === 0) { 
+            console.log('📊 No valid candles to update chart');
             return; 
         }
 
@@ -882,25 +916,34 @@ document.addEventListener('DOMContentLoaded', () => {
             xAxis: { data: chartDates },
             series: [{ data: chartData }]
         });
+        
+        console.log('📊 Chart updated successfully');
     }
 
     // Helper function to combine historical and current candle data
     function getCompleteCandleData(candles) {
-        if (!candles || !Array.isArray(candles)) return [];
+        if (!candles || !Array.isArray(candles)) {
+            console.log('📊 No candles array provided');
+            return [];
+        }
         
         // Filter out invalid candles but be less aggressive
-        return candles.filter(c => 
+        const validCandles = candles.filter(c => 
             c && 
             typeof c.open === 'number' && c.open > 0 &&
             typeof c.close === 'number' && c.close > 0 &&
             typeof c.high === 'number' && c.high > 0 &&
             typeof c.low === 'number' && c.low > 0
         );
+        
+        console.log('📊 Filtered', validCandles.length, 'valid candles from', candles.length, 'total');
+        return validCandles;
     }
 
     // ⭐ FIX: Initialize empty chart on page load
     setTimeout(() => {
         if (myChart) {
+            console.log('📊 Initializing empty chart on page load');
             initChart([]);
         }
     }, 100);
@@ -1118,7 +1161,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- SOCKET.IO Data Event Handlers ---
 
     socket.on('init', (data) => {
-        console.log('Received init data:', data);
+        console.log('📡 Received init data:', data);
         
         // Initialize with empty market data structure
         marketData = {};
@@ -1146,14 +1189,21 @@ document.addEventListener('DOMContentLoaded', () => {
         initChart([]);
     });
 
-    // ⭐ FIX: Updated market_data handler to ensure chart updates
+    // ⭐ FIX: Updated market_data handler with better debugging
     socket.on('market_data', (data) => {
-        console.log('Received market_data:', data);
+        console.log('📡 Received market_data:', {
+            asset: data.asset,
+            hasCandles: !!data.candles,
+            candlesLength: data.candles ? data.candles.length : 0,
+            hasCurrentCandle: !!data.currentCandle,
+            currentPrice: data.currentPrice,
+            currentAsset: currentAsset
+        });
         
         if (data.asset === currentAsset) {
             // Update the market data structure
             if (!marketData[data.asset]) {
-                marketData[data.asset] = {};
+                marketData[data.asset] = { initialized: false };
             }
             marketData[data.asset].candles = data.candles || [];
             marketData[data.asset].currentPrice = data.currentPrice;
@@ -1165,11 +1215,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 ...(data.currentCandle ? [data.currentCandle] : [])
             ];
             
+            console.log('📊 Complete candles for chart:', completeCandles.length);
+            
             // If this is the first data for this asset, initialize chart
             if (!marketData[data.asset].initialized) {
+                console.log('📊 Initializing chart with', completeCandles.length, 'candles');
                 initChart(completeCandles);
                 marketData[data.asset].initialized = true;
             } else {
+                console.log('📊 Updating chart with', completeCandles.length, 'candles');
                 updateChart(completeCandles);
             }
             
@@ -1184,7 +1238,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('market_data_initial', (initialData) => {
-        console.log('Received initial market data:', initialData);
+        console.log('📡 Received initial market data:', initialData);
         marketData = initialData;
         
         // Populate asset selector with available assets
