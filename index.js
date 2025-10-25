@@ -63,7 +63,7 @@ const kycRoutes = require("./routes/kyc");
 // ------------------ APP + SERVER + IO ------------------
 const app = express();
 const server = http.createServer(app);
-// ⭐ FIX 1: Removed Socket.IO CORS configuration for same-origin Render deployment
+// FIX: Removed Socket.IO CORS
 const io = socketIo(server); 
 
 const marketData = {};
@@ -74,10 +74,8 @@ module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
 // ------------------ BINANCE CLIENT ------------------
-const binance = new Binance().options({
-  APIKEY: process.env.BINANCE_API_KEY,
-  APISECRET: process.env.BINANCE_API_SECRET
-});
+// Keeping options empty since you stated you aren't using keys
+const binance = new Binance().options({});
 
 // ------------------ MIDDLEWARE ------------------
 app.use(cors());
@@ -193,11 +191,13 @@ async function initializeMarketData() {
         try {
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
             
-            // ⭐ FIX 2: Check if klines is an array to prevent "klines.map is not a function" crash
+            // FIX: Check if klines is an array to prevent "klines.map is not a function" crash
             if (!Array.isArray(klines) || klines.length === 0) {
                  console.error(`❌ Received invalid or empty response for ${pair}. Data initialization skipped.`);
+                 // Ensure initial marketData structure is clean
                  marketData[pair].candles = []; 
                  marketData[pair].currentPrice = 0;
+                 marketData[pair].currentCandle = null; // IMPORTANT: Set to null if no data
                  continue; 
             }
 
@@ -211,83 +211,126 @@ async function initializeMarketData() {
             }));
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
+            // Initialize currentCandle based on the last historical close
+            marketData[pair].currentCandle = {
+                asset: pair,
+                timestamp: new Date(lastCandle.timestamp.getTime() + 60000), // Start of next minute
+                open: lastCandle.close,
+                high: lastCandle.close,
+                low: lastCandle.close,
+                close: lastCandle.close
+            };
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
             console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.message) || (err && err.body) || err);
+            marketData[pair].currentCandle = null;
         }
     }
 }
 
-// ⭐ FIX 3A: New function to stream real-time data using unauthenticated WebSocket
+// ⭐ FIX: Updated stream function to be more resilient and candle-aware
 function startMarketDataStream() {
     console.log("⚡ Starting unauthenticated Binance WebSocket stream...");
     
-    // Create a combined stream URL for all trade pairs
-    const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
-    
-    // Subscribe to the unauthenticated public trade stream
-    binance.futuresSubscribe(streams, (trade) => {
-        const pair = trade.s;
-        const price = parseFloat(trade.p);
+    // Use a try-catch block around the subscription to ensure errors don't stop the whole server
+    try {
+        const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
+        
+        // Subscribe to the unauthenticated public trade stream
+        binance.futuresSubscribe(streams, (trade) => {
+            try {
+                const pair = trade.s;
+                const price = parseFloat(trade.p);
 
-        // Update current price
-        marketData[pair].currentPrice = price;
+                // Update current price
+                marketData[pair].currentPrice = price;
 
-        const md = marketData[pair];
-        const now = new Date();
-        const currentMinuteStart = new Date(now);
-        currentMinuteStart.setSeconds(0, 0);
-        currentMinuteStart.setMilliseconds(0);
+                const md = marketData[pair];
+                if (!md) return; 
 
-        // This logic is critical for chart updates
-        if (md.currentCandle) {
-            
-            // Handle minute-end logic
-            const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
+                const now = new Date();
+                const currentMinuteStart = new Date(now);
+                currentMinuteStart.setSeconds(0, 0);
+                currentMinuteStart.setMilliseconds(0);
 
-            if (isNewMinute) {
-                // Finalize old candle
-                const completed = { ...md.currentCandle, close: price };
-                const override = candleOverride[pair];
-                if (override) {
-                    const openP = completed.open;
-                    const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                    if (override === 'up') {
-                        completed.close = openP + priceChange;
-                        completed.high = Math.max(completed.high, completed.close);
-                    } else {
-                        completed.close = openP - priceChange;
-                        completed.low = Math.min(completed.low, completed.close);
-                    }
-                    console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                    candleOverride[pair] = null;
+                // Initialize currentCandle if it's null (e.g., if historical load failed)
+                if (!md.currentCandle) {
+                    md.currentCandle = { 
+                        asset: pair, 
+                        timestamp: currentMinuteStart, 
+                        open: price, 
+                        high: price, 
+                        low: price, 
+                        close: price 
+                    };
+                    // Emit initial data
+                    const allCandles = [...md.candles, md.currentCandle];
+                    io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: price });
+                    return; // Wait for the next tick
                 }
-                md.candles.push(completed);
-                if (md.candles.length > 200) md.candles.shift();
-                Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(console.error);
                 
-                // Start new candle
-                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: price, high: price, low: price, close: price };
+                const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
-            } else {
-                // Update current candle
-                md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                md.currentCandle.low = Math.min(md.currentCandle.low, price);
-                md.currentCandle.close = price;
+                if (isNewMinute) {
+                    // Finalize the last candle
+                    const completed = { ...md.currentCandle, close: price };
+                    
+                    // --- APPLY OVERRIDE LOGIC HERE ---
+                    const override = candleOverride[pair];
+                    if (override) {
+                        const openP = completed.open;
+                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                        if (override === 'up') {
+                            completed.close = openP + priceChange;
+                            completed.high = Math.max(completed.high, completed.close);
+                        } else {
+                            completed.close = openP - priceChange;
+                            completed.low = Math.min(completed.low, completed.close);
+                        }
+                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
+                        candleOverride[pair] = null;
+                    }
+                    
+                    md.candles.push(completed);
+                    if (md.candles.length > 200) md.candles.shift();
+                    
+                    Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
+                        console.error(`DB Error saving completed candle for ${pair}:`, err.message);
+                    });
+                    
+                    // Start new candle for the current minute
+                    md.currentCandle = { 
+                        asset: pair, 
+                        timestamp: currentMinuteStart, 
+                        open: price, 
+                        high: price, 
+                        low: price, 
+                        close: price 
+                    };
+                } else {
+                    // Update the current candle with the latest price
+                    md.currentCandle.high = Math.max(md.currentCandle.high, price);
+                    md.currentCandle.low = Math.min(md.currentCandle.low, price);
+                    md.currentCandle.close = price;
+                }
+
+                // Emit the real-time data to connected clients
+                const allCandles = [...md.candles, md.currentCandle];
+                io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: price });
+            } catch (streamErr) {
+                console.error(`❌ CRITICAL STREAM PROCESSING ERROR for ${pair}:`, streamErr);
+                // This error will only stop the processing for this specific trade event, not the entire stream
             }
-
-            // Emit the real-time data to connected clients
-            const allCandles = [...md.candles, md.currentCandle];
-            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: price });
-        }
-    });
+        });
+    } catch (subErr) {
+        console.error("❌ BINANCE SUBSCRIPTION FAILED:", subErr);
+        // This is a major failure. You might want to retry subscription here.
+    }
 }
-// ------------------ END OF BINANCE STREAMING FIX ------------------
 
 
 // ------------------ DASHBOARD PRICE EMITTER ------------------
 // This function remains to format and emit the data for your dashboard components.
-// It relies on the marketData being updated by the new stream function above.
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
@@ -296,6 +339,9 @@ setInterval(() => {
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
+        // Ensure md is initialized before attempting to access
+        if (!md || md.currentPrice === 0) continue; 
+        
         const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
         let change = 0;
         if (lastCandle && lastCandle.open !== 0) {
@@ -367,8 +413,7 @@ db.once("open", async () => {
 
 
   await initializeMarketData();
-  // ⭐ FIX 3B: Start the WebSocket stream instead of the old polling function
-  startMarketDataStream(); 
+  startMarketDataStream(); // Start the stable stream
 
   const tradeModule = require("./trade");
   if (typeof tradeModule.initialize === "function") {
