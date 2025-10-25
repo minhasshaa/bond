@@ -108,6 +108,11 @@
                         <span class="text-gray-400">Today's P&L: </span>
                         <span class="value">...</span>
                     </div>
+                    <!-- ⭐ FIX: Connection status indicator -->
+                    <div id="connection-status" class="text-xs mt-1">
+                        <span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-1"></span>
+                        <span class="text-gray-400">Connecting...</span>
+                    </div>
                 </div>
             </div>
         </header>
@@ -214,6 +219,23 @@
             const searchBox = document.getElementById('search-box');
             const tabContainer = document.getElementById('tab-container');
 
+            // ⭐ FIX: Connection status functions
+            function updateConnectionStatus(status, message) {
+                const statusElem = document.getElementById('connection-status');
+                if (!statusElem) return;
+                
+                const dot = statusElem.querySelector('span:first-child');
+                const text = statusElem.querySelector('span:last-child');
+                
+                dot.className = `inline-block w-2 h-2 rounded-full mr-1 ${
+                    status === 'connected' ? 'bg-green-500' : 
+                    status === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
+                }`;
+                text.textContent = message;
+                text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
+                                 status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
+            }
+
             const savePnlToStorage = (pnlValue) => {
                 const today = new Date().toDateString();
                 localStorage.setItem('todayPnl', pnlValue.toString());
@@ -318,22 +340,36 @@
                 pnlDisplay.classList.add('pnl-update');
             };
 
-            // ⭐ FIX 1: Add robust configuration to Socket.IO initialization
+            // ⭐ FIX: Updated Socket.IO connection with auth fix
             const socket = io({ 
                 auth: { token },
                 transports: ['websocket', 'polling'],
-                
-                // --- Keep-Alive Configuration for stable connections on Render ---
                 pingInterval: 10000, 
                 pingTimeout: 15000, 
                 reconnectionDelay: 5000, 
                 reconnectionDelayMax: 10000 
-                // ----------------------------------------------------
             });
 
+            // ⭐ FIX: Connection status handlers
             socket.on('connect', () => {
-                console.log('Connected to server, requesting dashboard data...');
+                console.log('✅ Dashboard connected to server');
+                updateConnectionStatus('connected', 'Connected');
                 socket.emit('request_dashboard_data');
+            });
+
+            socket.on('disconnect', (reason) => {
+                console.log('❌ Dashboard disconnected:', reason);
+                updateConnectionStatus('disconnected', 'Disconnected');
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('❌ Dashboard connection error:', error.message);
+                updateConnectionStatus('disconnected', 'Connection failed');
+                
+                // If auth error, redirect to login
+                if (error.message.includes('auth') || error.message.includes('Authentication') || error.message.includes('token')) {
+                    setTimeout(() => window.location.href = '/login.html', 2000);
+                }
             });
 
             socket.on('dashboard_data', (data) => {
@@ -414,8 +450,6 @@
             setInterval(() => {
                 socket.emit('request_dashboard_data');
             }, 30000);
-            socket.on('disconnect', () => console.log('Disconnected from server.'));
-            socket.on('connect_error', (error) => console.error('Connection error:', error));
 
             const initialPnl = loadPnlFromStorage();
             if (initialPnl !== 0) {
