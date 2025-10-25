@@ -1,440 +1,619 @@
-// index.js
-// ------------------ DEPENDENCIES ------------------
-require("dotenv").config();
-const express = require("express");
-const http = require("http");
-const socketIo = require("socket.io");
+const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
-const cors = require("cors");
-const path = require("path");
-const Binance = require("node-binance-api");
-const jwt = require('jsonwebtoken'); 
+const AdminCopyTrade = require('./models/AdminCopyTrade');
 
-// ------------------ CONFIG & CONSTANTS ------------------
-const requiredEnvVars = ['MONGO_URI', 'JWT_SECRET'];
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-if (missingEnvVars.length > 0) {
-    console.error(`❌ Missing required environment variables: ${missingEnvVars.join(', ')}`);
-    process.exit(1);
-}
+// Global reference for marketData (populated in initialize)
+let globalMarketData = {};
+const POLL_INTERVAL_MS = 1000; // Check every second
 
-const TRADE_PAIRS = [
-  'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
-  'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
-];
-module.exports.TRADE_PAIRS = TRADE_PAIRS;
+// --- Copy Trade Execution Logic ---
+async function executeCopyTrade(io, User, Trade, copyTradeId) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-// admin override flags
-const candleOverride = {};
-TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
-module.exports.candleOverride = candleOverride;
+    try {
+        const copyTrade = await AdminCopyTrade.findById(copyTradeId)
+            .populate('userCopies.userId')
+            .session(session);
 
-// ------------------ MODELS & ROUTES ------------------
-const User = require("./models/User");
-const Trade = require("./models/Trade");
-const Candle = require("./models/candles");
-
-const authRoutes = require("./routes/auth");
-const userRoutes = require("./routes/user");
-const depositRoutes = require("./routes/deposit");
-const adminRoutes = require("./routes/admin");
-const withdrawRoutes = require("./routes/withdraw");
-
-// ------------------ APP + SERVER + IO ------------------
-const app = express();
-const server = http.createServer(app);
-
-const io = socketIo(server, {
-    cors: {
-        origin: process.env.CLIENT_URL || "*",
-        methods: ["GET", "POST"],
-        credentials: true
-    }
-}); 
-
-const marketData = {};
-TRADE_PAIRS.forEach(pair => {
-  marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
-});
-module.exports.marketData = marketData;
-app.set('marketData', marketData);
-
-// ------------------ BINANCE CLIENT ------------------
-const binance = new Binance().options({});
-
-// ------------------ MIDDLEWARE ------------------
-app.use(cors({
-    origin: process.env.CLIENT_URL || "*",
-    credentials: true
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(express.static(path.join(__dirname, "public")));
-
-app.use("/api/auth", authRoutes);
-app.use("/api/user", userRoutes);
-app.use("/api/deposit", depositRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/withdraw", withdrawRoutes);
-
-// ----- DASHBOARD DATA FUNCTIONS START -----
-async function getDashboardData(userId) {
-    const user = await User.findById(userId).select('username balance');
-    if (!user) {
-        throw new Error('User not found.');
-    }
-
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    const recentTrades = await Trade.find({ 
-        userId: userId, 
-        status: 'closed',
-        closeTime: { $gte: startOfToday } 
-    });
-
-    const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
-
-    const assets = TRADE_PAIRS;
-    const marketInfo = assets.map(pair => {
-        const data = marketData[pair];
-        if (!data || typeof data.currentPrice !== 'number') return null;
-
-        const lastCandle = (Array.isArray(data.candles) && data.candles[data.candles.length - 1]) || data.currentCandle;
-        if (!lastCandle || typeof lastCandle.open !== 'number' || lastCandle.open === 0) {
-            return { name: pair.replace('USDT', ''), ticker: `${pair.replace('USDT', '')}/USD`, price: data.currentPrice || 0, change: 0, candles: data.candles };
+        if (!copyTrade || copyTrade.status !== 'active') {
+            await session.abortTransaction();
+            session.endSession();
+            return;
         }
 
-        const change = ((data.currentPrice - lastCandle.open) / lastCandle.open) * 100;
+        copyTrade.status = 'executed';
+        await copyTrade.save({ session });
 
-        return {
-            name: pair.replace('USDT', ''),
-            ticker: `${pair.replace('USDT', '')}/USD`,
-            price: data.currentPrice,
-            change: parseFloat(change.toFixed(2)),
-            candles: data.candles
-        };
-    }).filter(Boolean);
+        await session.commitTransaction();
+        session.endSession();
 
-    return {
-        username: user.username,
-        balance: user.balance,
-        todayPnl: parseFloat(todayPnl.toFixed(2)),
-        recentTrades: [], 
-        assets: marketInfo
-    };
+        console.log(`Copy trade ${copyTradeId} marked as executed`);
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error('Copy trade execution error:', error);
+    }
 }
 
-io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
-    if (!token) {
-        return next(new Error("Authentication Error: Token not provided."));
-    }
+// --- Auto-cleanup expired copy trades ---
+async function cleanupExpiredCopyTrades(io, User, Trade) {
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        socket.decoded = decoded; 
-        next();
-    } catch (ex) {
-        return next(new Error("Authentication Error: Invalid token."));
+        const now = new Date();
+        // Use lean() for faster read access as we are not modifying the trade during this find
+        const expiredTrades = await AdminCopyTrade.find({
+            status: 'active',
+            executionTime: { $lte: now }
+        }).lean();
+
+        for (const copyTrade of expiredTrades) {
+            // ⭐ FIX: Wrap individual execution to prevent one failure from stopping the loop
+            try {
+                await executeCopyTrade(io, User, Trade, copyTrade._id);
+            } catch (innerErr) {
+                console.error(`Inner error executing copy trade ${copyTrade._id}:`, innerErr);
+            }
+        }
+    } catch (error) {
+        console.error('Copy trade cleanup error (outer loop):', error);
     }
-});
+}
 
-io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`);
+async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
+    try {
+        const currentVolume = await Trade.aggregate([
+            { 
+                $match: { 
+                    asset: asset,
+                    status: { $in: ["active", "pending", "scheduled"] } 
+                } 
+            },
+            { 
+                $group: { 
+                    _id: '$direction',
+                    totalVolume: { $sum: '$amount' }
+                }
+            }
+        ]);
 
-    if (socket.decoded && socket.decoded.id) {
-        socket.join(socket.decoded.id);
-        console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
+        let upVolume = 0;
+        let downVolume = 0;
+
+        currentVolume.forEach(item => {
+            if (item._id === 'UP') upVolume = item.totalVolume;
+            if (item._id === 'DOWN') downVolume = item.totalVolume;
+        });
+
+        const totalVolume = upVolume + downVolume;
+
+        if (totalVolume === 0 || upVolume === downVolume) {
+            return userRequestedDirection;
+        }
+
+        const dominantDirection = upVolume > downVolume ? 'UP' : 'DOWN';
+
+        if (userRequestedDirection === dominantDirection) {
+            const random = Math.random(); 
+            if (random < 0.8) { 
+                return dominantDirection === 'UP' ? 'DOWN' : 'UP';
+            }
+        }
+
+        return userRequestedDirection;
+
+    } catch (error) {
+        console.error('Error calculating volume-based direction:', error);
+        return userRequestedDirection;
     }
+}
 
-    socket.on('request_dashboard_data', async () => {
+// ⭐ FIX: Encapsulated trade settlement and activation functions to ensure logging
+async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
+    const lastProcessedCompletedCandleTs = {};
+    const lastProcessedActivationTs = {};
+    const lastCopyTradeCleanup = {};
+
+    setInterval(async () => {
+        try {
+            for (const pair of TRADE_PAIRS) {
+                const md = globalMarketData[pair];
+                if (!md) continue;
+
+                // 1. SETTLE ACTIVE TRADES (when a candle is complete)
+                if (md.candles?.length > 0) {
+                    const lastCompleted = md.candles[md.candles.length - 1];
+                    const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
+                    
+                    // ⭐ FIX: Ensure we only settle once per unique candle completion timestamp
+                    if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
+                        if (Date.now() > lastCompletedTs) { 
+                             // ⭐ FIX: Call the wrapper function for settlement
+                             await settleTradesWrapper(io, User, Trade, pair, lastCompleted.close);
+                             lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
+                        }
+                    }
+                }
+
+                // 2. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW candle starts)
+                if (md.currentCandle) {
+                    const currentCandleStartTime = new Date(md.currentCandle.timestamp);
+                    const activationTs = currentCandleStartTime.getTime();
+
+                    // ⭐ FIX: Ensure we only activate once per unique candle start timestamp
+                    if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
+                        
+                        // ⭐ FIX: Call the wrapper function for activation
+                        await activateTradesWrapper(io, User, Trade, pair, md.currentCandle.timestamp, md.currentCandle.open);
+                        
+                        lastProcessedActivationTs[pair] = activationTs;
+                    }
+                }
+            }
+
+            // --- Copy Trade Cleanup ---
+            const now = Date.now();
+            if (!lastCopyTradeCleanup.global || (now - lastCopyTradeCleanup.global) > 5000) { // Every 5 seconds
+                await cleanupExpiredCopyTrades(io, User, Trade);
+                lastCopyTradeCleanup.global = now;
+            }
+        } catch (err) {
+            // ⭐ CRITICAL FIX: This catches any crash inside the main setInterval loop
+            console.error("Trade monitor FATAL crash (loop stopped):", err.stack);
+            // This error indicates the loop has stopped and trades will freeze.
+        }
+    }, POLL_INTERVAL_MS);
+}
+
+// ⭐ Wrapper for Activation Logic
+async function activateTradesWrapper(io, User, Trade, pair, candleTimestamp, entryPrice) {
+    try {
+        await activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice);
+        await activatePendingTradesForPair(io, User, Trade, pair, entryPrice);
+    } catch (err) {
+        // This logs any fatal error during activation process but allows the monitor loop to continue
+        console.error("Critical Trade Activation Error:", err.message);
+    }
+}
+
+// ⭐ Wrapper for Settlement Logic
+async function settleTradesWrapper(io, User, Trade, pair, exitPrice) {
+    try {
+        await settleActiveTradesForPair(io, User, Trade, pair, exitPrice);
+    } catch (err) {
+        // This logs any fatal error during settlement process but allows the monitor loop to continue
+        console.error("Critical Trade Settlement Error:", err.message);
+    }
+}
+// --- END NEW MONITORING LOGIC ---
+
+
+async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride) {
+    globalMarketData = marketData; // Set global reference
+
+    io.engine.marketData = marketData; 
+
+    // ⭐ FIX: Updated Socket.IO authentication to match HTTP middleware
+    io.use((socket, next) => {
+        try {
+            // Check both locations where token might be
+            let token = socket.handshake.auth?.token;
+            
+            // If not in auth, check headers (like HTTP middleware does)
+            if (!token) {
+                const authHeader = socket.handshake.headers.authorization;
+                if (authHeader && authHeader.startsWith('Bearer ')) {
+                    token = authHeader.substring(7);
+                }
+            }
+            
+            if (!token) {
+                console.log('Socket auth: No token provided');
+                return next(new Error("Authentication error: No token"));
+            }
+            
+            jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+                if (err) {
+                    console.log('Socket auth: Invalid token', err.message);
+                    return next(new Error("Authentication error: Invalid token"));
+                }
+                socket.decoded = decoded;
+                next();
+            });
+        } catch (err) {
+            console.log('Socket auth: Error', err.message);
+            return next(new Error("Authentication error"));
+        }
+    });
+
+    // START THE MONITORING LOOP
+    runTradeMonitor(io, User, Trade, TRADE_PAIRS);
+
+
+    io.on("connection", async (socket) => {
         try {
             const userId = socket.decoded.id;
-            const dashboardData = await getDashboardData(userId);
-            socket.emit('dashboard_data', { success: true, data: dashboardData });
-        } catch (error) {
-            console.error('Socket error fetching dashboard data:', error.message);
-            socket.emit('dashboard_data', { success: false, message: 'Could not fetch dashboard data.' });
-        }
-    });
+            const user = await User.findById(userId);
+            if (!user) return socket.disconnect();
+            socket.join(user._id.toString());
 
-    socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
-    });
-});
-// ----- DASHBOARD DATA FUNCTIONS END -----
-
-// ------------------ CANDLE / MARKET DATA LOGIC ------------------
-
-async function initializeMarketData() {
-    console.log("📈 Initializing market data from Binance...");
-    for (const pair of TRADE_PAIRS) {
-        try {
-            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+            // FIX: Removed duplicate market_data emissions that conflict with main server
+            const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
             
-            if (!Array.isArray(klines) || klines.length < 5) { 
-                 console.warn(`⚠️ Historical load failed for ${pair}. Starting clean.`);
-                 marketData[pair].candles = []; 
-                 marketData[pair].currentPrice = 0;
-                 marketData[pair].currentCandle = null; 
-                 continue; 
-            }
-
-            marketData[pair].candles = klines.map(k => ({
-                asset: pair,
-                timestamp: new Date(k[0]),
-                open: parseFloat(k[1]),
-                high: parseFloat(k[2]),
-                low: parseFloat(k[3]),
-                close: parseFloat(k[4]),
-            }));
-            const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
-            marketData[pair].currentPrice = lastCandle.close;
-            
-            marketData[pair].currentCandle = {
-                asset: pair,
-                timestamp: new Date(lastCandle.timestamp.getTime() + 60000),
-                open: lastCandle.close,
-                high: lastCandle.close,
-                low: lastCandle.close,
-                close: lastCandle.close
-            };
-            console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
-        } catch (err) {
-            console.error(`❌ Fatal error in initial load for ${pair}:`, err.message);
-            marketData[pair].candles = []; 
-            marketData[pair].currentPrice = 0;
-            marketData[pair].currentCandle = null;
-        }
-    }
-}
-
-let isStreaming = false;
-
-// ⭐ FIXED: Market data stream with proper chart updates
-function startMarketDataStream() {
-    if (isStreaming) return;
-    isStreaming = true;
-    
-    console.log("⚡ Starting Binance WebSocket stream...");
-    const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
-    
-    binance.futuresSubscribe(streams, (trade) => {
-        try {
-            const pair = trade.s;
-            const price = parseFloat(trade.p);
-            const md = marketData[pair];
-            
-            if (!md) return;
-            
-            // Update current price
-            md.currentPrice = price;
-            
-            const now = new Date();
-            const currentMinuteStart = new Date(now);
-            currentMinuteStart.setSeconds(0, 0);
-            currentMinuteStart.setMilliseconds(0);
-
-            // Initialize currentCandle if needed
-            if (!md.currentCandle) {
-                md.currentCandle = { 
-                    asset: pair, 
-                    timestamp: currentMinuteStart, 
-                    open: price, 
-                    high: price, 
-                    low: price, 
-                    close: price 
-                };
-            }
-            
-            const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-            if (isNewMinute) {
-                // Complete the current candle
-                const completed = { ...md.currentCandle, close: price };
-                
-                // Handle candle override if any
-                const override = candleOverride[pair];
-                if (override) {
-                    const openP = completed.open;
-                    const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                    if (override === 'up') {
-                        completed.close = openP + priceChange;
-                        completed.high = Math.max(completed.high, completed.close);
-                    } else {
-                        completed.close = openP - priceChange;
-                        completed.low = Math.min(completed.low, completed.close);
-                    }
-                    console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                    candleOverride[pair] = null;
-                }
-                
-                // Save completed candle
-                if (completed.open > 0 && completed.close > 0) {
-                    md.candles.push(completed);
-                    if (md.candles.length > 200) md.candles.shift();
-                    
-                    // Save to database
-                    Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
-                        console.error(`DB Error saving completed candle for ${pair}:`, err.message);
-                    });
-                }
-                
-                // Start new candle
-                md.currentCandle = { 
-                    asset: pair, 
-                    timestamp: currentMinuteStart, 
-                    open: price, 
-                    high: price, 
-                    low: price, 
-                    close: price 
-                };
-            } else {
-                // Update current candle
-                md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                md.currentCandle.low = Math.min(md.currentCandle.low, price);
-                md.currentCandle.close = price;
-            }
-
-            // ⭐ FIXED: Emit complete market data for charts
-            io.emit("market_data", { 
-                asset: pair, 
-                candles: md.candles,
-                currentCandle: md.currentCandle,
-                currentPrice: price,
-                timestamp: now.getTime()
+            // FIX: Only send trade-related data, not market_data
+            socket.emit("init", { 
+                balance: user.balance, 
+                tradeHistory: userTrades 
             });
-            
-        } catch (streamErr) {
-            console.error(`❌ Stream processing error for ${trade.s}:`, streamErr.message);
-        }
-    }, {
-        open: () => console.log('✅ Binance WebSocket connection opened.'),
-        close: (reason) => {
-            isStreaming = false;
-            console.warn(`⚠️ Binance WebSocket closed. Reason: ${reason}. Attempting to restart in 5s...`);
-            setTimeout(startMarketDataStream, 5000);
-        },
-        error: (err) => {
-            console.error('❌ Binance WebSocket Error:', err.message);
+
+            socket.on("trade", async (data) => {
+                try {
+                    const { asset, direction, amount } = data;
+                    if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
+                    if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
+
+                    const existingTrade = await Trade.findOne({ 
+                        userId: user._id, 
+                        status: { $in: ["pending", "active", "scheduled"] } 
+                    });
+
+                    if (existingTrade) {
+                        return socket.emit("error", { 
+                            message: `You already have an active trade. Please wait for it to complete.` 
+                        });
+                    }
+
+                    const tradeAmount = parseFloat(amount);
+                    if (isNaN(tradeAmount) || tradeAmount <= 0) {
+                        return socket.emit("error", { message: "Invalid trade amount." });
+                    }
+
+                    const freshUser = await User.findById(user._id);
+
+                    if (freshUser.balance < tradeAmount) {
+                        return socket.emit("error", { 
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        });
+                    }
+
+                    const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
+
+                    freshUser.balance -= tradeAmount;
+                    await freshUser.save();
+
+                    const trade = new Trade({
+                        userId: user._id,
+                        amount: tradeAmount,
+                        direction: finalDirection, 
+                        asset,
+                        status: "pending", 
+                        timestamp: new Date()
+                    });
+                    await trade.save();
+
+                    io.to(user._id.toString()).emit("trade_pending", { trade, balance: freshUser.balance });
+                } catch (err) {
+                    console.error("Trade placement error:", err);
+                    socket.emit("error", { message: "Could not place trade." });
+                }
+            });
+
+            // --- NEW: Copy Trade Event ---
+            socket.on("copy_trade", async (data) => {
+                const session = await mongoose.startSession();
+                session.startTransaction();
+
+                try {
+                    const { copyTradeId } = data;
+
+                    const freshUser = await User.findById(userId).session(session);
+                    if (!freshUser || freshUser.balance < 100) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return socket.emit("error", { message: "Minimum $100 balance required to copy trades" });
+                    }
+
+                    const existingTrade = await Trade.findOne({ 
+                        userId: user._id, 
+                        status: { $in: ["pending", "active", "scheduled"] } 
+                    }).session(session);
+
+                    if (existingTrade) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return socket.emit("error", { 
+                            message: `You already have an active trade. Please wait for it to complete before copying.` 
+                        });
+                    }
+
+                    const copyTrade = await AdminCopyTrade.findById(copyTradeId).session(session);
+                    if (!copyTrade || copyTrade.status !== 'active' || copyTrade.executionTime <= new Date()) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return socket.emit("error", { message: "This copy trade is no longer available" });
+                    }
+
+                    const alreadyCopied = copyTrade.userCopies.find(
+                        copy => copy.userId.toString() === userId
+                    );
+
+                    if (alreadyCopied) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return socket.emit("error", { message: "You have already copied this trade" });
+                    }
+
+                    const tradeAmount = (freshUser.balance * copyTrade.percentage) / 100;
+
+                    if (freshUser.balance < tradeAmount) {
+                        await session.abortTransaction();
+                        session.endSession();
+                        return socket.emit("error", { 
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        });
+                    }
+
+                    const executionTime = new Date(copyTrade.executionTime);
+                    executionTime.setSeconds(0, 0); 
+
+                    const scheduledTrade = new Trade({
+                        userId: user._id,
+                        amount: tradeAmount,
+                        direction: copyTrade.direction === 'CALL' ? 'UP' : 'DOWN',
+                        asset: copyTrade.tradingPair,
+                        status: "scheduled",
+                        scheduledTime: executionTime, 
+                        timestamp: new Date(),
+                        isCopyTrade: true,
+                        originalCopyTradeId: copyTrade._id
+                    });
+
+                    freshUser.balance -= tradeAmount;
+
+                    copyTrade.userCopies.push({
+                        userId: userId,
+                        copiedAt: new Date(),
+                        tradeAmount: tradeAmount
+                    });
+
+                    await scheduledTrade.save({ session });
+                    await copyTrade.save({ session });
+                    await freshUser.save({ session });
+
+                    await session.commitTransaction();
+                    session.endSession();
+
+                    const now = new Date();
+                    const timeUntilExecution = executionTime - now;
+                    const minutesUntilExecution = Math.floor(timeUntilExecution / (1000 * 60));
+
+                    socket.emit("copy_trade_success", {
+                        message: `Successfully copied trade! $${tradeAmount.toFixed(2)} scheduled to execute in ${minutesUntilExecution} minutes.`,
+                        copyTrade: {
+                            tradingPair: copyTrade.tradingPair,
+                            direction: copyTrade.direction,
+                            percentage: copyTrade.percentage,
+                            executionTime: executionTime,
+                            tradeAmount: tradeAmount,
+                            minutesUntilExecution: minutesUntilExecution
+                        },
+                        scheduledTrade: scheduledTrade
+                    });
+
+                    io.to(user._id.toString()).emit("trade_scheduled", { 
+                        trade: scheduledTrade, 
+                        balance: freshUser.balance 
+                    });
+
+                } catch (error) {
+                    await session.abortTransaction();
+                    session.endSession();
+                    console.error('Copy trade error:', error);
+                    socket.emit("error", { message: "Failed to copy trade" });
+                }
+            });
+
+            socket.on("schedule_trade", async (data) => {
+                try {
+                    const { asset, direction, scheduledTime, amount } = data;
+                    if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
+                    if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
+
+                    const existingTrade = await Trade.findOne({ 
+                        userId: user._id, 
+                        status: { $in: ["pending", "active", "scheduled"] } 
+                    });
+
+                    if (existingTrade) {
+                        return socket.emit("error", { 
+                            message: `You already have an active trade. Please wait for it to complete.` 
+                        });
+                    }
+
+                    const tradeAmount = parseFloat(amount);
+                    if (isNaN(tradeAmount) || tradeAmount <= 0) {
+                        return socket.emit("error", { message: "Invalid trade amount." });
+                    }
+
+                    const freshUser = await User.findById(user._id);
+
+                    if (freshUser.balance < tradeAmount) {
+                        return socket.emit("error", { 
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        });
+                    }
+
+                    const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
+
+                    const serverNowUTC = new Date();
+                    
+                    const [hour, minute] = scheduledTime.split(":").map(Number);
+                    
+                    const userScheduledTimeToday = new Date(serverNowUTC);
+                    userScheduledTimeToday.setUTCHours(hour, minute, 0, 0); 
+
+                    const tenMinutesFromNow = new Date(serverNowUTC.getTime() + (10 * 60 * 1000));
+                    
+                    if (userScheduledTimeToday <= serverNowUTC || userScheduledTimeToday > tenMinutesFromNow) {
+                        return socket.emit("error", { message: "Please select a time in the next 10 minutes." });
+                    }
+
+                    const finalScheduleDtUTC = userScheduledTimeToday; 
+                    finalScheduleDtUTC.setSeconds(0, 0); 
+
+                    freshUser.balance -= tradeAmount;
+                    await freshUser.save();
+
+                    const trade = new Trade({
+                        userId: user._id,
+                        amount: tradeAmount,
+                        direction: finalDirection, 
+                        asset,
+                        status: "scheduled",
+                        scheduledTime: finalScheduleDtUTC
+                    });
+                    await trade.save();
+
+                    io.to(user._id.toString()).emit("trade_scheduled", { trade, balance: freshUser.balance });
+                } catch (err) {
+                    console.error("Error in schedule_trade:", err);
+                    socket.emit("error", { message: "Could not schedule trade." });
+                }
+            });
+
+            socket.on("cancel_trade", async (data) => {
+                try {
+                    const trade = await Trade.findOne({
+                        _id: data.tradeId,
+                        userId: user._id,
+                        status: { $in: ["pending", "scheduled"] }
+                    });
+                    if (!trade) return socket.emit("error", { message: "Trade not found or cannot be cancelled." });
+
+                    const freshUser = await User.findById(user._id);
+                    freshUser.balance += trade.amount;
+                    await freshUser.save();
+
+                    trade.status = "cancelled";
+                    await trade.save();
+                    io.to(user._id.toString()).emit("trade_cancelled", { tradeId: trade._id, balance: freshUser.balance });
+                } catch (err) {
+                    socket.emit("error", { message: "Could not cancel trade." });
+                }
+            });
+
+            socket.on("disconnect", () => { });
+        } catch (err) {
+            socket.disconnect();
         }
     });
 }
 
-// ------------------ DASHBOARD PRICE EMITTER ------------------
-setInterval(() => {
-    const now = new Date();
-    const secondsUntilNextMinute = 60 - now.getSeconds();
-    const payloadDashboard = {};
-    const payloadTrading = {};
+// --- Helper Functions ---
 
-    for (const pair of TRADE_PAIRS) {
-        const md = marketData[pair];
-        if (!md || md.currentPrice === 0) continue; 
-        
-        const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
-        let change = 0;
-        if (lastCandle && lastCandle.open !== 0) {
-            change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
+async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
+    try {
+        const candleTime = new Date(candleTimestamp);
+        candleTime.setSeconds(0, 0);
+
+        const scheduleds = await Trade.find({ 
+            status: "scheduled", 
+            asset: pair, 
+            scheduledTime: { $lte: candleTime } 
+        });
+
+        // ⭐ FIX: Added internal try/catch for save operations
+        for (const t of scheduleds) {
+            try {
+                t.status = "active";
+                t.entryPrice = entryPrice;
+                t.activationTimestamp = new Date(); 
+                await t.save();
+                io.to(t.userId.toString()).emit("trade_active", { trade: t });
+            } catch (innerErr) {
+                 console.error(`Error saving active scheduled trade ${t._id}:`, innerErr.message);
+            }
         }
-
-        const tickerForClient = `${pair.replace('USDT', '')}/USD`;
-        payloadDashboard[tickerForClient] = {
-            price: md.currentPrice,
-            change: parseFloat(change.toFixed(2)),
-            countdown: secondsUntilNextMinute
-        };
-
-        payloadTrading[pair] = {
-            price: md.currentPrice,
-            countdown: secondsUntilNextMinute,
-            timestamp: now.getTime()
-        };
+    } catch (err) {
+        console.error("Error finding scheduled trades (outer loop):", err);
     }
-    
-    if (isStreaming && Object.keys(payloadTrading).length > 0) {
-        io.emit("price_update", payloadTrading);           
-        io.emit("dashboard_price_update", payloadDashboard);
+}
+
+async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
+    try {
+        const pendings = await Trade.find({ status: "pending", asset: pair });
+        // ⭐ FIX: Added internal try/catch for save operations
+        for (const t of pendings) {
+            try {
+                t.status = "active";
+                t.entryPrice = entryPrice;
+                t.activationTimestamp = new Date();
+                await t.save();
+                io.to(t.userId.toString()).emit("trade_active", { trade: t });
+            } catch (innerErr) {
+                 console.error(`Error saving active pending trade ${t._id}:`, innerErr.message);
+            }
+        }
+    } catch (err) {
+        console.error("Error finding pending trades (outer loop):", err);
     }
-}, 1000);
+}
 
-// ------------------ DB + STARTUP ------------------
-mongoose.connect(process.env.MONGO_URI, { 
-    useNewUrlParser: true, 
-    useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 5000,
-    socketTimeoutMS: 45000,
-}).catch(err => {
-    console.error('❌ MongoDB connection failed:', err.message);
-    process.exit(1);
-});
+async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
+    try {
+        const actives = await Trade.find({ status: "active", asset: pair });
+        // ⭐ FIX: Added internal try/catch for save operations
+        for (const t of actives) {
+            try {
+                const win = (t.direction === "UP" && exitPrice > t.entryPrice) || (t.direction === "DOWN" && exitPrice < t.entryPrice);
+                const tie = exitPrice === t.entryPrice;
+                const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount); // 90% payout on win
 
-const db = mongoose.connection;
-db.on("error", console.error.bind(console, "MongoDB connection error:"));
-db.on("disconnected", () => console.log("⚠️ MongoDB disconnected"));
-db.on("reconnected", () => console.log("✅ MongoDB reconnected"));
+                t.status = "closed";
+                t.exitPrice = exitPrice;
+                t.result = tie ? "TIE" : (win ? "WIN" : "LOSS");
+                t.pnl = pnl;
+                t.closeTime = new Date(); 
+                await t.save();
 
-db.once("open", async () => {
-  console.log("✅ Connected to MongoDB");
+                const userAfter = await User.findByIdAndUpdate(
+                    t.userId,
+                    {
+                        $inc: {
+                            balance: t.amount + pnl, // Refund original amount + P&L
+                            totalTradeVolume: t.amount
+                        }
+                    },
+                    { new: true }
+                );
 
-  try {
-    const TradeModel = mongoose.model('Trade');
-    const UserModel = mongoose.model('User');
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const tradeUpdateResult = await TradeModel.updateMany(
-      { 
-        status: { $ne: 'closed' },
-        $or: [
-          { activationTimestamp: { $not: { $type: 9 } } }, 
-          { activationTimestamp: { $exists: false } }, 
-          { activationTimestamp: null } 
-        ]
-      },
-      { 
-        $set: { 
-          status: 'closed', 
-          closeTime: new Date(),
-          pnl: 0 
-        } 
-      }
-    );
-    console.log(`🧹 Safely closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
+                const todayTrades = await Trade.find({
+                    userId: t.userId,
+                    status: "closed",
+                    closeTime: { $gte: today, $lt: tomorrow } 
+                });
 
-    const userUpdateResult = await UserModel.updateMany(
-      { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
-      { $set: { createdAt: new Date() } }
-    );
-    console.log(`🧹 Safely fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
+                const todayPnl = todayTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
 
-  } catch (error) {
-    console.error("Warning: Pre-boot database cleanup failed:", error.message);
-  }
+                io.to(t.userId.toString()).emit("trade_result", { 
+                    trade: t, 
+                    balance: userAfter.balance,
+                    todayPnl: parseFloat(todayPnl.toFixed(2)) 
+                });
 
-  await initializeMarketData();
-  startMarketDataStream(); 
+                console.log(`Trade settled for user ${t.userId}: P&L $${pnl}, Today's Total P&L: $${todayPnl}`);
+            } catch (innerErr) {
+                 console.error(`Error processing/saving trade settlement for trade ${t._id}:`, innerErr.message);
+            }
+        }
+    } catch (err) {
+        console.error("Error finding active trades (outer loop):", err);
+    }
+}
 
-  const tradeModule = require("./trade");
-  if (typeof tradeModule.initialize === "function") {
-    const Trade = mongoose.model('Trade');
-    const User = mongoose.model('User');
-    tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
-  } else if (typeof tradeModule === "function") {
-    tradeModule(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
-  } else {
-    console.error("Trade module export not recognized.");
-  }
-});
-
-// ------------------ CATCH-ALL / STATIC SERVE ------------------
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api/')) return res.status(404).json({ message: 'API endpoint not found.' });
-  const filePath = path.join(__dirname, 'public', req.path);
-  if (req.path.includes('..')) return res.status(403).send('Forbidden');
-  res.sendFile(filePath, (err) => {
-    if (err) res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-  });
-});
-
-// ------------------ START SERVER ------------------
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`✅ Server is running and listening on port ${PORT}`));
+module.exports = { initialize };
