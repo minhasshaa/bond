@@ -196,7 +196,7 @@ async function initializeMarketData() {
                  console.warn(`⚠️ Historical load failed for ${pair}. Starting clean.`);
                  marketData[pair].candles = []; 
                  marketData[pair].currentPrice = 0;
-                 marketData[pair].currentCandle = null; // CRITICAL: Ensure this is NULL
+                 marketData[pair].currentCandle = null; 
                  continue; 
             }
 
@@ -234,15 +234,17 @@ let isStreaming = false; // Flag to prevent multiple concurrent streams
 // ⭐ FIX: Final robust stream function with connection management
 function startMarketDataStream() {
     if (isStreaming) {
-        console.log('⚠️ Stream already running. Aborting restart.');
+        // Log this if it happens, but do not start a new stream
+        // console.log('⚠️ Stream already running. Aborting restart.'); 
         return;
     }
-    isStreaming = true;
-    console.log("⚡ Starting unauthenticated Binance WebSocket stream...");
+    isStreaming = true; // Set flag immediately
+    console.log("⚡ Attempting to start unauthenticated Binance WebSocket stream...");
     
     const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
     
-    const ws = binance.futuresSubscribe(streams, (trade) => {
+    // We don't need to capture the return value unless we want manual close control
+    binance.futuresSubscribe(streams, (trade) => {
         try {
             const pair = trade.s;
             const price = parseFloat(trade.p);
@@ -322,30 +324,23 @@ function startMarketDataStream() {
     }, {
         open: () => console.log('✅ Binance WebSocket connection opened.'),
         close: (reason) => {
-            isStreaming = false; // Reset flag
-            console.warn(`⚠️ Binance WebSocket closed. Reason: ${reason}. Attempting to restart...`);
-            // Attempt to restart the entire stream subscription after a short delay
+            isStreaming = false; // Reset flag so it can restart
+            console.warn(`⚠️ Binance WebSocket closed. Reason: ${reason}. Attempting to restart in 5s...`);
             setTimeout(startMarketDataStream, 5000); 
         },
         error: (err) => {
             console.error('❌ Binance WebSocket Error:', err.message);
-            // The close handler will take care of restarting
+            // The close handler will implicitly trigger if the error causes a disconnect
         }
     });
-    
-    // Return the WS handler if you need to manually close it later
-    return ws;
 }
 
 
 // ------------------ DASHBOARD PRICE EMITTER ------------------
 // This interval is ONLY for pushing data to the client, it does NOT fetch the price.
 setInterval(() => {
-    // ⭐ FIX: Add check for stream state to ensure accurate logging
-    if (!isStreaming) {
-        // console.log("Stream is down. Skipping client update.");
-        return; 
-    }
+    // This interval controls the client-side timer and price updates
+    // It should run every second regardless of stream state, but only send price if available.
     
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
@@ -354,6 +349,7 @@ setInterval(() => {
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
+        // Ensure md is initialized and has a price > 0
         if (!md || md.currentPrice === 0) continue; 
         
         const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
@@ -375,9 +371,12 @@ setInterval(() => {
             timestamp: now.getTime()
         };
     }
-
-    io.emit("price_update", payloadTrading);           
-    io.emit("dashboard_price_update", payloadDashboard);
+    
+    // Only emit if the stream is up AND there is price data to prevent client-side timer lag
+    if (isStreaming && Object.keys(payloadTrading).length > 0) {
+        io.emit("price_update", payloadTrading);           
+        io.emit("dashboard_price_update", payloadDashboard);
+    }
 }, 1000);
 
 // ------------------ DB + STARTUP ------------------
