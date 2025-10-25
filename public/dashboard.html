@@ -91,10 +91,8 @@
         if (!token) { window.location.href = '/login.html'; }
     </script>
 
-    <!-- Page content container -->
     <div class="container mx-auto p-4 max-w-4xl">
 
-        <!-- Sleek Header -->
         <header class="mb-6">
             <p class="text-sm text-gray-400">Welcome back, <span id="username-display">...</span></p>
             <div class="mt-2">
@@ -115,13 +113,11 @@
         </header>
 
         <main class="space-y-8">
-            <!-- Search Bar (ID added for JS) -->
             <div class="relative">
                 <input type="text" id="search-box" placeholder="Search coins..." class="w-full bg-gray-800/50 border border-gray-700 text-white rounded-full py-3 px-5 pl-12 focus:outline-none focus:ring-2 focus:ring-green-400">
                 <svg class="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
             </div>
 
-            <!-- Icon Grid -->
             <div class="grid grid-cols-4 gap-4 text-center">
                 <a href="deposit.html" class="flex flex-col items-center space-y-2">
                     <div class="w-14 h-14 rounded-full bg-gray-800/50 flex items-center justify-center text-green-400">
@@ -149,7 +145,6 @@
                 </a>
             </div>
 
-            <!-- Banner -->
             <div class="bg-gradient-to-r from-green-500 to-teal-600 rounded-xl p-6 flex items-center justify-between">
                 <div>
                     <h3 class="text-lg font-bold text-white">Stay Informed</h3>
@@ -158,17 +153,13 @@
                 <svg class="w-16 h-16 text-white/50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
             </div>
 
-            <!-- Tabs (New Pill Style) -->
-            <!-- We add an outer container to create the gray "track" -->
             <div class="bg-gray-800/50 p-1 rounded-full flex justify-between space-x-1" id="tab-container">
                 <button class="tab-link active w-1/3" data-sort="hot">Hot Ranking</button>
                 <button class="tab-link w-1/3" data-sort="gainers">Top Gainers</button>
                 <button class="tab-link w-1/3" data-sort="24h">24h Ranking</button>
             </div>
 
-            <!-- Market Watch List -->
             <div>
-                <!-- `data-sort-key` and `data-name` added for sorting/searching -->
                 <div id="assets-content" class="space-y-4"></div>
                 <div id="assets-skeleton" class="space-y-4">
                     <div class="skeleton w-full h-16 rounded-lg"></div>
@@ -180,7 +171,6 @@
         </main>
     </div>
 
-    <!-- 5-ITEM Bottom Navigation (Fixed) -->
     <nav class="bottom-nav">
         <a href="dashboard.html" class="nav-link" id="nav-dashboard">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
@@ -328,9 +318,22 @@
                 pnlDisplay.classList.add('pnl-update');
             };
 
+            // ⭐ FIX 1: Add robust configuration to Socket.IO initialization
             const socket = io({ 
                 auth: { token },
-                transports: ['websocket', 'polling'] 
+                transports: ['websocket', 'polling'],
+                
+                // --- Keep-Alive Configuration for Render Free Tier ---
+                // Lower the ping interval to aggressively send heartbeats (e.g., every 10 seconds)
+                pingInterval: 10000, 
+                
+                // Increase the timeout for receiving a pong after a ping
+                pingTimeout: 15000, 
+                
+                // Increase reconnection delays for a less frantic connection attempt cycle
+                reconnectionDelay: 5000, 
+                reconnectionDelayMax: 10000 
+                // ----------------------------------------------------
             });
 
             socket.on('connect', () => {
@@ -476,5 +479,3 @@
     </script>
 </body>
 </html>
-
-
