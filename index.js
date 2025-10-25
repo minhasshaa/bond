@@ -74,6 +74,7 @@ module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
 // ------------------ BINANCE CLIENT ------------------
+// Keeping options empty since you stated you aren't using keys
 const binance = new Binance().options({});
 
 // ------------------ MIDDLEWARE ------------------
@@ -233,6 +234,8 @@ let isStreaming = false; // Flag to prevent multiple concurrent streams
 // ⭐ FIX: Final robust stream function with connection management
 function startMarketDataStream() {
     if (isStreaming) {
+        // Log this if it happens, but do not start a new stream
+        // console.log('⚠️ Stream already running. Aborting restart.'); 
         return;
     }
     isStreaming = true; // Set flag immediately
@@ -240,6 +243,7 @@ function startMarketDataStream() {
     
     const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
     
+    // We don't need to capture the return value unless we want manual close control
     binance.futuresSubscribe(streams, (trade) => {
         try {
             const pair = trade.s;
@@ -248,15 +252,14 @@ function startMarketDataStream() {
             const md = marketData[pair];
             if (!md) return; 
             
-            // CRITICAL: This is the line that updates the price
-            md.currentPrice = price; 
+            md.currentPrice = price;
 
             const now = new Date();
             const currentMinuteStart = new Date(now);
             currentMinuteStart.setSeconds(0, 0);
             currentMinuteStart.setMilliseconds(0);
 
-            // Initialize currentCandle if it's null 
+            // Initialize currentCandle if it's null (e.g., if historical load failed)
             if (!md.currentCandle) {
                 md.currentCandle = { 
                     asset: pair, 
@@ -327,6 +330,7 @@ function startMarketDataStream() {
         },
         error: (err) => {
             console.error('❌ Binance WebSocket Error:', err.message);
+            // The close handler will implicitly trigger if the error causes a disconnect
         }
     });
 }
@@ -336,6 +340,8 @@ function startMarketDataStream() {
 // This interval is ONLY for pushing data to the client, it does NOT fetch the price.
 setInterval(() => {
     // This interval controls the client-side timer and price updates
+    // It should run every second regardless of stream state, but only send price if available.
+    
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
     const payloadDashboard = {};
@@ -366,8 +372,8 @@ setInterval(() => {
         };
     }
     
-    // Emit only if there is price data to prevent client-side timer lag
-    if (Object.keys(payloadTrading).length > 0) {
+    // Only emit if the stream is up AND there is price data to prevent client-side timer lag
+    if (isStreaming && Object.keys(payloadTrading).length > 0) {
         io.emit("price_update", payloadTrading);           
         io.emit("dashboard_price_update", payloadDashboard);
     }
@@ -416,19 +422,9 @@ db.once("open", async () => {
   }
   // >>> END CRASH PREVENTION/CLEANUP <<<
 
-  // ⭐ FINAL FIX: Wrap initialization in try/catch and DELAY stream start
-  try {
-    await initializeMarketData();
-  } catch (err) {
-      console.error("CRITICAL: Historical market data initialization FAILED but moving on to stream.", err);
-  }
 
-  // --- CRITICAL DELAY ---
-  console.log("⏱️ Delaying WebSocket stream start by 1 second to stabilize event loop...");
-  setTimeout(() => {
-      startMarketDataStream(); // This will now run 1 second AFTER the main process is unblocked
-  }, 1000); 
-  // --- END CRITICAL DELAY ---
+  await initializeMarketData();
+  startMarketDataStream(); 
 
   const tradeModule = require("./trade");
   if (typeof tradeModule.initialize === "function") {
