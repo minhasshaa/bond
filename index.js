@@ -201,21 +201,26 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (FIXED FOR SPOT PUBLIC DATA) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (FINAL FIX) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance (Spot Public)...");
     for (const pair of TRADE_PAIRS) {
         try {
-            // FIX: Use binance.candlesticks for Spot data (was futuresCandles)
-            const klines = await binance.candlesticks(pair, '1m', { limit: 200 });
-            
-            // Check if klines is a valid array. If not, it's an error response.
-            if (!Array.isArray(klines)) {
-                const errorMsg = klines && klines.msg 
-                                 ? `Error fetching public data: ${klines.msg} (Code: ${klines.code || 'N/A'})` 
-                                 : "Connection to Binance failed, check logs for network issues or Rate Limits.";
-                throw new Error(errorMsg);
-            }
+            // FIX 3: Wrap the binance.candlesticks callback in a Promise to fix the "callback.call is not a function" error
+            const klines = await new Promise((resolve, reject) => {
+                // Use binance.candlesticks for Spot data
+                binance.candlesticks(pair, '1m', (error, ticks) => {
+                    if (error) {
+                        const errorMsg = error && error.msg ? error.msg : JSON.stringify(error);
+                        return reject(new Error(`Binance API Call Failed: ${errorMsg}`));
+                    }
+                    if (!Array.isArray(ticks)) {
+                        return reject(new Error("Binance returned invalid non-array data."));
+                    }
+                    resolve(ticks);
+                }, { limit: 200 }); // Pass options here
+            });
+            // END FIX
 
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
@@ -229,7 +234,6 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            // Added JSON.stringify for better error logging in case of non-string error body
             console.error(`❌ Failed to load initial candles for ${pair}: ${err.message || JSON.stringify(err)}.`);
         }
     }
@@ -289,8 +293,7 @@ async function updateMarketData() {
 }
 
 function startMarketDataPolling() {
-  // FINAL SOLUTION: This is the heavy API call, so it MUST run slower.
-  // 5 seconds is required to stay under the Binance ban limit on a shared cloud server.
+  // FINAL SOLUTION: This heavy API call runs every 5 seconds to prevent the permanent Rate Limit Ban (Error -1003).
   console.log("✅ Starting market data API polling every 5 seconds (to avoid ban)...");
   setInterval(updateMarketData, 5000); 
 }
