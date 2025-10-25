@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Trading App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            padding-bottom: 80px; 
+            background-color: #0c1021;
+        }
+
+        /* 5-ITEM Bottom Nav Style (Fixed) */
+        .bottom-nav { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            width: 100%; 
+            display: flex; 
+            justify-content: space-around; 
+            z-index: 1000; 
+            background-color: #111827; 
+            border-top: 1px solid #374151; 
+            padding: 8px 0; 
+        }
+        .nav-link { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            flex-grow: 1; 
+            text-decoration: none; 
+            color: #9ca3af; 
+            font-weight: 500; 
+            font-size: 0.75rem; /* 12px */
+            transition: all 0.2s ease-in-out; 
+            gap: 4px; 
+            width: 20%; /* 100% / 5 items */
+        }
+        .nav-link svg { 
+            width: 24px; 
+            height: 24px; 
+        }
+        .nav-link.active { 
+            color: #4ade80; /* Bright green */
+            font-weight: 600; 
+        }
+
+        /* --- NEW: Tab Pill Styling (Matches Amzex) --- */
+        .tab-link {
+            padding: 0.5rem 1rem; /* 8px 16px */
+            font-weight: 600;
+            font-size: 0.875rem; /* 14px */
+            color: #9ca3af; /* Default gray text */
+            border-radius: 9999px; /* full pill */
+            transition: all 0.2s;
+            border: none;
+            background-color: transparent;
+        }
+        .tab-link.active {
+            color: #111827; /* Dark text */
+            background-color: #4ade80; /* Bright green pill */
+        }
+        /* --- End of Tab Styling --- */
+
+        /* Animation classes */
+        .skeleton { background-color: #374151; border-radius: 0.5rem; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 50% { opacity: .5; } }
+
+        @keyframes price-flash-up { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(34, 197, 94, 0.15); } }
+        @keyframes price-flash-down { 0%, 100% { background-color: transparent; } 50% { background-color: rgba(239, 68, 68, 0.15); } }
+        .price-up { animation: price-flash-up 0.8s ease-out; }
+        .price-down { animation: price-flash-down 0.8s ease-out; }
+
+        @keyframes pnl-update { 
+            0% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+            100% { transform: scale(1); }
+        }
+        .pnl-update { animation: pnl-update 0.6s ease-in-out; }
+    </style>
+</head>
+<body class="text-gray-100">
+
+    <script>
+        const token = localStorage.getItem('authToken');
+        if (!token) { window.location.href = '/login.html'; }
+    </script>
+
+    <!-- Page content container -->
+    <div class="container mx-auto p-4 max-w-4xl">
+
+        <!-- Sleek Header -->
+        <header class="mb-6">
+            <p class="text-sm text-gray-400">Welcome back, <span id="username-display">...</span></p>
+            <div class="mt-2">
+                <div id="header-skeleton">
+                    <div class="skeleton h-10 w-48 rounded-lg"></div>
+                    <div class="skeleton h-6 w-32 rounded-lg mt-2"></div>
+                </div>
+                <div id="header-content" class="hidden">
+                    <div id="balance-display" class="text-3xl font-bold text-white flex items-center space-x-2">
+                        <span class="value">0.00</span>
+                    </div>
+                    <div id="pnl-display" class="text-base font-medium text-gray-400 mt-1" data-pnl-value="0">
+                        <span class="text-gray-400">Today's P&L: </span>
+                        <span class="value">...</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="space-y-8">
+            <!-- Search Bar (ID added for JS) -->
+            <div class="relative">
+                <input type="text" id="search-box" placeholder="Search coins..." class="w-full bg-gray-800/50 border border-gray-700 text-white rounded-full py-3 px-5 pl-12 focus:outline-none focus:ring-2 focus:ring-green-400">
+                <svg class="w-5 h-5 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            </div>
+
+            <!-- Icon Grid -->
+            <div class="grid grid-cols-4 gap-4 text-center">
+                <a href="deposit.html" class="flex flex-col items-center space-y-2">
+                    <div class="w-14 h-14 rounded-full bg-gray-800/50 flex items-center justify-center text-green-400">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    </div>
+                    <span class="text-xs font-medium text-gray-300">Deposit</span>
+                </a>
+                <a href="withdraw.html" class="flex flex-col items-center space-y-2">
+                    <div class="w-14 h-14 rounded-full bg-gray-800/50 flex items-center justify-center text-blue-400">
+                         <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    </div>
+                    <span class="text-xs font-medium text-gray-300">Withdraw</span>
+                </a>
+                <a href="trade.html" class="flex flex-col items-center space-y-2">
+                    <div class="w-14 h-14 rounded-full bg-gray-800/50 flex items-center justify-center text-yellow-400">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                    </div>
+                    <span class="text-xs font-medium text-gray-300">Trade</span>
+                </a>
+                <a href="profile.html" class="flex flex-col items-center space-y-2">
+                    <div class="w-14 h-14 rounded-full bg-gray-800/50 flex items-center justify-center text-red-400">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                    </div>
+                    <span class="text-xs font-medium text-gray-300">Profile</span>
+                </a>
+            </div>
+
+            <!-- Banner -->
+            <div class="bg-gradient-to-r from-green-500 to-teal-600 rounded-xl p-6 flex items-center justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-white">Stay Informed</h3>
+                    <p class="text-sm text-white/80">Get the latest news and updates from our platform.</p>
+                </div>
+                <svg class="w-16 h-16 text-white/50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+            </div>
+
+            <!-- Tabs (New Pill Style) -->
+            <!-- We add an outer container to create the gray "track" -->
+            <div class="bg-gray-800/50 p-1 rounded-full flex justify-between space-x-1" id="tab-container">
+                <button class="tab-link active w-1/3" data-sort="hot">Hot Ranking</button>
+                <button class="tab-link w-1/3" data-sort="gainers">Top Gainers</button>
+                <button class="tab-link w-1/3" data-sort="24h">24h Ranking</button>
+            </div>
+
+            <!-- Market Watch List -->
+            <div>
+                <!-- `data-sort-key` and `data-name` added for sorting/searching -->
+                <div id="assets-content" class="space-y-4"></div>
+                <div id="assets-skeleton" class="space-y-4">
+                    <div class="skeleton w-full h-16 rounded-lg"></div>
+                    <div class="skeleton w-full h-16 rounded-lg"></div>
+                    <div class="skeleton w-full h-16 rounded-lg"></div>
+                    <div class="skeleton w-full h-16 rounded-lg"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 5-ITEM Bottom Navigation (Fixed) -->
+    <nav class="bottom-nav">
+        <a href="dashboard.html" class="nav-link" id="nav-dashboard">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+            <span>Home</span>
+        </a>
+        <a href="trade.html" class="nav-link" id="nav-trade">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+            <span>Trade</span>
+        </a>
+        <a href="deposit.html" class="nav-link" id="nav-deposit">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            <span>Deposit</span>
+        </a>
+        <a href="withdraw.html" class="nav-link" id="nav-withdraw">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+            <span>Withdraw</span>
+        </a>
+        <a href="profile.html" class="nav-link" id="nav-profile">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            <span>Profile</span>
+        </a>
+    </nav>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('nav-dashboard').classList.add('active');
+
+            const token = localStorage.getItem('authToken');
+            let lastPrices = {};
+            let allAssets = []; // To store the original asset list for sorting
+
+            const usernameDisplay = document.getElementById('username-display');
+            const balanceDisplay = document.getElementById('balance-display');
+            const pnlDisplay = document.getElementById('pnl-display');
+            const headerSkeleton = document.getElementById('header-skeleton');
+            const headerContent = document.getElementById('header-content');
+            const assetsContent = document.getElementById('assets-content');
+            const assetsSkeleton = document.getElementById('assets-skeleton');
+
+            // --- NEW: Get references for search and tabs ---
+            const searchBox = document.getElementById('search-box');
+            const tabContainer = document.getElementById('tab-container');
+
+            const savePnlToStorage = (pnlValue) => {
+                const today = new Date().toDateString();
+                localStorage.setItem('todayPnl', pnlValue.toString());
+                localStorage.setItem('pnlDate', today);
+            };
+
+            const loadPnlFromStorage = () => {
+                const today = new Date().toDateString();
+                const storedDate = localStorage.getItem('pnlDate');
+                if (storedDate === today) {
+                    return parseFloat(localStorage.getItem('todayPnl')) || 0;
+                } else {
+                    localStorage.setItem('todayPnl', '0');
+                    localStorage.setItem('pnlDate', today);
+                    return 0;
+                }
+            };
+
+            // --- *** NEW: Function to render the list from an array *** ---
+            // This allows us to re-render the list after sorting
+            const renderAssetList = (assets) => {
+                assetsContent.innerHTML = ''; // Clear the list
+                if (assets && assets.length > 0) {
+                    assets.forEach(asset => {
+                        const changeSign = asset.change >= 0 ? '+' : '';
+                        const changeColor = asset.change >= 0 ? 'text-green-400' : 'text-red-400';
+                        const tickerBase = asset.ticker.split('/')[0];
+                        const iconUrl = `/icons/${tickerBase.toLowerCase()}.svg`;
+
+                        const assetRow = document.createElement('div');
+                        const cardId = `asset-card-${asset.ticker.replace('/', '-')}`;
+                        assetRow.id = cardId;
+                        assetRow.className = 'asset-row flex items-center justify-between p-4 rounded-lg hover:bg-gray-800/50 transition-all';
+
+                        // Add data attributes for searching
+                        assetRow.setAttribute('data-name', `${tickerBase.toLowerCase()} ${asset.name.toLowerCase()}`);
+                        assetRow.setAttribute('data-change', asset.change);
+
+                        assetRow.innerHTML = `
+                            <div class="flex items-center space-x-4">
+                                <img src="${iconUrl}" alt="${asset.name} logo" class="w-9 h-9" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                                <div class="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center font-bold hidden">${tickerBase.charAt(0)}</div>
+                                <div>
+                                    <p class="font-bold text-base text-white">${tickerBase}</p>
+                                    <p class="text-sm text-gray-400">${asset.name}</p>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <p class="font-semibold text-base text-white asset-price">${asset.price.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 5 })}</p>
+                                <p class="font-medium text-sm ${changeColor} asset-change">${changeSign}${asset.change.toFixed(2)}%</p>
+                            </div>
+                        `;
+                        assetsContent.appendChild(assetRow);
+
+                        lastPrices[asset.ticker] = asset.price;
+                    });
+                } else {
+                    assetsContent.innerHTML = `<p class="text-center text-gray-500 py-4 col-span-full">No assets found.</p>`;
+                }
+            };
+            // --- End of new function ---
+
+            const renderData = (data) => {
+                console.log('Rendering dashboard data:', data);
+
+                usernameDisplay.textContent = data.username;
+                balanceDisplay.querySelector('.value').textContent = data.balance.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+                const serverPnl = data.todayPnl !== undefined ? data.todayPnl : loadPnlFromStorage();
+                pnlDisplay.dataset.pnlValue = serverPnl;
+                updatePnlDisplay(serverPnl);
+                savePnlToStorage(serverPnl);
+
+                // --- Store the original list and render it ---
+                allAssets = data.assets || [];
+                renderAssetList(allAssets);
+                // ---
+
+                headerSkeleton.style.display = 'none';
+                headerContent.style.display = 'block';
+                assetsSkeleton.style.display = 'none';
+            };
+
+            const updatePnlDisplay = (pnlValue) => {
+                const pnlNumber = parseFloat(pnlValue);
+                const pnlValueElem = pnlDisplay.querySelector('.value');
+
+                pnlValueElem.classList.remove('text-green-400', 'text-red-400', 'text-gray-400');
+
+                if (pnlNumber > 0) {
+                    pnlValueElem.classList.add('text-green-400');
+                    pnlValueElem.textContent = '+' + pnlNumber.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                } else if (pnlNumber < 0) {
+                    pnlValueElem.classList.add('text-red-400');
+                    pnlValueElem.textContent = pnlNumber.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                } else {
+                    pnlValueElem.classList.add('text-gray-400');
+                    pnlValueElem.textContent = pnlNumber.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                }
+                pnlDisplay.classList.remove('pnl-update');
+                void pnlDisplay.offsetWidth;
+                pnlDisplay.classList.add('pnl-update');
+            };
+
+            const socket = io({ 
+                auth: { token },
+                transports: ['websocket', 'polling'] 
+            });
+
+            socket.on('connect', () => {
+                console.log('Connected to server, requesting dashboard data...');
+                socket.emit('request_dashboard_data');
+            });
+
+            socket.on('dashboard_data', (data) => {
+                if (data && data.success) {
+                    renderData(data.data);
+                } else {
+                     document.querySelector('main').innerHTML = `<div class="text-center py-10 bg-gray-800/50 rounded-2xl p-6 text-red-400">Could not load dashboard data. Please try again later.</div>`;
+                }
+            });
+
+            socket.on('dashboard_price_update', (updates) => {
+                // Update the master list
+                let listChanged = false;
+                allAssets.forEach(asset => {
+                    if (updates[asset.ticker]) {
+                        asset.price = updates[asset.ticker].price;
+                        asset.change = updates[asset.ticker].change;
+                        listChanged = true;
+                    }
+                });
+
+                // Update the visible rows
+                for (const ticker in updates) {
+                    const cardId = `asset-card-${ticker.replace('/', '-')}`;
+                    const assetRow = document.getElementById(cardId);
+
+                    if (assetRow) {
+                        const newPrice = updates[ticker].price;
+                        const newChange = updates[ticker].change;
+                        const priceElem = assetRow.querySelector('.asset-price');
+                        const changeElem = assetRow.querySelector('.asset-change');
+
+                        assetRow.setAttribute('data-change', newChange); // Update data-change for sorting
+
+                        if (lastPrices[ticker] && newPrice !== lastPrices[ticker]) {
+                            assetRow.classList.remove('price-up', 'price-down');
+                            void assetRow.offsetWidth;
+                            assetRow.classList.add(newPrice > lastPrices[ticker] ? 'price-up' : 'price-down');
+                        }
+                        priceElem.textContent = newPrice.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 5 });
+                        const changeSign = newChange >= 0 ? '+' : '';
+                        const changeColor = newChange >= 0 ? 'text-green-400' : 'text-red-400';
+                        changeElem.textContent = `${changeSign}${newChange.toFixed(2)}%`;
+                        changeElem.className = `font-medium text-sm asset-change ${changeColor}`;
+                        lastPrices[ticker] = newPrice;
+                    }
+                }
+            });
+
+            socket.on('trade_result', (data) => {
+                try {
+                    if (data.balance !== undefined && !isNaN(data.balance)) {
+                        balanceDisplay.querySelector('.value').textContent = data.balance.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                        balanceDisplay.classList.remove('pnl-update');
+                        void balanceDisplay.offsetWidth;
+                        balanceDisplay.classList.add('pnl-update');
+                    }
+                    let newPnlValue = (data.todayPnl !== undefined && !isNaN(data.todayPnl)) ? data.todayPnl : loadPnlFromStorage();
+                    pnlDisplay.dataset.pnlValue = newPnlValue;
+                    updatePnlDisplay(newPnlValue);
+                    savePnlToStorage(newPnlValue);
+                } catch (error) {
+                    console.error('Error processing trade result:', error);
+                }
+            });
+
+            socket.on('pnl_update', (data) => {
+                if (data.todayPnl !== undefined && !isNaN(data.todayPnl)) {
+                    pnlDisplay.dataset.pnlValue = data.todayPnl;
+                    updatePnlDisplay(data.todayPnl);
+                    savePnlToStorage(data.todayPnl);
+                }
+            });
+
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) socket.emit('request_dashboard_data');
+            });
+            setInterval(() => {
+                socket.emit('request_dashboard_data');
+            }, 30000);
+            socket.on('disconnect', () => console.log('Disconnected from server.'));
+            socket.on('connect_error', (error) => console.error('Connection error:', error));
+
+            const initialPnl = loadPnlFromStorage();
+            if (initialPnl !== 0) {
+                pnlDisplay.dataset.pnlValue = initialPnl;
+                updatePnlDisplay(initialPnl);
+            }
+
+            // --- *** NEW: SEARCH BOX LOGIC *** ---
+            searchBox.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                document.querySelectorAll('.asset-row').forEach(row => {
+                    const name = row.getAttribute('data-name');
+                    if (name.includes(query)) {
+                        row.style.display = 'flex';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                });
+            });
+
+            // --- *** NEW: TAB SWITCHING LOGIC *** ---
+            tabContainer.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'BUTTON') return;
+
+                // Update active visual
+                tabContainer.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+
+                const sortType = e.target.getAttribute('data-sort');
+                let sortedAssets = [...allAssets]; // Copy the master list
+
+                if (sortType === 'gainers') {
+                    // Sort by change, highest to lowest
+                    sortedAssets.sort((a, b) => b.change - a.change);
+                } else if (sortType === 'hot') {
+                    // "Hot" is just the default list, no sort needed
+                } else if (sortType === '24h') {
+                    // "24h" is also default for now
+                }
+
+                renderAssetList(sortedAssets);
+
+                // After re-rendering, we must re-apply the search filter
+                const currentQuery = searchBox.value.toLowerCase();
+                if (currentQuery) {
+                    document.querySelectorAll('.asset-row').forEach(row => {
+                        const name = row.getAttribute('data-name');
+                        if (!name.includes(currentQuery)) {
+                            row.style.display = 'none';
+                        }
+                    });
+                }
+            });
+
+        });
+    </script>
+</body>
+</html>
+
+

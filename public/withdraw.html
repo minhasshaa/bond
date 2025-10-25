@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Withdraw - Trading App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            padding-bottom: 80px; 
+            /* MATCH DASHBOARD BACKGROUND */
+            background-color: #0c1021; 
+        }
+
+        /* 5-ITEM Bottom Nav Style (Fixed) - MATCHED FROM DASHBOARD */
+        .bottom-nav { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            width: 100%; 
+            display: flex; 
+            justify-content: space-around; 
+            z-index: 1000; 
+            background-color: #111827; 
+            border-top: 1px solid #374151; 
+            padding: 8px 0; 
+        }
+        .nav-link { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            flex-grow: 1; 
+            text-decoration: none; 
+            color: #9ca3af; 
+            font-weight: 500; 
+            font-size: 0.75rem; /* 12px */
+            transition: all 0.2s ease-in-out; 
+            gap: 4px; 
+            width: 20%; 
+        }
+        .nav-link svg { 
+            width: 24px; 
+            height: 24px; 
+        }
+        .nav-link.active { 
+            /* MATCH DASHBOARD ACTIVE COLOR */
+            color: #4ade80; 
+            font-weight: 600; 
+        }
+    </style>
+</head>
+<body class="text-gray-100">
+
+    <script>
+        // This script runs first to check for the token
+        const token = localStorage.getItem('authToken');
+        if (!token) {
+            // If no token, redirect to login immediately
+            window.location.href = '/login.html';
+        }
+    </script>
+
+    <div class="container mx-auto p-4 max-w-4xl">
+        <header class="mb-6">
+            <h1 class="text-2xl font-bold text-white">Withdraw Funds</h1>
+            <p class="text-gray-400">Request a withdrawal to your personal wallet.</p>
+        </header>
+
+        <main class="space-y-6">
+            <div class="p-4 space-y-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">Withdrawal Request</h2>
+                    <p class="text-sm text-gray-400">Balance: <strong id="balance-display" class="text-green-400">$0.00</strong></p>
+                </div>
+                <form id="withdraw-form">
+                    <div class="mb-4">
+                        <label for="amount" class="block text-sm font-medium text-gray-300 mb-1">Amount (USD)</label>
+                        <input type="number" id="amount" step="0.01" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm" placeholder="e.g., 100" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="address" class="block text-sm font-medium text-gray-300 mb-1">Your ERC-20 Wallet Address</label>
+                        <input type="text" id="address" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm" placeholder="0x..." required>
+                    </div>
+                    <button type="submit" id="submit-button" class="w-full mt-2 px-4 py-3 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700">
+                        Submit Withdrawal Request
+                    </button>
+                </form>
+                <div id="form-message" class="mt-4 text-center text-sm"></div>
+            </div>
+
+            <div class="h-px bg-gray-700 mx-4"></div> <div class="p-4 space-y-4">
+                <h2 class="text-xl font-semibold mb-4">Withdrawal History</h2>
+                <div id="history-container" class="space-y-3">
+                    <p id="history-loading" class="text-gray-400 text-center">Loading history...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <nav class="bottom-nav">
+        <a href="dashboard.html" class="nav-link" id="nav-dashboard">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+            <span>Home</span>
+        </a>
+        <a href="trade.html" class="nav-link" id="nav-trade">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+            <span>Trade</span>
+        </a>
+        <a href="deposit.html" class="nav-link" id="nav-deposit">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            <span>Deposit</span>
+        </a>
+        <a href="withdraw.html" class="nav-link" id="nav-withdraw">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+            <span>Withdraw</span>
+        </a>
+        <a href="profile.html" class="nav-link" id="nav-profile">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            <span>Profile</span>
+        </a>
+    </nav>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Script to set active navbar link
+            const currentPage = 'withdraw'; 
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            const activeLink = document.getElementById(`nav-${currentPage}`);
+            if (activeLink) activeLink.classList.add('active');
+
+            // --- YOUR ORIGINAL SCRIPT LOGIC (PRESERVED) ---
+            const token = localStorage.getItem('authToken');
+            const balanceDisplay = document.getElementById('balance-display');
+            const withdrawForm = document.getElementById('withdraw-form');
+            const amountInput = document.getElementById('amount');
+            const addressInput = document.getElementById('address');
+            const submitButton = document.getElementById('submit-button');
+            const formMessage = document.getElementById('form-message');
+            const historyContainer = document.getElementById('history-container');
+            const historyLoading = document.getElementById('history-loading');
+
+            // CRITICAL: Using your original, confirmed working header setup.
+            const authHeaders = {
+                'Content-Type': 'application/json',
+                'x-auth-token': token
+            };
+
+            const fetchUserData = async () => {
+                try {
+                    // CRITICAL: Using your original, confirmed working API endpoint.
+                    const response = await fetch('/api/user/info', { headers: authHeaders });
+                    const data = await response.json();
+                    if (data.success) {
+                        balanceDisplay.textContent = `$${data.user.balance.toFixed(2)}`;
+                    } else {
+                        throw new Error(data.message || 'Failed to fetch user balance.');
+                    }
+                } catch (error) {
+                    console.error("Could not fetch user balance.", error);
+                    // Retain $0.00 display on failure
+                }
+            };
+
+            const fetchWithdrawalHistory = async () => {
+                try {
+                    const response = await fetch('/api/withdraw/history', { headers: authHeaders });
+                    const data = await response.json();
+                    historyLoading.classList.add('hidden');
+                    if (data.success && data.history.length > 0) {
+                        historyContainer.innerHTML = '';
+                        data.history.forEach(tx => {
+                            const txDate = new Date(tx.date).toLocaleString();
+                            const statusColor = tx.status === 'completed' ? 'text-green-400' : (tx.status === 'rejected' ? 'text-red-400' : 'text-yellow-400');
+                            const statusText = tx.status.replace('_', ' ');
+                            const itemHTML = `
+                                <div class="bg-gray-900 p-3 rounded-lg flex justify-between items-center text-sm">
+                                    <div>
+                                        <p class="font-semibold text-white">$${tx.amount.toFixed(2)}</p>
+                                        <p class="text-xs text-gray-400 truncate" title="${tx.address}">To: ${tx.address.substring(0, 10)}...</p>
+                                        <p class="text-xs text-gray-500">${txDate}</p>
+                                    </div>
+                                    <div class="font-semibold ${statusColor} capitalize">${statusText}</div>
+                                </div>`;
+                            historyContainer.innerHTML += itemHTML;
+                        });
+                    } else {
+                        historyContainer.innerHTML = '<p class="text-gray-500 text-center">No withdrawal history found.</p>';
+                    }
+                } catch (err) {
+                    historyLoading.classList.add('hidden');
+                    historyContainer.innerHTML = '<p class="text-red-400 text-center">Could not load history.</p>';
+                }
+            };
+
+            withdrawForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                submitButton.disabled = true;
+                submitButton.textContent = 'Submitting...';
+                formMessage.textContent = '';
+
+                try {
+                    const response = await fetch('/api/withdraw/request', {
+                        method: 'POST',
+                        headers: authHeaders,
+                        body: JSON.stringify({
+                            amount: amountInput.value,
+                            address: addressInput.value
+                        })
+                    });
+                    const result = await response.json();
+
+                    if (result.success) {
+                        formMessage.style.color = '#34d399';
+                        withdrawForm.reset();
+                        balanceDisplay.textContent = `$${result.newBalance.toFixed(2)}`;
+                        fetchWithdrawalHistory();
+                    } else {
+                        throw new Error(result.message || 'Request failed.');
+                    }
+                    formMessage.textContent = result.message;
+
+                } catch (error) {
+                    formMessage.style.color = '#f87171';
+                    formMessage.textContent = error.message;
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Submit Withdrawal Request';
+                }
+            });
+
+            fetchUserData();
+            fetchWithdrawalHistory();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deposit - Trading App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            padding-bottom: 80px; 
+            /* MATCH DASHBOARD BACKGROUND */
+            background-color: #0c1021;
+        }
+
+        /* 5-ITEM Bottom Nav Style (Fixed) - MATCHED FROM DASHBOARD */
+        .bottom-nav { 
+            position: fixed; 
+            bottom: 0; 
+            left: 0; 
+            width: 100%; 
+            display: flex; 
+            justify-content: space-around; 
+            z-index: 1000; 
+            background-color: #111827; 
+            border-top: 1px solid #374151; 
+            padding: 8px 0; 
+        }
+        .nav-link { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            flex-grow: 1; 
+            text-decoration: none; 
+            color: #9ca3af; 
+            font-weight: 500; 
+            font-size: 0.75rem; /* 12px */
+            transition: all 0.2s ease-in-out; 
+            gap: 4px; 
+            width: 20%; 
+        }
+        .nav-link svg { 
+            width: 24px; 
+            height: 24px; 
+        }
+        .nav-link.active { 
+            /* MATCH DASHBOARD ACTIVE COLOR */
+            color: #4ade80; 
+            font-weight: 600; 
+        }
+    </style>
+</head>
+<body class="text-gray-100">
+
+    <script>
+        const token = localStorage.getItem('authToken');
+        if (!token) { window.location.href = '/login.html'; }
+    </script>
+
+    <div class="container mx-auto p-4 max-w-4xl">
+        <header class="mb-6">
+            <h1 class="text-2xl font-bold text-white">Deposit Crypto</h1>
+            <p class="text-gray-400">Follow the steps below to add funds.</p>
+        </header>
+
+        <main id="deposit-content" class="space-y-6">
+
+            <div class="p-4 space-y-4">
+                <h2 class="text-xl font-semibold mb-4">Step 1: Send Funds</h2>
+                <div class="bg-orange-900/50 border border-orange-500 text-orange-200 px-4 py-3 rounded-lg mb-4" role="alert">
+                    <div class="flex">
+                        <div class="py-1"><svg class="fill-current h-6 w-6 text-orange-400 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM9 5v6h2V5H9zm0 8v2h2v-2H9z"/></svg></div>
+                        <div>
+                            <p class="font-bold">Important: Use the Correct Network</p>
+                            <p class="text-sm">Send funds using the <strong>Ethereum (ERC-20)</strong> network only. Using any other network will result in a permanent loss of funds.</p>
+                            <p class="text-sm mt-2">Supported currencies: <strong>ETH, USDT, USDC, DAI</strong>.</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="loading-spinner" class="text-center py-4"><p class="text-gray-400">Generating deposit address...</p></div>
+                <div id="error-message-container" class="hidden text-red-400 bg-red-900/50 p-4 rounded-lg"><p id="error-message"></p></div>
+                <div id="address-container" class="hidden">
+                    <p class="text-gray-400 mb-2">Send funds to this address:</p>
+                    <div class="bg-gray-900 p-4 rounded-lg flex items-center justify-between">
+                        <code id="deposit-address" class="text-sm text-yellow-300 break-all"></code>
+                        <button id="copy-button" class="ml-4 px-3 py-1.5 text-sm font-medium bg-green-600 rounded-lg hover:bg-green-700">Copy</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="h-px bg-gray-700 mx-4"></div> <div class="p-4 space-y-4">
+                <h2 class="text-xl font-semibold mb-4">Step 2: Submit for Verification</h2>
+                <p class="text-gray-400 mb-4">After sending, enter the amount and paste the Transaction ID (TXID) below.</p>
+                <form id="txid-form" class="space-y-4">
+                    <div>
+                        <label for="amount-input" class="block text-sm font-medium text-gray-300 mb-1">Amount (USD)</label>
+                        <input type="number" id="amount-input" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm" placeholder="e.g., 50.00" required min="0" step="0.01">
+                    </div>
+                    <div>
+                        <label for="txid-input" class="block text-sm font-medium text-gray-300 mb-1">Transaction ID (TXID)</label>
+                        <input type="text" id="txid-input" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm" placeholder="Paste your TXID here" required>
+                    </div>
+                    <button type="submit" id="submit-txid-button" class="w-full mt-4 px-4 py-2.5 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700">Submit for Verification</button>
+                </form>
+                <div id="form-message" class="mt-4 text-center text-sm"></div>
+            </div>
+
+            <div class="h-px bg-gray-700 mx-4"></div> <div class="p-4 space-y-4">
+                <h2 class="text-xl font-semibold mb-4">Deposit History</h2>
+                <div id="history-container" class="space-y-3">
+                    <p id="history-loading" class="text-gray-400 text-center">Loading history...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <nav class="bottom-nav">
+        <a href="dashboard.html" class="nav-link" id="nav-dashboard">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+            <span>Home</span>
+        </a>
+        <a href="trade.html" class="nav-link" id="nav-trade">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+            <span>Trade</span>
+        </a>
+        <a href="deposit.html" class="nav-link" id="nav-deposit">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            <span>Deposit</span>
+        </a>
+        <a href="withdraw.html" class="nav-link" id="nav-withdraw">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+            <span>Withdraw</span>
+        </a>
+        <a href="profile.html" class="nav-link" id="nav-profile">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+            <span>Profile</span>
+        </a>
+    </nav>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set active nav link and body class
+            const currentPage = 'deposit'; // Hardcoded for this file
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            const activeLink = document.getElementById(`nav-${currentPage}`);
+            if (activeLink) activeLink.classList.add('active');
+
+
+            const token = localStorage.getItem('authToken');
+            // Using the original Authorization header method
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+            const loadingSpinner = document.getElementById('loading-spinner');
+            const errorContainer = document.getElementById('error-message-container');
+            const errorMessageEl = document.getElementById('error-message');
+            const addressContainer = document.getElementById('address-container');
+            const depositAddressEl = document.getElementById('deposit-address');
+            const copyButton = document.getElementById('copy-button');
+            const txidForm = document.getElementById('txid-form');
+            const txidInput = document.getElementById('txid-input');
+            const amountInput = document.getElementById('amount-input');
+            const formMessage = document.getElementById('form-message');
+            const submitTxidButton = document.getElementById('submit-txid-button');
+            const historyContainer = document.getElementById('history-container');
+            const historyLoading = document.getElementById('history-loading');
+
+            const fetchDepositAddress = async () => {
+                try {
+                    const response = await fetch('/api/deposit/address', { headers });
+                    const data = await response.json();
+                    loadingSpinner.classList.add('hidden');
+                    if (data.success) {
+                        depositAddressEl.textContent = data.address;
+                        addressContainer.classList.remove('hidden');
+                    } else {
+                        throw new Error(data.message || 'Could not generate deposit address.');
+                    }
+                } catch (err) {
+                    loadingSpinner.classList.add('hidden');
+                    errorMessageEl.textContent = err.message;
+                    errorContainer.classList.remove('hidden');
+                }
+            };
+
+            const fetchDepositHistory = async () => {
+                try {
+                    const response = await fetch('/api/deposit/history', { headers });
+                    const data = await response.json();
+                    historyLoading.classList.add('hidden');
+                    if (data.success && data.history.length > 0) {
+                        historyContainer.innerHTML = '';
+                        data.history.forEach(tx => {
+                            const txDate = new Date(tx.date).toLocaleString();
+                            const statusColor = tx.status === 'completed' ? 'text-green-400' : (tx.status === 'rejected' ? 'text-red-400' : 'text-yellow-400');
+                            const statusText = tx.status.replace('_', ' ');
+
+                            const historyItemHTML = `
+                                <div class="bg-gray-900 p-3 rounded-lg flex justify-between items-center text-sm">
+                                    <div>
+                                        <p class="text-gray-400">
+                                            <a href="https://etherscan.io/tx/${tx.txid}" target="_blank" class="text-blue-400 hover:underline truncate" title="${tx.txid}">
+                                                ${tx.txid.substring(0, 10)}...${tx.txid.substring(tx.txid.length - 8)}
+                                            </a>
+                                        </p>
+                                        <p class="text-xs text-gray-500">${txDate}</p>
+                                    </div>
+                                    <div class="font-semibold ${statusColor} capitalize">${statusText}</div>
+                                </div>`;
+                            historyContainer.innerHTML += historyItemHTML;
+                        });
+                    } else {
+                        historyContainer.innerHTML = '<p class="text-gray-500 text-center">No deposit history found.</p>';
+                    }
+                } catch (err) {
+                    historyLoading.classList.add('hidden');
+                    historyContainer.innerHTML = '<p class="text-red-400 text-center">Could not load history.</p>';
+                }
+            };
+
+            fetchDepositAddress();
+            fetchDepositHistory();
+
+            copyButton.addEventListener('click', () => {
+                navigator.clipboard.writeText(depositAddressEl.textContent).then(() => {
+                    copyButton.textContent = 'Copied!';
+                    setTimeout(() => { copyButton.textContent = 'Copy'; }, 2000);
+                });
+            });
+
+            txidForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const amount = parseFloat(amountInput.value);
+                const txid = txidInput.value.trim();
+
+                if (isNaN(amount) || amount <= 0) {
+                    formMessage.style.color = '#f87171';
+                    formMessage.textContent = 'Please enter a valid, positive amount.';
+                    return;
+                }
+
+                submitTxidButton.disabled = true;
+                submitTxidButton.textContent = 'Submitting...';
+                formMessage.textContent = '';
+                try {
+                    const response = await fetch('/api/deposit/verify', {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify({ txid: txid, amount: amount })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        formMessage.style.color = '#34d399';
+                        formMessage.textContent = result.message;
+                        txidInput.value = '';
+                        amountInput.value = '';
+                        fetchDepositHistory();
+                    } else {
+                        throw new Error(result.message || 'Submission failed.');
+                    }
+                } catch (error) {
+                    formMessage.style.color = '#f87171';
+                    formMessage.textContent = error.message;
+                } finally {
+                    submitTxidButton.disabled = false;
+                    submitTxidButton.textContent = 'Submit for Verification';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
