@@ -1,4 +1,4 @@
-// index.js (SPOT TRADING PLATFORM - FIXED)
+// index.js (FINAL FIX: Stable Public Data & Fast UI)
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -77,11 +77,10 @@ TRADE_PAIRS.forEach(pair => {
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
-// ------------------ BINANCE CLIENT (FIXED FOR SPOT ONLY) ------------------
+// ------------------ BINANCE CLIENT (FIXED FOR PUBLIC SPOT DATA) ------------------
 const binance = new Binance().options({
-  APIKEY: process.env.BINANCE_API_KEY,
-  APISECRET: process.env.BINANCE_API_SECRET,
-  // FIX 1: Explicitly set the base URL for the SPOT API.
+  // FIX 1: Remove APIKEY and APISECRET to force public (unsigned) calls.
+  // FIX 2: Set the stable SPOT API URL.
   baseURL: 'https://api.binance.com/api/' 
 });
 
@@ -202,32 +201,23 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (FIXED FOR SPOT) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (FIXED FOR SPOT PUBLIC DATA) ------------------
 async function initializeMarketData() {
-    console.log("📈 Initializing market data from Binance (Spot)...");
+    console.log("📈 Initializing market data from Binance (Spot Public)...");
     for (const pair of TRADE_PAIRS) {
         try {
-            // FIX 2: Switched from binance.futuresCandles to binance.candlesticks for Spot
-            const klines = await binance.candlesticks(pair, '1m', (error, ticks) => {
-                if (error) throw new Error(error.body || error.message);
-                return ticks; // Return ticks in the callback to be used by the surrounding async function
-            }, { limit: 200 });
+            // FIX: Use binance.candlesticks for Spot data (was futuresCandles)
+            const klines = await binance.candlesticks(pair, '1m', { limit: 200 });
             
-            // FIX: Check if klines is a valid array. If not, it's an error response.
+            // Check if klines is a valid array. If not, it's an error response.
             if (!Array.isArray(klines)) {
-                // Try to extract the specific error message from the response object
                 const errorMsg = klines && klines.msg 
-                                 ? `API Error: ${klines.msg} (Code: ${klines.code || 'N/A'})` 
-                                 : "Binance returned non-array data (Invalid Key/Permission/Endpoint).";
+                                 ? `Error fetching public data: ${klines.msg} (Code: ${klines.code || 'N/A'})` 
+                                 : "Connection to Binance failed, check logs for network issues or Rate Limits.";
                 throw new Error(errorMsg);
             }
-            // END FIX
 
-            // The 'ticks' variable from the callback is the actual array we need
-            // node-binance-api's candlestick function is complex, so we ensure we use the returned array
-            const finalKlines = klines; 
-
-            marketData[pair].candles = finalKlines.map(k => ({
+            marketData[pair].candles = klines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
                 open: parseFloat(k[1]),
@@ -239,14 +229,15 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}: ${err.message}.`);
+            // Added JSON.stringify for better error logging in case of non-string error body
+            console.error(`❌ Failed to load initial candles for ${pair}: ${err.message || JSON.stringify(err)}.`);
         }
     }
 }
 
 async function updateMarketData() {
     try {
-        // FIX 3: Switched from binance.futuresPrices to binance.prices for Spot
+        // FIX: Use binance.prices for Spot market (was futuresPrices)
         const prices = await binance.prices();
         const now = new Date();
         const currentMinuteStart = new Date(now);
@@ -298,12 +289,16 @@ async function updateMarketData() {
 }
 
 function startMarketDataPolling() {
-  console.log("✅ Starting market data polling every second...");
-  setInterval(updateMarketData, 1000);
+  // FINAL SOLUTION: This is the heavy API call, so it MUST run slower.
+  // 5 seconds is required to stay under the Binance ban limit on a shared cloud server.
+  console.log("✅ Starting market data API polling every 5 seconds (to avoid ban)...");
+  setInterval(updateMarketData, 5000); 
 }
 
-// ------------------ FIX: SUPPORT BOTH DASHBOARD + TRADING PRICE UPDATES (UNCHANGED) ------------------
+// ------------------ FIX: FAST UI UPDATE (1 SECOND) ------------------
 setInterval(() => {
+    // This runs every 1 second and only broadcasts the data that was LAST fetched.
+    // This is SAFE and provides the 1-second update feeling to the user interface.
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
     const payloadDashboard = {};
@@ -335,7 +330,7 @@ setInterval(() => {
 
     io.emit("price_update", payloadTrading);           
     io.emit("dashboard_price_update", payloadDashboard);
-}, 1000);
+}, 1000); // UI BROADCAST runs every 1 second
 
 // ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
