@@ -621,13 +621,6 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </div>
 </div>
 
-<!-- ⭐ FIX: Add temporary debug button -->
-<div class="fixed bottom-20 right-4 z-50">
-    <button onclick="forceChartUpdate()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-        Force Chart Update
-    </button>
-</div>
-
 <nav class="bottom-nav">
     <a href="dashboard.html" class="nav-link" id="nav-dashboard">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
@@ -731,21 +724,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let assetPrices = {};
     let activeTab = 'trade';
 
-    // ⭐ FIX: Debug function for manual chart updates
-    window.forceChartUpdate = function() {
-        console.log('🔄 DEBUG: Forcing chart update');
-        if (marketData[currentAsset]) {
-            const completeCandles = [
-                ...(marketData[currentAsset].candles || []),
-                ...(marketData[currentAsset].currentCandle ? [marketData[currentAsset].currentCandle] : [])
-            ];
-            console.log('🔄 DEBUG: Complete candles for chart:', completeCandles.length);
-            updateChart(completeCandles);
-        } else {
-            console.log('🔄 DEBUG: No market data for current asset:', currentAsset);
-        }
-    };
-
     // --- Connection Status Functions ---
     function updateConnectionStatus(status, message) {
         const statusElem = document.getElementById('connection-status');
@@ -761,6 +739,112 @@ document.addEventListener('DOMContentLoaded', () => {
         text.textContent = message;
         text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
                          status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
+    }
+
+    // --- Charting Functions (FIXED) ---
+    function initChart(candles) {
+        if (!candles || candles.length === 0) { 
+            myChart.clear(); 
+            return; 
+        }
+        
+        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit'
+        }));
+        
+        const options = {
+            backgroundColor: 'transparent',
+            tooltip: { 
+                trigger: 'axis', 
+                axisPointer: { type: 'cross' } 
+            },
+            xAxis: { 
+                type: 'category', 
+                data: chartDates, 
+                axisLine: { lineStyle: { color: '#8392A5' } },
+                axisLabel: {
+                    rotate: 45,
+                    color: '#9ca3af'
+                }
+            },
+            yAxis: { 
+                scale: true, 
+                axisLine: { lineStyle: { color: '#8392A5' } }, 
+                splitLine: { lineStyle: { color: '#2a2e39' } },
+                axisLabel: {
+                    color: '#9ca3af'
+                }
+            },
+            grid: { left: '10%', right: '5%', bottom: '15%', top: '5%' },
+            dataZoom: [{ 
+                type: 'inside', 
+                startValue: Math.max(0, chartDates.length - 50), 
+                endValue: chartDates.length - 1,
+                zoomOnMouseWheel: 'shift'
+            }],
+            series: [{ 
+                type: 'candlestick', 
+                data: chartData, 
+                itemStyle: { 
+                    color: '#22c55e', 
+                    color0: '#ef4444', 
+                    borderColor: '#22c55e', 
+                    borderColor0: '#ef4444' 
+                } 
+            }]
+        };
+        
+        myChart.setOption(options, true);
+    }
+
+    function updateChart(candles) {
+        if (!candles || candles.length === 0) return;
+        
+        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit'
+        }));
+        
+        myChart.setOption({
+            xAxis: { data: chartDates },
+            series: [{ data: chartData }]
+        });
+    }
+
+    // ⭐ FIX: Candle validation and normalization
+    function normalizeCandle(candle, currentPrice) {
+        if (!candle) {
+            // Create a default candle if none provided
+            return {
+                timestamp: Date.now(),
+                open: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                close: currentPrice
+            };
+        }
+
+        // Fix abnormal opening prices
+        if (candle.open > currentPrice * 2 || candle.open < currentPrice / 2) {
+            console.warn('⚠️ Fixing abnormal candle opening:', {
+                originalOpen: candle.open,
+                currentPrice: currentPrice,
+                fixedOpen: currentPrice
+            });
+            candle.open = currentPrice;
+        }
+
+        // Ensure candle values are logical
+        return {
+            timestamp: candle.timestamp || Date.now(),
+            open: candle.open,
+            high: Math.max(candle.open, candle.high || candle.open, currentPrice),
+            low: Math.min(candle.open, candle.low || candle.open, currentPrice),
+            close: currentPrice // Current forming candle should close at current price
+        };
     }
 
     // --- Socket.IO Event Handlers with Connection Status ---
@@ -789,164 +873,208 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- Chart Functions (FIXED) ---
-    function initChart(candles) {
-        if (!myChart) {
-            console.error('❌ Chart not initialized');
-            return;
-        }
-        
-        console.log('📊 Initializing chart with', candles.length, 'candles');
-        
-        // Use the complete candle data (both historical and current)
-        const allCandles = getCompleteCandleData(candles);
-        if (!allCandles || allCandles.length === 0) { 
-            // Show empty chart with message
-            myChart.setOption({
-                backgroundColor: 'transparent',
-                graphic: {
-                    type: 'text',
-                    left: 'center',
-                    top: 'middle',
-                    style: {
-                        text: 'Loading market data...',
-                        fontSize: 16,
-                        fill: '#9ca3af'
-                    }
-                }
-            }, true);
-            console.log('📊 Chart initialized with empty state');
-            return; 
-        }
-        
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => {
-            const date = new Date(c.timestamp);
-            return date.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit'
+    // ⭐ FIX: Proper market_data handler with candle normalization
+    socket.on('market_data', (data) => { 
+        if (data.asset === currentAsset) {
+            console.log('📊 Market Data Received:', {
+                asset: data.asset,
+                historicalCandles: data.candles?.length,
+                currentCandle: data.currentCandle,
+                currentPrice: data.currentPrice
             });
+            
+            // Update market data
+            if (!marketData[data.asset]) {
+                marketData[data.asset] = {};
+            }
+            
+            const currentPrice = data.currentPrice || lastPrice;
+            
+            // Store historical candles
+            marketData[data.asset].candles = data.candles || [];
+            marketData[data.asset].currentPrice = currentPrice;
+            
+            // ⭐ FIX: Normalize current forming candle
+            marketData[data.asset].currentCandle = normalizeCandle(data.currentCandle, currentPrice);
+            
+            // Update chart with complete data
+            const completeCandles = [
+                ...(marketData[data.asset].candles || []),
+                marketData[data.asset].currentCandle
+            ].filter(candle => candle && typeof candle.open === 'number');
+            
+            console.log('📊 Complete candles for chart:', completeCandles.length);
+            
+            if (completeCandles.length > 0) {
+                updateChart(completeCandles);
+            }
+            
+            // Update price display
+            if (data.currentPrice && data.currentPrice !== lastPrice) {
+                currentPriceElem.classList.remove('price-up', 'price-down');
+                currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
+                currentPriceElem.textContent = formatPrice(data.currentPrice, currentAsset);
+                lastPrice = data.currentPrice;
+            }
+        }
+    });
+
+    socket.on('init', (data) => {
+        console.log('📡 Received init data:', data);
+        
+        // Initialize with empty market data structure
+        marketData = {};
+        
+        // Get default assets
+        const assets = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
+                       'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'MATICUSDT'];
+        
+        populateAssetSelector(assets);
+
+        const lastAsset = localStorage.getItem('lastSelectedAsset');
+        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
+        setActiveAsset(currentAsset);
+
+        if (data.balance !== undefined) {
+            updateBalance(data.balance);
+        }
+
+        tradeHistoryContainer.innerHTML = '';
+        fullTradeHistory = data.tradeHistory || [];
+        visibleHistoryCount = 0;
+        loadMoreTrades();
+
+        // Initialize chart with empty data - it will be populated by market_data events
+        initChart([]);
+    });
+
+    // ... (rest of your existing socket event handlers remain the same)
+    socket.on('copy_trades_available', (data) => {
+        if (activeTab === 'copy-trade') {
+            availableCopyTrades = data.copyTrades || [];
+            renderCopyTrades();
+
+            if (data.message && data.message.includes('Minimum $100')) {
+                copyTradeStatus.textContent = data.message;
+                copyTradeStatus.classList.remove('text-red-400');
+                copyTradeStatus.classList.add('text-yellow-400');
+            } else {
+                copyTradeStatus.textContent = '';
+            }
+        }
+    });
+
+    socket.on('copy_trade_success', (data) => {
+        showCopySuccessPopup(data.asset || 'that trade'); 
+        socket.emit('request_copy_trades'); 
+
+        const allCopyBtns = document.querySelectorAll('.copy-btn');
+        allCopyBtns.forEach(btn => {
+            btn.disabled = false;
+            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
         });
-        
-        const options = {
-            backgroundColor: 'transparent',
-            animation: false,
-            tooltip: { 
-                trigger: 'axis', 
-                axisPointer: { type: 'cross' },
-                formatter: function (params) {
-                    const data = params[0].data;
-                    return `
-                        Time: ${params[0].name}<br/>
-                        Open: $${data[0].toFixed(4)}<br/>
-                        Close: $${data[1].toFixed(4)}<br/>
-                        Low: $${data[2].toFixed(4)}<br/>
-                        High: $${data[3].toFixed(4)}
-                    `;
-                }
-            },
-            xAxis: { 
-                type: 'category', 
-                data: chartDates, 
-                axisLine: { lineStyle: { color: '#8392A5' } },
-                axisLabel: {
-                    rotate: 45,
-                    color: '#9ca3af'
-                }
-            },
-            yAxis: { 
-                scale: true, 
-                axisLine: { lineStyle: { color: '#8392A5' } }, 
-                splitLine: { lineStyle: { color: '#2a2e39' } },
-                axisLabel: {
-                    color: '#9ca3af'
-                }
-            },
-            grid: { left: '10%', right: '5%', bottom: '15%', top: '10%' },
-            dataZoom: [
-                { 
-                    type: 'inside', 
-                    startValue: Math.max(0, allCandles.length - 50), 
-                    endValue: allCandles.length - 1
-                }
-            ],
-            series: [
-                { 
-                    type: 'candlestick', 
-                    data: chartData, 
-                    itemStyle: { 
-                        color: '#22c55e', 
-                        color0: '#ef4444', 
-                        borderColor: '#22c55e', 
-                        borderColor0: '#ef4444',
-                        borderWidth: 1
-                    } 
-                }
-            ]
-        };
-        
-        myChart.setOption(options, true);
-        console.log('📊 Chart initialized successfully with', allCandles.length, 'candles');
-    }
+    });
 
-    function updateChart(candles) {
-        if (!myChart) {
-            console.error('❌ Chart not available for update');
-            return;
-        }
-        
-        console.log('📊 Updating chart with', candles.length, 'candles');
-        
-        const allCandles = getCompleteCandleData(candles);
-        if (!allCandles || allCandles.length === 0) { 
-            console.log('📊 No valid candles to update chart');
-            return; 
-        }
+    socket.on('copy_trade_executed', (data) => {
+        showCopyExecutedToast(data.trade);
+        updateBalance(data.balance);
+        addTradeToHistory(data.trade);
+    });
 
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => {
-            const date = new Date(c.timestamp);
-            return date.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit'
-            });
+    socket.on('price_update', (data) => {
+        Object.entries(data).forEach(([asset, assetData]) => {
+            assetPrices[asset] = assetData.price;
+            if (marketData[asset]) {
+                marketData[asset].currentPrice = assetData.price;
+            }
         });
-        
-        myChart.setOption({
-            xAxis: { data: chartDates },
-            series: [{ data: chartData }]
+
+        if (data[currentAsset]) {
+            const newPrice = data[currentAsset].price;
+            const countdown = data[currentAsset].countdown;
+
+            currentPriceElem.classList.remove('price-up', 'price-down');
+            if (lastPrice !== 0 && newPrice !== lastPrice) {
+                currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
+            }
+
+            currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
+
+            countdownSecondsElem.textContent = `${countdown}s`;
+            countdownSecondsElem.classList.remove('warning', 'critical');
+            if (countdown <= 10) {
+                countdownSecondsElem.classList.add('critical');
+            } else if (countdown <= 30) {
+                countdownSecondsElem.classList.add('warning');
+            }
+
+            lastPrice = newPrice;
+        }
+    });
+
+    socket.on('trade_pending', (data) => { 
+        updateBalance(data.balance); 
+        addTradeToHistory(data.trade);
+        showPendingPopup(data.trade);
+    });
+
+    socket.on('trade_scheduled', (data) => { 
+        updateBalance(data.balance); 
+        addTradeToHistory(data.trade);
+        showScheduledPopup(data.trade);
+    });
+
+    socket.on('trade_active', (data) => {
+        tradeHistoryData[data.trade._id] = data.trade;
+        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
+        if (!tradeRow) {
+            addTradeToHistory(data.trade);
+        } else {
+            updateTradeStatus(data.trade._id, 'Active');
+        }
+        showToast(toastActive);
+    });
+
+    socket.on('trade_result', (data) => {
+        updateBalance(data.balance);
+
+        tradeHistoryData[data.trade._id] = data.trade;
+
+        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
+        if (!tradeRow) {
+            addTradeToHistory(data.trade);
+        } else {
+            updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
+        }
+
+        setTradeButtonsDisabled(false);
+
+        if (data.trade.result === 'WIN') {
+            showWinPopup(data.trade);
+        } else if (data.trade.result === 'LOSS') {
+            showLossPopup(data.trade);
+        }
+    });
+
+    socket.on('trade_cancelled', (data) => { 
+        updateBalance(data.balance); 
+        delete tradeHistoryData[data.tradeId];
+        const row = document.getElementById(`trade-${data.tradeId}`); 
+        if (row) row.remove(); 
+        showStatus('Trade cancelled.', 'gray'); 
+        setTradeButtonsDisabled(false); 
+    });
+
+    socket.on('error', (data) => { 
+        showStatus(`Error: ${data.message}`, 'red'); 
+        setTradeButtonsDisabled(false); 
+
+        const allCopyBtns = document.querySelectorAll('.copy-btn');
+        allCopyBtns.forEach(btn => {
+            btn.disabled = false;
+            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
         });
-        
-        console.log('📊 Chart updated successfully');
-    }
-
-    // Helper function to combine historical and current candle data
-    function getCompleteCandleData(candles) {
-        if (!candles || !Array.isArray(candles)) {
-            console.log('📊 No candles array provided');
-            return [];
-        }
-        
-        // Filter out invalid candles but be less aggressive
-        const validCandles = candles.filter(c => 
-            c && 
-            typeof c.open === 'number' && c.open > 0 &&
-            typeof c.close === 'number' && c.close > 0 &&
-            typeof c.high === 'number' && c.high > 0 &&
-            typeof c.low === 'number' && c.low > 0
-        );
-        
-        console.log('📊 Filtered', validCandles.length, 'valid candles from', candles.length, 'total');
-        return validCandles;
-    }
-
-    // ⭐ FIX: Initialize empty chart on page load
-    setTimeout(() => {
-        if (myChart) {
-            console.log('📊 Initializing empty chart on page load');
-            initChart([]);
-        }
-    }, 100);
+    });
 
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
@@ -1157,228 +1285,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     instantBtn.addEventListener("click", () => setTradeMode(false));
     scheduledBtn.addEventListener("click", () => setTradeMode(true));
-
-    // --- SOCKET.IO Data Event Handlers ---
-
-    socket.on('init', (data) => {
-        console.log('📡 Received init data:', data);
-        
-        // Initialize with empty market data structure
-        marketData = {};
-        
-        // Get default assets
-        const assets = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
-                       'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'MATICUSDT'];
-        
-        populateAssetSelector(assets);
-
-        const lastAsset = localStorage.getItem('lastSelectedAsset');
-        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
-        setActiveAsset(currentAsset);
-
-        if (data.balance !== undefined) {
-            updateBalance(data.balance);
-        }
-
-        tradeHistoryContainer.innerHTML = '';
-        fullTradeHistory = data.tradeHistory || [];
-        visibleHistoryCount = 0;
-        loadMoreTrades();
-
-        // Initialize chart with empty data - it will be populated by market_data events
-        initChart([]);
-    });
-
-    // ⭐ FIX: Updated market_data handler with better debugging
-    socket.on('market_data', (data) => {
-        console.log('📡 Received market_data:', {
-            asset: data.asset,
-            hasCandles: !!data.candles,
-            candlesLength: data.candles ? data.candles.length : 0,
-            hasCurrentCandle: !!data.currentCandle,
-            currentPrice: data.currentPrice,
-            currentAsset: currentAsset
-        });
-        
-        if (data.asset === currentAsset) {
-            // Update the market data structure
-            if (!marketData[data.asset]) {
-                marketData[data.asset] = { initialized: false };
-            }
-            marketData[data.asset].candles = data.candles || [];
-            marketData[data.asset].currentPrice = data.currentPrice;
-            marketData[data.asset].currentCandle = data.currentCandle;
-            
-            // Combine historical and current candle for chart
-            const completeCandles = [
-                ...(data.candles || []),
-                ...(data.currentCandle ? [data.currentCandle] : [])
-            ];
-            
-            console.log('📊 Complete candles for chart:', completeCandles.length);
-            
-            // If this is the first data for this asset, initialize chart
-            if (!marketData[data.asset].initialized) {
-                console.log('📊 Initializing chart with', completeCandles.length, 'candles');
-                initChart(completeCandles);
-                marketData[data.asset].initialized = true;
-            } else {
-                console.log('📊 Updating chart with', completeCandles.length, 'candles');
-                updateChart(completeCandles);
-            }
-            
-            // Update price display
-            if (data.currentPrice && data.currentPrice !== lastPrice) {
-                currentPriceElem.classList.remove('price-up', 'price-down');
-                currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
-                currentPriceElem.textContent = formatPrice(data.currentPrice, currentAsset);
-                lastPrice = data.currentPrice;
-            }
-        }
-    });
-
-    socket.on('market_data_initial', (initialData) => {
-        console.log('📡 Received initial market data:', initialData);
-        marketData = initialData;
-        
-        // Populate asset selector with available assets
-        const assets = Object.keys(initialData);
-        populateAssetSelector(assets);
-        
-        const lastAsset = localStorage.getItem('lastSelectedAsset');
-        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
-        setActiveAsset(currentAsset);
-        
-        updateUIForCurrentAsset();
-    });
-
-    socket.on('copy_trades_available', (data) => {
-        if (activeTab === 'copy-trade') {
-            availableCopyTrades = data.copyTrades || [];
-            renderCopyTrades();
-
-            if (data.message && data.message.includes('Minimum $100')) {
-                copyTradeStatus.textContent = data.message;
-                copyTradeStatus.classList.remove('text-red-400');
-                copyTradeStatus.classList.add('text-yellow-400');
-            } else {
-                copyTradeStatus.textContent = '';
-            }
-        }
-    });
-
-    socket.on('copy_trade_success', (data) => {
-        showCopySuccessPopup(data.asset || 'that trade'); 
-        socket.emit('request_copy_trades'); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
-        });
-    });
-
-    socket.on('copy_trade_executed', (data) => {
-        showCopyExecutedToast(data.trade);
-        updateBalance(data.balance);
-        addTradeToHistory(data.trade);
-    });
-
-    socket.on('price_update', (data) => {
-        Object.entries(data).forEach(([asset, assetData]) => {
-            assetPrices[asset] = assetData.price;
-            if (marketData[asset]) {
-                marketData[asset].currentPrice = assetData.price;
-            }
-        });
-
-        if (data[currentAsset]) {
-            const newPrice = data[currentAsset].price;
-            const countdown = data[currentAsset].countdown;
-
-            currentPriceElem.classList.remove('price-up', 'price-down');
-            if (lastPrice !== 0 && newPrice !== lastPrice) {
-                currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
-            }
-
-            currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
-
-            countdownSecondsElem.textContent = `${countdown}s`;
-            countdownSecondsElem.classList.remove('warning', 'critical');
-            if (countdown <= 10) {
-                countdownSecondsElem.classList.add('critical');
-            } else if (countdown <= 30) {
-                countdownSecondsElem.classList.add('warning');
-            }
-
-            lastPrice = newPrice;
-        }
-    });
-
-    // ... (rest of your existing socket event handlers remain the same)
-    socket.on('trade_pending', (data) => { 
-        updateBalance(data.balance); 
-        addTradeToHistory(data.trade);
-        showPendingPopup(data.trade);
-    });
-
-    socket.on('trade_scheduled', (data) => { 
-        updateBalance(data.balance); 
-        addTradeToHistory(data.trade);
-        showScheduledPopup(data.trade);
-    });
-
-    socket.on('trade_active', (data) => {
-        tradeHistoryData[data.trade._id] = data.trade;
-        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
-        if (!tradeRow) {
-            addTradeToHistory(data.trade);
-        } else {
-            updateTradeStatus(data.trade._id, 'Active');
-        }
-        showToast(toastActive);
-    });
-
-    socket.on('trade_result', (data) => {
-        updateBalance(data.balance);
-
-        tradeHistoryData[data.trade._id] = data.trade;
-
-        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
-        if (!tradeRow) {
-            addTradeToHistory(data.trade);
-        } else {
-            updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
-        }
-
-        setTradeButtonsDisabled(false);
-
-        if (data.trade.result === 'WIN') {
-            showWinPopup(data.trade);
-        } else if (data.trade.result === 'LOSS') {
-            showLossPopup(data.trade);
-        }
-    });
-
-    socket.on('trade_cancelled', (data) => { 
-        updateBalance(data.balance); 
-        delete tradeHistoryData[data.tradeId];
-        const row = document.getElementById(`trade-${data.tradeId}`); 
-        if (row) row.remove(); 
-        showStatus('Trade cancelled.', 'gray'); 
-        setTradeButtonsDisabled(false); 
-    });
-
-    socket.on('error', (data) => { 
-        showStatus(`Error: ${data.message}`, 'red'); 
-        setTradeButtonsDisabled(false); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
-        });
-    });
 
     // --- Core Trade & UI Functions ---
 
