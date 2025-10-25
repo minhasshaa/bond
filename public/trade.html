@@ -356,6 +356,13 @@
     cursor: not-allowed;
     }
 
+    /* ⭐ FIX: Chart container styling */
+    #candlestickContainer {
+        background: #1f2937;
+        border-radius: 0.5rem;
+        border: 1px solid #374151;
+    }
+
 </style>
 </head>
 
@@ -501,6 +508,7 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </main>
 </div>
 
+<!-- All your modals remain the same -->
 <div id="modal-overlay" class="modal-overlay hidden fixed inset-0 bg-black/70 items-center justify-center"></div>
 <div id="modal-pending" class="modal hidden fixed inset-0 items-center justify-center p-4">
     <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
@@ -689,7 +697,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noCopyTrades = document.getElementById('noCopyTrades');
     const copyTradeStatus = document.getElementById('copyTradeStatus');
 
-    // Charting
+    // Charting - Initialize immediately
     const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
     // Popup Elements
@@ -760,6 +768,143 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // --- Chart Functions (FIXED) ---
+    function initChart(candles) {
+        if (!myChart) return;
+        
+        // Use the complete candle data (both historical and current)
+        const allCandles = getCompleteCandleData(candles);
+        if (!allCandles || allCandles.length === 0) { 
+            // Show empty chart with message
+            myChart.setOption({
+                backgroundColor: 'transparent',
+                graphic: {
+                    type: 'text',
+                    left: 'center',
+                    top: 'middle',
+                    style: {
+                        text: 'Loading market data...',
+                        fontSize: 16,
+                        fill: '#9ca3af'
+                    }
+                }
+            }, true);
+            return; 
+        }
+        
+        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = allCandles.map(c => {
+            const date = new Date(c.timestamp);
+            return date.toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+        });
+        
+        const options = {
+            backgroundColor: 'transparent',
+            animation: false,
+            tooltip: { 
+                trigger: 'axis', 
+                axisPointer: { type: 'cross' },
+                formatter: function (params) {
+                    const data = params[0].data;
+                    return `
+                        Time: ${params[0].name}<br/>
+                        Open: $${data[0].toFixed(4)}<br/>
+                        Close: $${data[1].toFixed(4)}<br/>
+                        Low: $${data[2].toFixed(4)}<br/>
+                        High: $${data[3].toFixed(4)}
+                    `;
+                }
+            },
+            xAxis: { 
+                type: 'category', 
+                data: chartDates, 
+                axisLine: { lineStyle: { color: '#8392A5' } },
+                axisLabel: {
+                    rotate: 45,
+                    color: '#9ca3af'
+                }
+            },
+            yAxis: { 
+                scale: true, 
+                axisLine: { lineStyle: { color: '#8392A5' } }, 
+                splitLine: { lineStyle: { color: '#2a2e39' } },
+                axisLabel: {
+                    color: '#9ca3af'
+                }
+            },
+            grid: { left: '10%', right: '5%', bottom: '15%', top: '10%' },
+            dataZoom: [
+                { 
+                    type: 'inside', 
+                    startValue: Math.max(0, allCandles.length - 50), 
+                    endValue: allCandles.length - 1
+                }
+            ],
+            series: [
+                { 
+                    type: 'candlestick', 
+                    data: chartData, 
+                    itemStyle: { 
+                        color: '#22c55e', 
+                        color0: '#ef4444', 
+                        borderColor: '#22c55e', 
+                        borderColor0: '#ef4444',
+                        borderWidth: 1
+                    } 
+                }
+            ]
+        };
+        
+        myChart.setOption(options, true);
+    }
+
+    function updateChart(candles) {
+        if (!myChart) return;
+        
+        const allCandles = getCompleteCandleData(candles);
+        if (!allCandles || allCandles.length === 0) { 
+            return; 
+        }
+
+        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = allCandles.map(c => {
+            const date = new Date(c.timestamp);
+            return date.toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+        });
+        
+        myChart.setOption({
+            xAxis: { data: chartDates },
+            series: [{ data: chartData }]
+        });
+    }
+
+    // Helper function to combine historical and current candle data
+    function getCompleteCandleData(candles) {
+        if (!candles || !Array.isArray(candles)) return [];
+        
+        // Filter out invalid candles but be less aggressive
+        return candles.filter(c => 
+            c && 
+            typeof c.open === 'number' && c.open > 0 &&
+            typeof c.close === 'number' && c.close > 0 &&
+            typeof c.high === 'number' && c.high > 0 &&
+            typeof c.low === 'number' && c.low > 0
+        );
+    }
+
+    // ⭐ FIX: Initialize empty chart on page load
+    setTimeout(() => {
+        if (myChart) {
+            initChart([]);
+        }
+    }, 100);
+
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
         if (e.target.tagName !== 'BUTTON') return;
@@ -790,108 +935,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         const decimals = decimalMap[asset] || 2;
         return price.toFixed(decimals);
-    }
-
-    // ⭐ FIX: Updated chart functions
-    function initChart(candles) {
-        // Use the complete candle data (both historical and current)
-        const allCandles = getCompleteCandleData(candles);
-        if (!allCandles || allCandles.length === 0) { 
-            myChart.clear(); 
-            return; 
-        }
-        
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        }));
-        
-        const options = {
-            backgroundColor: 'transparent',
-            tooltip: { 
-                trigger: 'axis', 
-                axisPointer: { type: 'cross' },
-                formatter: function (params) {
-                    const data = params[0].data;
-                    return `
-                        Time: ${params[0].name}<br/>
-                        Open: $${data[0].toFixed(4)}<br/>
-                        Close: $${data[1].toFixed(4)}<br/>
-                        Low: $${data[2].toFixed(4)}<br/>
-                        High: $${data[3].toFixed(4)}
-                    `;
-                }
-            },
-            xAxis: { 
-                type: 'category', 
-                data: chartDates, 
-                axisLine: { lineStyle: { color: '#8392A5' } },
-                axisLabel: {
-                    rotate: 45
-                }
-            },
-            yAxis: { 
-                scale: true, 
-                axisLine: { lineStyle: { color: '#8392A5' } }, 
-                splitLine: { lineStyle: { color: '#2a2e39' } } 
-            },
-            grid: { left: '10%', right: '5%', bottom: '15%', top: '10%' },
-            dataZoom: [
-                { 
-                    type: 'inside', 
-                    startValue: Math.max(0, allCandles.length - 50), 
-                    endValue: allCandles.length - 1
-                }
-            ],
-            series: [
-                { 
-                    type: 'candlestick', 
-                    data: chartData, 
-                    itemStyle: { 
-                        color: '#22c55e', 
-                        color0: '#ef4444', 
-                        borderColor: '#22c55e', 
-                        borderColor0: '#ef4444',
-                        borderWidth: 1
-                    } 
-                }
-            ]
-        };
-        
-        myChart.setOption(options, true);
-    }
-
-    function updateChart(candles) {
-        const allCandles = getCompleteCandleData(candles);
-        if (!allCandles || allCandles.length === 0) { 
-            return; 
-        }
-
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        }));
-        
-        myChart.setOption({
-            xAxis: { data: chartDates },
-            series: [{ data: chartData }]
-        }, true);
-    }
-
-    // ⭐ NEW: Helper function to combine historical and current candle data
-    function getCompleteCandleData(candles) {
-        if (!candles || !Array.isArray(candles)) return [];
-        
-        // Filter out invalid candles but be less aggressive
-        return candles.filter(c => 
-            c && 
-            typeof c.open === 'number' && c.open > 0 &&
-            typeof c.close === 'number' && c.close > 0 &&
-            typeof c.high === 'number' && c.high > 0 &&
-            typeof c.low === 'number' && c.low > 0
-        );
     }
 
     // --- Copy Trading Functions ---
@@ -1103,6 +1146,43 @@ document.addEventListener('DOMContentLoaded', () => {
         initChart([]);
     });
 
+    // ⭐ FIX: Updated market_data handler to ensure chart updates
+    socket.on('market_data', (data) => {
+        console.log('Received market_data:', data);
+        
+        if (data.asset === currentAsset) {
+            // Update the market data structure
+            if (!marketData[data.asset]) {
+                marketData[data.asset] = {};
+            }
+            marketData[data.asset].candles = data.candles || [];
+            marketData[data.asset].currentPrice = data.currentPrice;
+            marketData[data.asset].currentCandle = data.currentCandle;
+            
+            // Combine historical and current candle for chart
+            const completeCandles = [
+                ...(data.candles || []),
+                ...(data.currentCandle ? [data.currentCandle] : [])
+            ];
+            
+            // If this is the first data for this asset, initialize chart
+            if (!marketData[data.asset].initialized) {
+                initChart(completeCandles);
+                marketData[data.asset].initialized = true;
+            } else {
+                updateChart(completeCandles);
+            }
+            
+            // Update price display
+            if (data.currentPrice && data.currentPrice !== lastPrice) {
+                currentPriceElem.classList.remove('price-up', 'price-down');
+                currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
+                currentPriceElem.textContent = formatPrice(data.currentPrice, currentAsset);
+                lastPrice = data.currentPrice;
+            }
+        }
+    });
+
     socket.on('market_data_initial', (initialData) => {
         console.log('Received initial market data:', initialData);
         marketData = initialData;
@@ -1181,36 +1261,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ⭐ FIX: Updated market_data handler
-    socket.on('market_data', (data) => {
-        console.log('Received market_data:', data);
-        
-        if (data.asset === currentAsset) {
-            // Update the market data structure
-            if (!marketData[data.asset]) {
-                marketData[data.asset] = {};
-            }
-            marketData[data.asset].candles = data.candles || [];
-            marketData[data.asset].currentPrice = data.currentPrice;
-            
-            // Combine historical and current candle for chart
-            const completeCandles = [
-                ...(data.candles || []),
-                ...(data.currentCandle ? [data.currentCandle] : [])
-            ];
-            
-            updateChart(completeCandles);
-            
-            // Update price display
-            if (data.currentPrice && data.currentPrice !== lastPrice) {
-                currentPriceElem.classList.remove('price-up', 'price-down');
-                currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
-                currentPriceElem.textContent = formatPrice(data.currentPrice, currentAsset);
-                lastPrice = data.currentPrice;
-            }
-        }
-    });
-
+    // ... (rest of your existing socket event handlers remain the same)
     socket.on('trade_pending', (data) => { 
         updateBalance(data.balance); 
         addTradeToHistory(data.trade);
@@ -1423,7 +1474,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateUIForCurrentAsset() {
-        if (marketData[currentAsset]) {
+        if (marketData[currentAsset] && marketData[currentAsset].candles) {
             // Get the complete candle data including current forming candle
             const completeCandles = [
                 ...(marketData[currentAsset].candles || []),
@@ -1435,14 +1486,22 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            myChart.clear();
+            // Show empty chart while waiting for data
+            initChart([]);
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
     }
 
+    // ⭐ FIX: Add resize handler and ensure chart is properly initialized
     window.addEventListener('resize', () => {
-        if (myChart) myChart.resize();
+        if (myChart) {
+            try {
+                myChart.resize();
+            } catch (e) {
+                console.log('Chart resize error:', e);
+            }
+        }
     });
 
     // --- Popup & Modal Functions ---
