@@ -202,10 +202,10 @@ io.on('connection', (socket) => {
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     
-    // FIX 1: Use futuresAllTickers for initial 24h change data
+    // FIX 1: Use binance.futuresTicker() as the final fallback for 24h data
     let allTickers = [];
     try {
-        allTickers = await binance.futuresAllTickers();
+        allTickers = await binance.futuresTicker(); // Using simple futuresTicker() method
     } catch (e) {
         console.error("CRITICAL ERROR: Failed to fetch initial 24hr Tickers. Dashboard change percentage may be 0.", e.message);
     }
@@ -225,7 +225,9 @@ async function initializeMarketData() {
                     close: parseFloat(k[4]),
                 }));
             } else {
-                 throw new Error("Binance returned non-array data for candles, connection failed.");
+                 // Log the actual response for debugging if it's not an array
+                 console.error(`❌ Non-array response for ${pair}:`, klines);
+                 throw new Error("Binance returned non-array data for candles, connection failed or key is blocked.");
             }
             
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
@@ -235,6 +237,7 @@ async function initializeMarketData() {
             // FIX 3: Set initial 24h change from Ticker endpoint
             const tickerData = allTickers.find(t => t.symbol === pair);
             if (tickerData) {
+                // The futuresTicker() response format uses 'priceChangePercent'
                 marketData[pair].priceChange24h = parseFloat(tickerData.priceChangePercent); 
             }
 
@@ -246,10 +249,10 @@ async function initializeMarketData() {
 
 async function updateMarketData() {
     try {
-        // FIX 4: Fetch 24hr ticker using the correct function name in the continuous update
+        // FIX 4: Use futuresTicker() for continuous 24h data updates
         const [prices, allTickers] = await Promise.all([
             binance.futuresPrices(),
-            binance.futuresAllTickers() 
+            binance.futuresTicker() // <--- FINAL CORRECTED FUNCTION NAME
         ]);
 
         const now = new Date();
