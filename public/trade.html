@@ -639,7 +639,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     document.getElementById(`nav-${currentPage}`).classList.add('active');
 
-    const socket = io({ auth: { token: localStorage.getItem('authToken') } });
+    // ⭐ FIX 1: Add robust Socket.IO config (from dashboard.html fix)
+    const socket = io({ 
+        auth: { token: localStorage.getItem('authToken') },
+        pingInterval: 10000, 
+        pingTimeout: 15000, 
+        reconnectionDelay: 5000, 
+        reconnectionDelayMax: 10000 
+    });
 
     // --- DOM Elements ---
     const balanceElem = document.getElementById('balance-display');
@@ -993,8 +1000,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    socket.on('market_data', (data) => { 
-        if (data.asset === currentAsset) updateChart(data.candles); 
+    // ⭐ FIX 2: Apply filter to remove corrupted data before charting
+    socket.on('market_data', (data) => {
+        if (data.asset === currentAsset) {
+            
+            // CRITICAL FILTER: Remove any candles where the prices are 0,
+            // which are the corrupted candles from the failed historical load.
+            const validCandles = data.candles.filter(c => 
+                c.open > 0 && c.close > 0 && c.high > 0 && c.low > 0
+            );
+
+            // Now update the chart ONLY with the clean data
+            updateChart(validCandles);
+        } 
     });
 
     socket.on('trade_pending', (data) => { 
@@ -1214,25 +1232,38 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Charting Functions ---
 
     function initChart(candles) {
-        if (!candles || candles.length === 0) { myChart.clear(); return; }
-        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        // ⭐ FIX 3: Ensure initChart also uses filtered candles
+        const filteredCandles = candles.filter(c => c.open > 0);
+        if (!filteredCandles || filteredCandles.length === 0) { myChart.clear(); return; }
+        
+        const chartData = filteredCandles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = filteredCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        
         const options = {
             backgroundColor: 'transparent',
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
             xAxis: { type: 'category', data: chartDates, axisLine: { lineStyle: { color: '#8392A5' } } },
             yAxis: { scale: true, axisLine: { lineStyle: { color: '#8392A5' } }, splitLine: { lineStyle: { color: '#2a2e39' } } },
             grid: { left: '15%', right: '5%', bottom: '15%' },
-            dataZoom: [{ type: 'inside', startValue: Math.max(0, chartDates.length - 50), endValue: chartDates.length - 1, zoomOnMouseWheel: 'shift' }],
+            // Adjust startValue for better initial view (show last 50 candles)
+            dataZoom: [{ type: 'inside', startValue: Math.max(0, filteredCandles.length - 50), endValue: filteredCandles.length - 1, zoomOnMouseWheel: 'shift' }], 
             series: [{ type: 'candlestick', data: chartData, itemStyle: { color: '#22c55e', color0: '#ef4444', borderColor: '#22c55e', borderColor0: '#ef4444' } }]
         };
         myChart.setOption(options, { notMerge: true });
     }
 
     function updateChart(candles) {
-        if (!candles || candles.length === 0) return;
-        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        // ⭐ FIX 4: Ensure updateChart also uses filtered candles
+        const filteredCandles = candles.filter(c => c.open > 0);
+        if (!filteredCandles || filteredCandles.length === 0) { 
+            // If no valid data, clear the spike
+            if (myChart) myChart.clear();
+            return; 
+        }
+
+        const chartData = filteredCandles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = filteredCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        
         myChart.setOption({
             xAxis: { data: chartDates },
             series: [{ data: chartData }]
@@ -1241,7 +1272,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset]) {
-            initChart(marketData[currentAsset].candles);
+            // Pass the original, unfiltered array. The charting functions will filter.
+            initChart(marketData[currentAsset].candles); 
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
@@ -1256,7 +1288,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (myChart) myChart.resize();
     });
 
-    // --- Popup & Modal Functions ---
+    // --- Popup & Modal Functions (UNCHANGED) ---
 
     function showModal(modal) {
         hideAllModals(); 
