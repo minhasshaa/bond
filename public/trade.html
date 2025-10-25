@@ -372,6 +372,11 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
         </div>
         <div>
             <p class="text-lg">Balance: <span id="balance-display" class="font-bold text-green-400">$0.00</span></p>
+            <!-- ⭐ FIX: Connection status indicator -->
+            <div id="connection-status" class="text-xs mt-1">
+                <span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-1"></span>
+                <span class="text-gray-400">Connecting...</span>
+            </div>
         </div>
     </header>
 
@@ -639,9 +644,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     document.getElementById(`nav-${currentPage}`).classList.add('active');
 
-    // ⭐ FIX 1: Add robust Socket.IO config (from dashboard.html fix)
+    // ⭐ FIX: Improved Socket.IO connection with auth fix
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+        window.location.href = '/login.html';
+    }
+
     const socket = io({ 
-        auth: { token: localStorage.getItem('authToken') },
+        auth: { 
+            token: token
+        },
+        transports: ['websocket', 'polling'],
         pingInterval: 10000, 
         pingTimeout: 15000, 
         reconnectionDelay: 5000, 
@@ -679,7 +692,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Charting
     const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
-
     // Popup Elements
     const overlay = document.getElementById('modal-overlay');
     const modalPending = document.getElementById('modal-pending');
@@ -704,6 +716,49 @@ document.addEventListener('DOMContentLoaded', () => {
     let tradeHistoryData = {};
     let assetPrices = {};
     let activeTab = 'trade';
+
+    // --- Connection Status Functions ---
+    function updateConnectionStatus(status, message) {
+        const statusElem = document.getElementById('connection-status');
+        if (!statusElem) return;
+        
+        const dot = statusElem.querySelector('span:first-child');
+        const text = statusElem.querySelector('span:last-child');
+        
+        dot.className = `inline-block w-2 h-2 rounded-full mr-1 ${
+            status === 'connected' ? 'bg-green-500' : 
+            status === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
+        }`;
+        text.textContent = message;
+        text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
+                         status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
+    }
+
+    // --- Socket.IO Event Handlers with Connection Status ---
+    socket.on('connect', () => {
+        console.log('✅ Connected to server');
+        updateConnectionStatus('connected', 'Connected');
+        showStatus('Connected to server', 'green');
+    });
+
+    socket.on('disconnect', (reason) => {
+        console.log('❌ Disconnected:', reason);
+        updateConnectionStatus('disconnected', 'Disconnected');
+        showStatus('Disconnected from server', 'red');
+    });
+
+    socket.on('connect_error', (error) => {
+        console.log('❌ Connection error:', error.message);
+        updateConnectionStatus('disconnected', 'Connection failed');
+        
+        // If auth error, redirect to login
+        if (error.message.includes('auth') || error.message.includes('Authentication') || error.message.includes('token')) {
+            showStatus('Authentication failed - redirecting to login', 'red');
+            setTimeout(() => window.location.href = '/login.html', 2000);
+        } else {
+            showStatus('Connection failed', 'red');
+        }
+    });
 
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
@@ -952,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Asset Dropdown Logic (No Change) ---
+    // --- Asset Dropdown Logic ---
     assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
 
     window.onclick = (event) => {
@@ -982,7 +1037,7 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedAssetSpan.textContent = asset;
     }
 
-    // --- Time Scroller & Trade Mode (No Change) ---
+    // --- Time Scroller & Trade Mode ---
     function populateTimeSelector() {
         const now = new Date();
         timeScroller.innerHTML = '';
@@ -1017,24 +1072,49 @@ document.addEventListener('DOMContentLoaded', () => {
     instantBtn.addEventListener("click", () => setTradeMode(false));
     scheduledBtn.addEventListener("click", () => setTradeMode(true));
 
-    // --- SOCKET.IO Event Handlers ---
+    // --- SOCKET.IO Data Event Handlers ---
 
     socket.on('init', (data) => {
-        marketData = data.marketData;
-        const assets = Object.keys(marketData);
+        console.log('Received init data:', data);
+        
+        // Initialize with empty market data structure
+        marketData = {};
+        
+        // Get default assets
+        const assets = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
+                       'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'MATICUSDT'];
+        
         populateAssetSelector(assets);
 
         const lastAsset = localStorage.getItem('lastSelectedAsset');
         currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
         setActiveAsset(currentAsset);
 
-        updateBalance(data.balance);
+        if (data.balance !== undefined) {
+            updateBalance(data.balance);
+        }
 
         tradeHistoryContainer.innerHTML = '';
-        fullTradeHistory = data.tradeHistory; 
+        fullTradeHistory = data.tradeHistory || [];
         visibleHistoryCount = 0;
-        loadMoreTrades(); 
+        loadMoreTrades();
 
+        // Initialize chart with empty data - it will be populated by market_data events
+        initChart([]);
+    });
+
+    socket.on('market_data_initial', (initialData) => {
+        console.log('Received initial market data:', initialData);
+        marketData = initialData;
+        
+        // Populate asset selector with available assets
+        const assets = Object.keys(initialData);
+        populateAssetSelector(assets);
+        
+        const lastAsset = localStorage.getItem('lastSelectedAsset');
+        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
+        setActiveAsset(currentAsset);
+        
         updateUIForCurrentAsset();
     });
 
@@ -1069,7 +1149,6 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBalance(data.balance);
         addTradeToHistory(data.trade);
     });
-
 
     socket.on('price_update', (data) => {
         Object.entries(data).forEach(([asset, assetData]) => {
@@ -1196,8 +1275,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
-
     // --- Core Trade & UI Functions ---
 
     const requestTrade = (direction) => {
@@ -1300,7 +1377,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     loadMoreBtn.addEventListener('click', loadMoreTrades);
 
-
     function addTradeToHistory(trade) {
         const tradeElement = createTradeHistoryRow(trade);
         tradeHistoryContainer.prepend(tradeElement); 
@@ -1369,7 +1445,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (myChart) myChart.resize();
     });
 
-    // --- Popup & Modal Functions (UNCHANGED) ---
+    // --- Popup & Modal Functions ---
 
     function showModal(modal) {
         hideAllModals(); 
@@ -1450,7 +1526,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('copy-executed-text').textContent = `Copy trade for ${trade.asset || trade.tradingPair} is now active!`;
         showToast(toastCopyExecuted);
     }
-
 
     function showTradeDetails(tradeId) {
         const trade = tradeHistoryData[tradeId];
