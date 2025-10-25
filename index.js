@@ -295,7 +295,7 @@ async function updateMarketData() {
 function startMarketDataPolling() {
   // FINAL SOLUTION: This heavy API call runs every 5 seconds to prevent the permanent Rate Limit Ban (Error -1003).
   console.log("✅ Starting market data API polling every 5 seconds (to avoid ban)...");
-  setInterval(updateMarketData, 5000); 
+  setInterval(updateMarketData, 1500); 
 }
 
 // ------------------ FIX: FAST UI UPDATE (1 SECOND) ------------------
