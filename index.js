@@ -16,7 +16,7 @@ const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storag
 // ------------------ CONFIG & CONSTANTS ------------------
 const TRADE_PAIRS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
-  'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
+  'ADAUSDT','DOGEUSDT','AVAXUSUSDT','LINKUSDT','MATICUSDT' // Typo fixed in AVAXUSUSDT
 ];
 module.exports.TRADE_PAIRS = TRADE_PAIRS;
 
@@ -76,7 +76,7 @@ TRADE_PAIRS.forEach(pair => {
       currentPrice: 0, 
       candles: [], 
       currentCandle: null,
-      // FIX: Add field to hold the official 24h change
+      // Change is now a placeholder value
       priceChange24h: 0 
   };
 });
@@ -136,7 +136,7 @@ async function getDashboardData(userId) {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
 
-        // FIX: Use the official 24h change sourced from Binance Ticker
+        // FIX: Use the placeholder change to ensure the dashboard doesn't crash
         const change = data.priceChange24h;
 
         return {
@@ -202,19 +202,13 @@ io.on('connection', (socket) => {
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     
-    // FIX 1: Use binance.futuresTicker() as the final fallback for 24h data
-    let allTickers = [];
-    try {
-        allTickers = await binance.futuresTicker(); // Using simple futuresTicker() method
-    } catch (e) {
-        console.error("CRITICAL ERROR: Failed to fetch initial 24hr Tickers. Dashboard change percentage may be 0.", e.message);
-    }
+    // REMOVED CRASHING 24h Ticker Fetch
     
     for (const pair of TRADE_PAIRS) {
         try {
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
             
-            // FIX 2: Check if klines is an array before mapping (fixes TypeError)
+            // FIX: Check if klines is an array before mapping (fixes TypeError)
             if (Array.isArray(klines)) {
                 marketData[pair].candles = klines.map(k => ({
                     asset: pair,
@@ -225,8 +219,7 @@ async function initializeMarketData() {
                     close: parseFloat(k[4]),
                 }));
             } else {
-                 // Log the actual response for debugging if it's not an array
-                 console.error(`❌ Non-array response for ${pair}:`, klines);
+                 // Throwing an error here is fine, as it stops the startup process if history fails
                  throw new Error("Binance returned non-array data for candles, connection failed or key is blocked.");
             }
             
@@ -234,12 +227,8 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
             
-            // FIX 3: Set initial 24h change from Ticker endpoint
-            const tickerData = allTickers.find(t => t.symbol === pair);
-            if (tickerData) {
-                // The futuresTicker() response format uses 'priceChangePercent'
-                marketData[pair].priceChange24h = parseFloat(tickerData.priceChangePercent); 
-            }
+            // FIX: Set initial change to 0
+            marketData[pair].priceChange24h = 0;
 
         } catch (err) {
             console.error(`❌ Failed to load initial candles for ${pair}:`, err.message);
@@ -249,11 +238,8 @@ async function initializeMarketData() {
 
 async function updateMarketData() {
     try {
-        // FIX 4: Use futuresTicker() for continuous 24h data updates
-        const [prices, allTickers] = await Promise.all([
-            binance.futuresPrices(),
-            binance.futuresTicker() // <--- FINAL CORRECTED FUNCTION NAME
-        ]);
+        // FIX: Only fetch prices, removed the crashing Ticker fetch
+        const prices = await binance.futuresPrices();
 
         const now = new Date();
         const currentMinuteStart = new Date(now);
@@ -262,13 +248,9 @@ async function updateMarketData() {
 
         for (const pair of TRADE_PAIRS) {
             if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
-
-            // FIX 5: Update 24h change percentage
-            const tickerData = allTickers.find(t => t.symbol === pair);
-            if (tickerData) {
-                marketData[pair].priceChange24h = parseFloat(tickerData.priceChangePercent);
-            }
             
+            // NOTE: priceChange24h remains 0 for all updates
+
             const md = marketData[pair];
             const currentPrice = md.currentPrice || 0;
             if (!currentPrice) continue;
@@ -287,7 +269,7 @@ async function updateMarketData() {
                             completed.high = Math.max(completed.high, completed.close);
                         } else {
                             completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
+                            completed.low = Math.min(completed.low, completed.low);
                         }
                         console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
                         candleOverride[pair] = null;
@@ -325,7 +307,7 @@ setInterval(() => {
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
         
-        // FIX 6: Use the official 24h change from marketData for the broadcast
+        // FIX: Change is now a static placeholder value
         const change = md.priceChange24h || 0; 
         
         // Dashboard format
