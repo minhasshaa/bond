@@ -188,7 +188,7 @@ async function settleTradesWrapper(io, User, Trade, pair, exitPrice) {
 // --- END NEW MONITORING LOGIC ---
 
 
-async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
+async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride) {
     globalMarketData = marketData; // Set global reference
 
     io.engine.marketData = marketData; 
@@ -218,6 +218,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             if (!user) return socket.disconnect();
             socket.join(user._id.toString());
 
+            // FIX: Removed duplicate market_data emissions that conflict with main server
             const clientMarketData = {};
             for (const p of TRADE_PAIRS) {
                 clientMarketData[p] = {
@@ -227,11 +228,12 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             }
 
             const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
-            socket.emit("init", { marketData: clientMarketData, balance: user.balance, tradeHistory: userTrades });
-
-            for (const p of TRADE_PAIRS) {
-                socket.emit("market_data", { asset: p, candles: clientMarketData[p].candles, currentPrice: clientMarketData[p].currentPrice });
-            }
+            
+            // FIX: Only send trade-related data, not market_data
+            socket.emit("init", { 
+                balance: user.balance, 
+                tradeHistory: userTrades 
+            });
 
             socket.on("trade", async (data) => {
                 try {
