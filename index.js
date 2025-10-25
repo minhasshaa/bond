@@ -170,7 +170,7 @@ async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     for (const pair of TRADE_PAIRS) {
         try {
-            const klines = await binance.futancesCandles(pair, '1m', { limit: 200 });
+            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
             
             if (!Array.isArray(klines) || klines.length < 5) { 
                  console.warn(`⚠️ Historical load failed for ${pair}. Starting clean.`);
@@ -358,213 +358,6 @@ setInterval(() => {
     }
 }, 1000);
 
-// ------------------ TRADE MODULE HANDLING ------------------
-function initializeTradeHandlers() {
-    console.log("🔄 Initializing trade handlers...");
-    
-    // Trade event handlers
-    io.on('connection', (socket) => {
-        // Existing dashboard handlers above...
-        
-        // Trade handlers
-        socket.on('trade', async (tradeData) => {
-            try {
-                console.log('📈 Trade request:', tradeData);
-                
-                // Create trade record
-                const trade = new Trade({
-                    userId: socket.decoded.id,
-                    asset: tradeData.asset,
-                    direction: tradeData.direction,
-                    amount: tradeData.amount,
-                    openingPrice: tradeData.openingPrice,
-                    status: 'pending'
-                });
-                
-                await trade.save();
-                
-                // Update user balance (deduct trade amount)
-                await User.findByIdAndUpdate(socket.decoded.id, {
-                    $inc: { balance: -tradeData.amount }
-                });
-                
-                const user = await User.findById(socket.decoded.id);
-                
-                socket.emit('trade_pending', { trade, balance: user.balance });
-                
-                // Simulate trade processing
-                setTimeout(() => {
-                    trade.status = 'active';
-                    trade.save();
-                    
-                    socket.emit('trade_active', { trade });
-                    
-                    // Simulate trade result after 1 minute
-                    setTimeout(async () => {
-                        const currentPrice = marketData[tradeData.asset]?.currentPrice || tradeData.openingPrice;
-                        const isWin = tradeData.direction === 'UP' ? 
-                            currentPrice > tradeData.openingPrice : 
-                            currentPrice < tradeData.openingPrice;
-                        
-                        trade.status = 'closed';
-                        trade.result = isWin ? 'WIN' : 'LOSS';
-                        trade.closingPrice = currentPrice;
-                        trade.pnl = isWin ? tradeData.amount * 0.8 : -tradeData.amount;
-                        trade.closeTime = new Date();
-                        
-                        await trade.save();
-                        
-                        // Update user balance with P&L
-                        await User.findByIdAndUpdate(socket.decoded.id, {
-                            $inc: { balance: trade.pnl + tradeData.amount } // Return original amount + P&L
-                        });
-                        
-                        const updatedUser = await User.findById(socket.decoded.id);
-                        
-                        socket.emit('trade_result', { 
-                            trade, 
-                            balance: updatedUser.balance 
-                        });
-                        
-                    }, 60000); // 1 minute
-                    
-                }, 2000); // 2 seconds for "pending" state
-                
-            } catch (error) {
-                console.error('❌ Trade error:', error);
-                socket.emit('error', { message: 'Trade failed: ' + error.message });
-            }
-        });
-
-        socket.on('schedule_trade', async (tradeData) => {
-            try {
-                console.log('⏰ Scheduled trade:', tradeData);
-                
-                const scheduledTime = new Date();
-                const [hours, minutes] = tradeData.scheduledTime.split(':');
-                scheduledTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                
-                // Deduct amount immediately for scheduled trades
-                await User.findByIdAndUpdate(socket.decoded.id, {
-                    $inc: { balance: -tradeData.amount }
-                });
-                
-                const trade = new Trade({
-                    userId: socket.decoded.id,
-                    asset: tradeData.asset,
-                    direction: tradeData.direction,
-                    amount: tradeData.amount,
-                    openingPrice: tradeData.openingPrice,
-                    status: 'scheduled',
-                    scheduledTime: scheduledTime
-                });
-                
-                await trade.save();
-                
-                const user = await User.findById(socket.decoded.id);
-                
-                socket.emit('trade_scheduled', { trade, balance: user.balance });
-                
-                // Schedule the trade execution
-                const timeUntilExecution = scheduledTime.getTime() - Date.now();
-                if (timeUntilExecution > 0) {
-                    setTimeout(async () => {
-                        try {
-                            trade.status = 'active';
-                            await trade.save();
-                            
-                            socket.emit('trade_active', { trade });
-                            
-                            // Simulate trade result after 1 minute
-                            setTimeout(async () => {
-                                const currentPrice = marketData[tradeData.asset]?.currentPrice || tradeData.openingPrice;
-                                const isWin = tradeData.direction === 'UP' ? 
-                                    currentPrice > tradeData.openingPrice : 
-                                    currentPrice < tradeData.openingPrice;
-                                
-                                trade.status = 'closed';
-                                trade.result = isWin ? 'WIN' : 'LOSS';
-                                trade.closingPrice = currentPrice;
-                                trade.pnl = isWin ? tradeData.amount * 0.8 : -tradeData.amount;
-                                trade.closeTime = new Date();
-                                
-                                await trade.save();
-                                
-                                // Update user balance with P&L
-                                await User.findByIdAndUpdate(socket.decoded.id, {
-                                    $inc: { balance: trade.pnl + tradeData.amount }
-                                });
-                                
-                                const updatedUser = await User.findById(socket.decoded.id);
-                                
-                                socket.emit('trade_result', { 
-                                    trade, 
-                                    balance: updatedUser.balance 
-                                });
-                                
-                            }, 60000);
-                            
-                        } catch (error) {
-                            console.error('❌ Scheduled trade execution error:', error);
-                            // Refund user if scheduled trade fails
-                            await User.findByIdAndUpdate(socket.decoded.id, {
-                                $inc: { balance: tradeData.amount }
-                            });
-                            socket.emit('error', { message: 'Scheduled trade execution failed' });
-                        }
-                    }, timeUntilExecution);
-                }
-                
-            } catch (error) {
-                console.error('❌ Scheduled trade error:', error);
-                socket.emit('error', { message: 'Scheduled trade failed' });
-            }
-        });
-
-        socket.on('cancel_trade', async (data) => {
-            try {
-                const trade = await Trade.findById(data.tradeId);
-                if (trade && trade.userId.toString() === socket.decoded.id) {
-                    // Refund the amount if trade was pending/scheduled
-                    if (trade.status === 'pending' || trade.status === 'scheduled') {
-                        await User.findByIdAndUpdate(socket.decoded.id, {
-                            $inc: { balance: trade.amount }
-                        });
-                    }
-                    
-                    trade.status = 'cancelled';
-                    await trade.save();
-                    
-                    const user = await User.findById(socket.decoded.id);
-                    socket.emit('trade_cancelled', { tradeId: data.tradeId, balance: user.balance });
-                }
-            } catch (error) {
-                console.error('❌ Cancel trade error:', error);
-                socket.emit('error', { message: 'Cancel trade failed' });
-            }
-        });
-
-        socket.on('copy_trade', async (data) => {
-            try {
-                console.log('📋 Copy trade request:', data);
-                // Implement copy trade logic here
-                socket.emit('copy_trade_success', { asset: data.asset });
-            } catch (error) {
-                console.error('❌ Copy trade error:', error);
-                socket.emit('error', { message: 'Copy trade failed' });
-            }
-        });
-
-        socket.on('request_copy_trades', () => {
-            // Send available copy trades
-            socket.emit('copy_trades_available', {
-                copyTrades: [],
-                message: 'No copy trades available'
-            });
-        });
-    });
-}
-
 // ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI, { 
     useNewUrlParser: true, 
@@ -619,9 +412,17 @@ db.once("open", async () => {
 
   await initializeMarketData();
   startMarketDataStream(); 
-  
-  // ⭐ FIXED: Initialize trade handlers directly instead of importing external module
-  initializeTradeHandlers();
+
+  const tradeModule = require("./trade");
+  if (typeof tradeModule.initialize === "function") {
+    const Trade = mongoose.model('Trade');
+    const User = mongoose.model('User');
+    tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
+  } else if (typeof tradeModule === "function") {
+    tradeModule(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
+  } else {
+    console.error("Trade module export not recognized.");
+  }
 });
 
 // ------------------ CATCH-ALL / STATIC SERVE ------------------
@@ -636,18 +437,4 @@ app.get('*', (req, res) => {
 
 // ------------------ START SERVER ------------------
 const PORT = process.env.PORT || 5000;
-
-// ⭐ FIXED: Port conflict handling
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server is running and listening on port ${PORT}`);
-}).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.error(`❌ Port ${PORT} is already in use. Trying port ${Number(PORT) + 1}...`);
-        server.listen(Number(PORT) + 1, '0.0.0.0', () => {
-            console.log(`✅ Server is running on alternative port ${Number(PORT) + 1}`);
-        });
-    } else {
-        console.error('❌ Server error:', err);
-        process.exit(1);
-    }
-});
+server.listen(PORT, () => console.log(`✅ Server is running and listening on port ${PORT}`));
