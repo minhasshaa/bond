@@ -193,16 +193,35 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverri
 
     io.engine.marketData = marketData; 
 
+    // ⭐ FIX: Updated Socket.IO authentication to match HTTP middleware
     io.use((socket, next) => {
         try {
-            const token = socket.handshake.auth?.token;
-            if (!token) return next(new Error("Authentication error"));
+            // Check both locations where token might be
+            let token = socket.handshake.auth?.token;
+            
+            // If not in auth, check headers (like HTTP middleware does)
+            if (!token) {
+                const authHeader = socket.handshake.headers.authorization;
+                if (authHeader && authHeader.startsWith('Bearer ')) {
+                    token = authHeader.substring(7);
+                }
+            }
+            
+            if (!token) {
+                console.log('Socket auth: No token provided');
+                return next(new Error("Authentication error: No token"));
+            }
+            
             jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-                if (err) return next(new Error("Authentication error"));
+                if (err) {
+                    console.log('Socket auth: Invalid token', err.message);
+                    return next(new Error("Authentication error: Invalid token"));
+                }
                 socket.decoded = decoded;
                 next();
             });
         } catch (err) {
+            console.log('Socket auth: Error', err.message);
             return next(new Error("Authentication error"));
         }
     });
@@ -219,14 +238,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverri
             socket.join(user._id.toString());
 
             // FIX: Removed duplicate market_data emissions that conflict with main server
-            const clientMarketData = {};
-            for (const p of TRADE_PAIRS) {
-                clientMarketData[p] = {
-                    currentPrice: globalMarketData[p]?.currentPrice || 0,
-                    candles: [...(globalMarketData[p]?.candles || []), ...(globalMarketData[p]?.currentCandle ? [globalMarketData[p].currentCandle] : [])]
-                };
-            }
-
             const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
             
             // FIX: Only send trade-related data, not market_data
