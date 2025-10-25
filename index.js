@@ -1,4 +1,4 @@
-// index.js
+// index.js (SPOT TRADING PLATFORM - FIXED)
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -7,12 +7,10 @@ const socketIo = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
-// NOTE: We still need the Binance library for market updates, but we'll use 'fetch' for the initial load test.
 const Binance = require("node-binance-api");
 const jwt = require('jsonwebtoken'); 
 // >>> START KYC ADDITIONS <<<
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
-const fetch = require('node-fetch'); // ADDED: Need this for direct API testing
 // >>> END KYC ADDITIONS <<<
 
 // ------------------ CONFIG & CONSTANTS ------------------
@@ -27,7 +25,7 @@ const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
 
-// >>> START AZURE CONFIGURATION (UNCHANGED) <<<
+// >>> START AZURE CONFIGURATION <<<
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
@@ -48,7 +46,7 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
 }
 // >>> END AZURE CONFIGURATION <<<
 
-// ------------------ MODELS & ROUTES (UNCHANGED) ------------------
+// ------------------ MODELS & ROUTES ------------------
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
@@ -58,9 +56,11 @@ const userRoutes = require("./routes/user");
 const depositRoutes = require("./routes/deposit");
 const adminRoutes = require("./routes/admin");
 const withdrawRoutes = require("./routes/withdraw");
+// >>> START KYC ADDITION <<<
 const kycRoutes = require("./routes/kyc"); 
+// >>> END KYC ADDITION <<<
 
-// ------------------ APP + SERVER + IO (UNCHANGED) ------------------
+// ------------------ APP + SERVER + IO ------------------
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -77,13 +77,15 @@ TRADE_PAIRS.forEach(pair => {
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
-// ------------------ BINANCE CLIENT (STILL INITIALIZED FOR OTHER USES) ------------------
+// ------------------ BINANCE CLIENT (FIXED FOR SPOT ONLY) ------------------
 const binance = new Binance().options({
   APIKEY: process.env.BINANCE_API_KEY,
-  APISECRET: process.env.BINANCE_API_SECRET
+  APISECRET: process.env.BINANCE_API_SECRET,
+  // FIX 1: Explicitly set the base URL for the SPOT API.
+  baseURL: 'https://api.binance.com/api/' 
 });
 
-// ------------------ MIDDLEWARE & ROUTES (UNCHANGED) ------------------
+// ------------------ MIDDLEWARE ------------------
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -92,24 +94,38 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
-app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }));
-app.use("/api/withdraw", withdrawRoutes);
-app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME }));
 
-// ----- DASHBOARD DATA FUNCTIONS (UNCHANGED) -----
+// --------------------------------------------------------------------------------------------------
+// ⭐ Admin Route: Passes Azure credentials to routes/admin.js (Handles /api/admin/* and /api/admin/kyc/*)
+// --------------------------------------------------------------------------------------------------
+app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }));
+
+app.use("/api/withdraw", withdrawRoutes);
+
+// >>> START KYC ROUTE REGISTRATION <<<
+// ⭐ User Route: RESTORED for Profile Page functionality (Handles /api/kyc/*)
+app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME }));
+// >>> END KYC ROUTE REGISTRATION <<<
+
+// ----- DASHBOARD DATA FUNCTIONS START (UNCHANGED) -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
         throw new Error('User not found.');
     }
+
+    // --- FIX TO GET CORRECT PNL ---
+    // Calculate PNL from trades closed *today*
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const recentTrades = await Trade.find({ 
         userId: userId, 
         status: 'closed',
-        closeTime: { $gte: startOfToday } 
+        closeTime: { $gte: startOfToday } // Only get trades that closed today
     });
+    // --- END PNL FIX ---
+
     const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
 
     const assets = TRADE_PAIRS;
@@ -159,10 +175,14 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
+    // --- THIS IS THE FIX ---
+    // Add the socket to the user's room, so it receives broadcasts
+    // like 'trade_result' which are sent from trade.js.
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
         console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
     }
+    // --- END OF FIX ---
 
     socket.on('request_dashboard_data', async () => {
         try {
@@ -182,30 +202,32 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (MODIFIED FOR TESTING) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (FIXED FOR SPOT) ------------------
 async function initializeMarketData() {
-    console.log("📈 Initializing market data from Binance (TEST MODE)...");
+    console.log("📈 Initializing market data from Binance (Spot)...");
     for (const pair of TRADE_PAIRS) {
         try {
-            // ⭐ MODIFIED FOR TEST: Hitting the public REST API directly using 'fetch'
-            const response = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${pair}&interval=1m&limit=200`);
+            // FIX 2: Switched from binance.futuresCandles to binance.candlesticks for Spot
+            const klines = await binance.candlesticks(pair, '1m', (error, ticks) => {
+                if (error) throw new Error(error.body || error.message);
+                return ticks; // Return ticks in the callback to be used by the surrounding async function
+            }, { limit: 200 });
             
-            if (!response.ok) {
-                // If we get an HTTP error (e.g., 404, 500)
-                throw new Error(`HTTP Error ${response.status}: ${response.statusText}`);
-            }
-
-            const klines = await response.json();
-            
+            // FIX: Check if klines is a valid array. If not, it's an error response.
             if (!Array.isArray(klines)) {
-                // This is the check that was failing. If it's still not an array,
-                // it means the JSON response was not the expected list of candles.
-                // This is the last stop before assuming a key/network issue.
-                throw new Error("Binance returned a non-array response body. Check key, symbol, or network connectivity.");
+                // Try to extract the specific error message from the response object
+                const errorMsg = klines && klines.msg 
+                                 ? `API Error: ${klines.msg} (Code: ${klines.code || 'N/A'})` 
+                                 : "Binance returned non-array data (Invalid Key/Permission/Endpoint).";
+                throw new Error(errorMsg);
             }
-            // ⭐ END MODIFIED TEST CODE
+            // END FIX
 
-            marketData[pair].candles = klines.map(k => ({
+            // The 'ticks' variable from the callback is the actual array we need
+            // node-binance-api's candlestick function is complex, so we ensure we use the returned array
+            const finalKlines = klines; 
+
+            marketData[pair].candles = finalKlines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
                 open: parseFloat(k[1]),
@@ -215,18 +237,17 @@ async function initializeMarketData() {
             }));
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
-            console.log(`✅ TEST SUCCESS: Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
+            console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            // We now log the specific error message from the fetch operation
-            console.error(`❌ TEST FAILED: Could not load initial candles for ${pair}. Error: ${err.message}.`);
+            console.error(`❌ Failed to load initial candles for ${pair}: ${err.message}.`);
         }
     }
 }
 
 async function updateMarketData() {
-    // NOTE: This call still uses the 'binance' object which relies on your environment variables.
     try {
-        const prices = await binance.futuresPrices();
+        // FIX 3: Switched from binance.futuresPrices to binance.prices for Spot
+        const prices = await binance.prices();
         const now = new Date();
         const currentMinuteStart = new Date(now);
         currentMinuteStart.setSeconds(0, 0);
@@ -272,7 +293,7 @@ async function updateMarketData() {
             io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
         }
     } catch (err) {
-        console.error("Error in updateMarketData (This uses your API Key):", (err && err.body) || err);
+        console.error("Error in updateMarketData:", (err && err.body) || err);
     }
 }
 
@@ -296,6 +317,7 @@ setInterval(() => {
             change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
         }
 
+        // Dashboard format
         const tickerForClient = `${pair.replace('USDT', '')}/USD`;
         payloadDashboard[tickerForClient] = {
             price: md.currentPrice,
@@ -303,6 +325,7 @@ setInterval(() => {
             countdown: secondsUntilNextMinute
         };
 
+        // Trading format (old)
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
@@ -314,7 +337,7 @@ setInterval(() => {
     io.emit("dashboard_price_update", payloadDashboard);
 }, 1000);
 
-// ------------------ DB + STARTUP (UNCHANGED) ------------------
+// ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 const db = mongoose.connection;
 db.on("error", console.error.bind(console, "MongoDB connection error:"));
@@ -322,14 +345,18 @@ db.on("error", console.error.bind(console, "MongoDB connection error:"));
 db.once("open", async () => {
   console.log("✅ Connected to MongoDB");
 
+  // >>> START CRASH PREVENTION/CLEANUP <<<
+  // This non-destructive query runs ONCE at startup to fix any corrupted documents
+  // that could cause the server to crash (CastError) later.
   try {
     const TradeModel = mongoose.model('Trade');
     const UserModel = mongoose.model('User');
+
     const tradeUpdateResult = await TradeModel.updateMany(
       { 
         status: { $ne: 'closed' },
         $or: [
-          { activationTimestamp: { $not: { $type: 9 } } }, 
+          { activationTimestamp: { $not: { $type: 9 } } }, // Not a valid BSON Date
           { activationTimestamp: { $exists: false } }, 
           { activationTimestamp: null } 
         ]
@@ -353,6 +380,8 @@ db.once("open", async () => {
   } catch (error) {
     console.error("Warning: Pre-boot database cleanup failed. Proceeding with trade initialization.", error.message);
   }
+  // >>> END CRASH PREVENTION/CLEANUP <<<
+
 
   await initializeMarketData();
   startMarketDataPolling();
@@ -367,7 +396,7 @@ db.once("open", async () => {
   }
 });
 
-// ------------------ CATCH-ALL / STATIC SERVE (UNCHANGED) ------------------
+// ------------------ CATCH-ALL / STATIC SERVE ------------------
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ message: 'API endpoint not found.' });
   const filePath = path.join(__dirname, 'public', req.path);
@@ -377,6 +406,6 @@ app.get('*', (req, res) => {
   });
 });
 
-// ------------------ START SERVER (UNCHANGED) ------------------
+// ------------------ START SERVER ------------------
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`✅ Server is running and listening on port ${PORT}`));
