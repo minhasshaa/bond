@@ -229,8 +229,15 @@ async function initializeMarketData() {
     }
 }
 
-// ⭐ FIX: Added WebSocket error handling and stream restart logic
+let isStreaming = false; // Flag to prevent multiple concurrent streams
+
+// ⭐ FIX: Final robust stream function with connection management
 function startMarketDataStream() {
+    if (isStreaming) {
+        console.log('⚠️ Stream already running. Aborting restart.');
+        return;
+    }
+    isStreaming = true;
     console.log("⚡ Starting unauthenticated Binance WebSocket stream...");
     
     const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
@@ -288,7 +295,6 @@ function startMarketDataStream() {
                     md.candles.push(completed);
                     if (md.candles.length > 200) md.candles.shift();
                     
-                    // Use catch for DB operations inside stream
                     Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
                         console.error(`DB Error saving completed candle for ${pair}:`, err.message);
                     });
@@ -312,21 +318,19 @@ function startMarketDataStream() {
             io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: price });
         } catch (streamErr) {
             console.error(`❌ CRITICAL STREAM PROCESSING ERROR for ${pair}:`, streamErr.message);
-            // Non-fatal, but logs the exact failure point
         }
     }, {
-        // --- ADDED WS Error Handlers for Reconnection ---
         open: () => console.log('✅ Binance WebSocket connection opened.'),
         close: (reason) => {
+            isStreaming = false; // Reset flag
             console.warn(`⚠️ Binance WebSocket closed. Reason: ${reason}. Attempting to restart...`);
             // Attempt to restart the entire stream subscription after a short delay
             setTimeout(startMarketDataStream, 5000); 
         },
         error: (err) => {
             console.error('❌ Binance WebSocket Error:', err.message);
-            // The library may try to reconnect, but we log the severity.
+            // The close handler will take care of restarting
         }
-        // ------------------------------------------------
     });
     
     // Return the WS handler if you need to manually close it later
@@ -337,6 +341,12 @@ function startMarketDataStream() {
 // ------------------ DASHBOARD PRICE EMITTER ------------------
 // This interval is ONLY for pushing data to the client, it does NOT fetch the price.
 setInterval(() => {
+    // ⭐ FIX: Add check for stream state to ensure accurate logging
+    if (!isStreaming) {
+        // console.log("Stream is down. Skipping client update.");
+        return; 
+    }
+    
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
     const payloadDashboard = {};
@@ -344,7 +354,6 @@ setInterval(() => {
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
-        // ⭐ FIX: Ensure we check for md and currentPrice before continuing
         if (!md || md.currentPrice === 0) continue; 
         
         const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
