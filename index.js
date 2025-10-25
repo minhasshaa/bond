@@ -367,7 +367,6 @@ setInterval(() => {
     }
     
     // Emit only if there is price data to prevent client-side timer lag
-    // Note: The timer runs because this interval is running; the data is only sent if available.
     if (Object.keys(payloadTrading).length > 0) {
         io.emit("price_update", payloadTrading);           
         io.emit("dashboard_price_update", payloadDashboard);
@@ -417,14 +416,19 @@ db.once("open", async () => {
   }
   // >>> END CRASH PREVENTION/CLEANUP <<<
 
-  // ⭐ FINAL FIX: Wrap initialization in try/catch to ensure stream starts
+  // ⭐ FINAL FIX: Wrap initialization in try/catch and DELAY stream start
   try {
     await initializeMarketData();
   } catch (err) {
       console.error("CRITICAL: Historical market data initialization FAILED but moving on to stream.", err);
   }
 
-  startMarketDataStream(); // This MUST run
+  // --- CRITICAL DELAY ---
+  console.log("⏱️ Delaying WebSocket stream start by 1 second to stabilize event loop...");
+  setTimeout(() => {
+      startMarketDataStream(); // This will now run 1 second AFTER the main process is unblocked
+  }, 1000); 
+  // --- END CRITICAL DELAY ---
 
   const tradeModule = require("./trade");
   if (typeof tradeModule.initialize === "function") {
