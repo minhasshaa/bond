@@ -323,14 +323,9 @@
                 auth: { token },
                 transports: ['websocket', 'polling'],
                 
-                // --- Keep-Alive Configuration for Render Free Tier ---
-                // Lower the ping interval to aggressively send heartbeats (e.g., every 10 seconds)
+                // --- Keep-Alive Configuration for stable connections on Render ---
                 pingInterval: 10000, 
-                
-                // Increase the timeout for receiving a pong after a ping
                 pingTimeout: 15000, 
-                
-                // Increase reconnection delays for a less frantic connection attempt cycle
                 reconnectionDelay: 5000, 
                 reconnectionDelayMax: 10000 
                 // ----------------------------------------------------
