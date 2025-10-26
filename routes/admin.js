@@ -2,8 +2,13 @@ const express = require('express');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
-const { TRADE_PAIRS } = require('../index'); 
 const AdminCopyTrade = require('../models/AdminCopyTrade');
+
+// Define TRADE_PAIRS locally instead of importing from index (which causes circular dependency)
+const TRADE_PAIRS = [
+  'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
+  'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
+];
 
 // Create candleOverride object since it doesn't exist in index
 const candleOverride = {};
