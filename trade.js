@@ -1,11 +1,10 @@
-// trade.js - COMPLETE VERSION WITH AUTOMATIC TRADE ACTIVATION FIXES
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const AdminCopyTrade = require('./models/AdminCopyTrade');
 
-// Global reference for marketData
+// Global reference for marketData (populated in initialize)
 let globalMarketData = {};
-const POLL_INTERVAL_MS = 1000;
+const POLL_INTERVAL_MS = 1000; // Check every second
 
 // --- Copy Trade Execution Logic ---
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
@@ -29,8 +28,6 @@ async function executeCopyTrade(io, User, Trade, copyTradeId) {
         await session.commitTransaction();
         session.endSession();
 
-        console.log(`Copy trade ${copyTradeId} executed`);
-
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -51,15 +48,14 @@ async function cleanupExpiredCopyTrades(io, User, Trade) {
             try {
                 await executeCopyTrade(io, User, Trade, copyTrade._id);
             } catch (innerErr) {
-                console.error(`Error executing copy trade ${copyTrade._id}:`, innerErr);
+                // Silent error handling
             }
         }
     } catch (error) {
-        console.error('Copy trade cleanup error:', error);
+        // Silent error handling
     }
 }
 
-// --- Volume-based Direction Logic ---
 async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
     try {
         const currentVolume = await Trade.aggregate([
@@ -103,145 +99,11 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
         return userRequestedDirection;
 
     } catch (error) {
-        console.error('Error calculating volume-based direction:', error);
         return userRequestedDirection;
     }
 }
 
-// --- Trade Activation Functions ---
-async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
-    try {
-        const candleTime = new Date(candleTimestamp);
-        candleTime.setSeconds(0, 0);
-
-        const scheduledTrades = await Trade.find({ 
-            status: "scheduled", 
-            asset: pair, 
-            scheduledTime: { $lte: candleTime } 
-        });
-
-        console.log(`🔄 Found ${scheduledTrades.length} scheduled trades to activate for ${pair}`);
-
-        for (const trade of scheduledTrades) {
-            try {
-                console.log(`🔄 Activating scheduled trade ${trade._id} for ${pair}`);
-                
-                trade.status = "active";
-                trade.entryPrice = entryPrice;
-                trade.activationTimestamp = new Date();
-                await trade.save();
-                
-                // ✅ CRITICAL FIX: Emit to ALL clients in the user's room
-                io.to(trade.userId.toString()).emit("trade_active", { trade: trade });
-                console.log(`✅ Emitted trade_active for user ${trade.userId}, trade ${trade._id}`);
-                
-            } catch (innerErr) {
-                console.error(`Error activating scheduled trade ${trade._id}:`, innerErr);
-            }
-        }
-    } catch (err) {
-        console.error("Error finding scheduled trades:", err);
-    }
-}
-
-async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
-    try {
-        const pendingTrades = await Trade.find({ status: "pending", asset: pair });
-        
-        console.log(`🔄 Found ${pendingTrades.length} pending trades to activate for ${pair}`);
-
-        for (const trade of pendingTrades) {
-            try {
-                console.log(`🔄 Activating pending trade ${trade._id} for ${pair}`);
-                
-                trade.status = "active";
-                trade.entryPrice = entryPrice;
-                trade.activationTimestamp = new Date();
-                await trade.save();
-                
-                // ✅ CRITICAL FIX: Emit to ALL clients in the user's room
-                io.to(trade.userId.toString()).emit("trade_active", { trade: trade });
-                console.log(`✅ Emitted trade_active for user ${trade.userId}, trade ${trade._id}`);
-                
-            } catch (innerErr) {
-                console.error(`Error activating pending trade ${trade._id}:`, innerErr);
-            }
-        }
-    } catch (err) {
-        console.error("Error finding pending trades:", err);
-    }
-}
-
-// --- Trade Settlement Function ---
-async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
-    try {
-        const activeTrades = await Trade.find({ 
-            status: "active", 
-            asset: pair,
-            activationTimestamp: { $exists: true, $lte: new Date(Date.now() - 60000) } // At least 1 minute old
-        });
-        
-        console.log(`💰 Found ${activeTrades.length} active trades to settle for ${pair}`);
-
-        for (const trade of activeTrades) {
-            try {
-                const win = (trade.direction === "UP" && exitPrice > trade.entryPrice) || 
-                           (trade.direction === "DOWN" && exitPrice < trade.entryPrice);
-                
-                // Only process if there's a clear win/loss (not tie)
-                if (exitPrice !== trade.entryPrice) {
-                    const pnl = win ? trade.amount * 0.9 : -trade.amount;
-
-                    trade.status = "closed";
-                    trade.exitPrice = exitPrice;
-                    trade.result = win ? "WIN" : "LOSS";
-                    trade.pnl = pnl;
-                    trade.closeTime = new Date();
-                    await trade.save();
-
-                    const userAfter = await User.findByIdAndUpdate(
-                        trade.userId,
-                        {
-                            $inc: {
-                                balance: trade.amount + pnl,
-                                totalTradeVolume: trade.amount
-                            }
-                        },
-                        { new: true }
-                    );
-
-                    // Calculate today's P&L
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const tomorrow = new Date(today);
-                    tomorrow.setDate(tomorrow.getDate() + 1);
-
-                    const todayTrades = await Trade.find({
-                        userId: trade.userId,
-                        status: "closed",
-                        closeTime: { $gte: today, $lt: tomorrow } 
-                    });
-
-                    const todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-
-                    io.to(trade.userId.toString()).emit("trade_result", { 
-                        trade: trade, 
-                        balance: userAfter.balance,
-                        todayPnl: parseFloat(todayPnl.toFixed(2)) 
-                    });
-
-                    console.log(`💰 Trade settled for user ${trade.userId}: ${trade.result} P&L $${pnl}`);
-                }
-            } catch (innerErr) {
-                console.error(`Error settling trade ${trade._id}:`, innerErr);
-            }
-        }
-    } catch (err) {
-        console.error("Error finding active trades:", err);
-    }
-}
-
-// --- Trade Monitoring Logic ---
+// Trade monitoring logic
 async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedCompletedCandleTs = {};
     const lastProcessedActivationTs = {};
@@ -253,39 +115,37 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 const md = globalMarketData[pair];
                 if (!md) continue;
 
-                // 1. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW candle starts)
-                if (md.currentCandle) {
-                    const currentCandleStartTime = new Date(md.currentCandle.timestamp);
-                    const activationTs = currentCandleStartTime.getTime();
-
-                    // ✅ CRITICAL FIX: Check if this is a new minute and we haven't processed it yet
-                    if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
-                        console.log(`🕒 New candle detected for ${pair}, activating trades...`);
-                        
-                        await activateScheduledTradesForPair(io, Trade, pair, md.currentCandle.timestamp, md.currentCandle.open);
-                        await activatePendingTradesForPair(io, User, Trade, pair, md.currentCandle.open);
-                        
-                        lastProcessedActivationTs[pair] = activationTs;
-                        console.log(`✅ Trade activation completed for ${pair}`);
-                    }
-                }
-
-                // 2. SETTLE ACTIVE TRADES (when a candle is complete)
+                // 1. SETTLE ACTIVE TRADES (when a candle is complete)
                 if (md.candles?.length > 0) {
                     const lastCompleted = md.candles[md.candles.length - 1];
                     const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
                     
-                    // Only settle once per unique candle
                     if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
-                        const candleAge = Date.now() - lastCompletedTs;
-                        
-                        // Only process candles that are completed (at least 5 seconds old)
-                        if (candleAge > 5000) { 
-                            console.log(`💰 Settling trades for completed candle on ${pair}`);
-                            await settleActiveTradesForPair(io, User, Trade, pair, lastCompleted.close);
+                        if (Date.now() > lastCompletedTs) { 
+                            await settleTradesWrapper(io, User, Trade, pair, lastCompleted.close);
                             lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
                         }
                     }
+                }
+
+                // 2. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW candle starts)
+                const now = Date.now();
+                const currentMinute = Math.floor(now / 60000);
+                
+                if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < currentMinute) {
+                    const pendingTrades = await Trade.countDocuments({ 
+                        status: { $in: ["pending", "scheduled"] }, 
+                        asset: pair 
+                    });
+                    
+                    if (pendingTrades > 0) {
+                        const currentPrice = md.currentPrice || (md.currentCandle ? md.currentCandle.open : 0);
+                        const currentTimestamp = new Date();
+                        
+                        await activateTradesWrapper(io, User, Trade, pair, currentTimestamp, currentPrice);
+                    }
+                    
+                    lastProcessedActivationTs[pair] = currentMinute;
                 }
             }
 
@@ -296,16 +156,35 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 lastCopyTradeCleanup.global = now;
             }
         } catch (err) {
-            console.error("Trade monitor error:", err);
+            // Silent error handling
         }
     }, POLL_INTERVAL_MS);
 }
 
-// --- Main Initialization Function ---
+// Wrapper for Activation Logic
+async function activateTradesWrapper(io, User, Trade, pair, candleTimestamp, entryPrice) {
+    try {
+        await activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice);
+        await activatePendingTradesForPair(io, User, Trade, pair, entryPrice);
+    } catch (err) {
+        // Silent error handling
+    }
+}
+
+// Wrapper for Settlement Logic
+async function settleTradesWrapper(io, User, Trade, pair, exitPrice) {
+    try {
+        await settleActiveTradesForPair(io, User, Trade, pair, exitPrice);
+    } catch (err) {
+        // Silent error handling
+    }
+}
+
 async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     globalMarketData = marketData;
 
-    // Socket authentication
+    io.engine.marketData = marketData;
+
     io.use((socket, next) => {
         try {
             let token = socket.handshake.auth?.token;
@@ -333,63 +212,30 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
         }
     });
 
-    // Forward market data to trading clients
-    const mainServerNamespace = io.of("/");
-    mainServerNamespace.on('connection', (mainSocket) => {
-        mainSocket.on('market_data', (data) => {
-            io.emit('market_data', data);
-        });
-
-        mainSocket.on('price_update', (data) => {
-            io.emit('price_update', data);
-        });
-    });
-
-    // Start trade monitoring
-    console.log("🔄 Starting trade monitor with automatic activation...");
+    // START THE MONITORING LOOP
     runTradeMonitor(io, User, Trade, TRADE_PAIRS);
 
-    // Socket event handlers
     io.on("connection", async (socket) => {
         try {
             const userId = socket.decoded.id;
             const user = await User.findById(userId);
             if (!user) return socket.disconnect();
-            
             socket.join(user._id.toString());
-            console.log(`🔗 User ${userId} connected to trading`);
 
-            // Send initial data
             const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
+            
             socket.emit("init", { 
                 balance: user.balance, 
                 tradeHistory: userTrades,
                 marketData: globalMarketData
             });
 
-            // Forward real-time data to client
-            socket.on('market_data', (data) => {
-                socket.emit('market_data', data);
-            });
-
-            socket.on('price_update', (data) => {
-                socket.emit('price_update', data);
-            });
-
-            // --- TRADE PLACEMENT ---
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
-                    console.log(`🎯 New trade request from user ${userId}:`, { asset, direction, amount });
-                    
-                    if (!TRADE_PAIRS.includes(asset)) {
-                        return socket.emit("error", { message: "Invalid asset." });
-                    }
-                    if (!["UP", "DOWN"].includes(direction)) {
-                        return socket.emit("error", { message: "Invalid direction." });
-                    }
+                    if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
+                    if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
 
-                    // Check for existing active trade
                     const existingTrade = await Trade.findOne({ 
                         userId: user._id, 
                         status: { $in: ["pending", "active", "scheduled"] } 
@@ -407,20 +253,18 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     }
 
                     const freshUser = await User.findById(user._id);
+
                     if (freshUser.balance < tradeAmount) {
                         return socket.emit("error", { 
                             message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
                         });
                     }
 
-                    // Get volume-based direction
                     const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
 
-                    // Deduct balance
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
 
-                    // Create trade
                     const trade = new Trade({
                         userId: user._id,
                         amount: tradeAmount,
@@ -431,20 +275,12 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     });
                     await trade.save();
 
-                    console.log(`✅ Trade created for user ${userId}: ${trade._id}`);
-
-                    io.to(user._id.toString()).emit("trade_pending", { 
-                        trade: trade, 
-                        balance: freshUser.balance 
-                    });
-
+                    io.to(user._id.toString()).emit("trade_pending", { trade, balance: freshUser.balance });
                 } catch (err) {
-                    console.error("Trade placement error:", err);
                     socket.emit("error", { message: "Could not place trade." });
                 }
             });
 
-            // --- COPY TRADE ---
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
@@ -459,7 +295,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         return socket.emit("error", { message: "Minimum $100 balance required to copy trades" });
                     }
 
-                    // Check for existing trade
                     const existingTrade = await Trade.findOne({ 
                         userId: user._id, 
                         status: { $in: ["pending", "active", "scheduled"] } 
@@ -480,7 +315,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         return socket.emit("error", { message: "This copy trade is no longer available" });
                     }
 
-                    // Check if already copied
                     const alreadyCopied = copyTrade.userCopies.find(
                         copy => copy.userId.toString() === userId
                     );
@@ -504,7 +338,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     const executionTime = new Date(copyTrade.executionTime);
                     executionTime.setSeconds(0, 0); 
 
-                    // Create scheduled trade
                     const scheduledTrade = new Trade({
                         userId: user._id,
                         amount: tradeAmount,
@@ -517,8 +350,8 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         originalCopyTradeId: copyTrade._id
                     });
 
-                    // Update balances
                     freshUser.balance -= tradeAmount;
+
                     copyTrade.userCopies.push({
                         userId: userId,
                         copiedAt: new Date(),
@@ -532,7 +365,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     await session.commitTransaction();
                     session.endSession();
 
-                    // Calculate time until execution
                     const now = new Date();
                     const timeUntilExecution = executionTime - now;
                     const minutesUntilExecution = Math.floor(timeUntilExecution / (1000 * 60));
@@ -558,19 +390,16 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 } catch (error) {
                     await session.abortTransaction();
                     session.endSession();
-                    console.error('Copy trade error:', error);
                     socket.emit("error", { message: "Failed to copy trade" });
                 }
             });
 
-            // --- SCHEDULED TRADE ---
             socket.on("schedule_trade", async (data) => {
                 try {
                     const { asset, direction, scheduledTime, amount } = data;
                     if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
                     if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
 
-                    // Check for existing trade
                     const existingTrade = await Trade.findOne({ 
                         userId: user._id, 
                         status: { $in: ["pending", "active", "scheduled"] } 
@@ -588,23 +417,24 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     }
 
                     const freshUser = await User.findById(user._id);
+
                     if (freshUser.balance < tradeAmount) {
                         return socket.emit("error", { 
                             message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
                         });
                     }
 
-                    // Get volume-based direction
                     const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
 
-                    // Parse scheduled time
                     const serverNowUTC = new Date();
+                    
                     const [hour, minute] = scheduledTime.split(":").map(Number);
+                    
                     const userScheduledTimeToday = new Date(serverNowUTC);
                     userScheduledTimeToday.setUTCHours(hour, minute, 0, 0); 
 
-                    // Validate time (next 10 minutes only)
                     const tenMinutesFromNow = new Date(serverNowUTC.getTime() + (10 * 60 * 1000));
+                    
                     if (userScheduledTimeToday <= serverNowUTC || userScheduledTimeToday > tenMinutesFromNow) {
                         return socket.emit("error", { message: "Please select a time in the next 10 minutes." });
                     }
@@ -612,7 +442,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     const finalScheduleDtUTC = userScheduledTimeToday; 
                     finalScheduleDtUTC.setSeconds(0, 0); 
 
-                    // Deduct balance and create trade
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
 
@@ -626,18 +455,12 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     });
                     await trade.save();
 
-                    io.to(user._id.toString()).emit("trade_scheduled", { 
-                        trade: trade, 
-                        balance: freshUser.balance 
-                    });
-
+                    io.to(user._id.toString()).emit("trade_scheduled", { trade, balance: freshUser.balance });
                 } catch (err) {
-                    console.error("Error in schedule_trade:", err);
                     socket.emit("error", { message: "Could not schedule trade." });
                 }
             });
 
-            // --- CANCEL TRADE ---
             socket.on("cancel_trade", async (data) => {
                 try {
                     const trade = await Trade.findOne({
@@ -645,42 +468,135 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         userId: user._id,
                         status: { $in: ["pending", "scheduled"] }
                     });
-                    
                     if (!trade) return socket.emit("error", { message: "Trade not found or cannot be cancelled." });
 
-                    // Refund balance
                     const freshUser = await User.findById(user._id);
                     freshUser.balance += trade.amount;
                     await freshUser.save();
 
-                    // Cancel trade
                     trade.status = "cancelled";
                     await trade.save();
-                    
-                    io.to(user._id.toString()).emit("trade_cancelled", { 
-                        tradeId: trade._id, 
-                        balance: freshUser.balance 
-                    });
+                    io.to(user._id.toString()).emit("trade_cancelled", { tradeId: trade._id, balance: freshUser.balance });
                 } catch (err) {
                     socket.emit("error", { message: "Could not cancel trade." });
                 }
             });
 
-            // --- TRADE ACTIVE EVENT HANDLER ---
-            socket.on("trade_active", (data) => {
-                console.log(`✅ Received trade_active event for user ${userId}`);
-                // This will be handled by the updateTradeStatus function in the frontend
-            });
-
-            socket.on("disconnect", () => {
-                console.log(`🔌 User ${userId} disconnected from trading`);
-            });
-
+            socket.on("disconnect", () => { });
         } catch (err) {
-            console.error("Socket connection error:", err);
             socket.disconnect();
         }
     });
+}
+
+// --- Helper Functions ---
+
+async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
+    try {
+        const now = new Date();
+        
+        const scheduleds = await Trade.find({ 
+            status: "scheduled", 
+            asset: pair,
+            $or: [
+                { scheduledTime: { $lte: now } },
+                { 
+                    scheduledTime: { 
+                        $lte: new Date(now.getTime() + 60000),
+                        $gte: new Date(now.getTime() - 60000)
+                    } 
+                }
+            ]
+        });
+
+        for (const t of scheduleds) {
+            try {
+                t.status = "active";
+                t.entryPrice = entryPrice;
+                t.activationTimestamp = new Date(); 
+                await t.save();
+                io.to(t.userId.toString()).emit("trade_active", { trade: t });
+            } catch (innerErr) {
+                // Silent error handling
+            }
+        }
+    } catch (err) {
+        // Silent error handling
+    }
+}
+
+async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
+    try {
+        const pendings = await Trade.find({ status: "pending", asset: pair });
+        for (const t of pendings) {
+            try {
+                t.status = "active";
+                t.entryPrice = entryPrice;
+                t.activationTimestamp = new Date();
+                await t.save();
+                io.to(t.userId.toString()).emit("trade_active", { trade: t });
+            } catch (innerErr) {
+                // Silent error handling
+            }
+        }
+    } catch (err) {
+        // Silent error handling
+    }
+}
+
+async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
+    try {
+        const actives = await Trade.find({ status: "active", asset: pair });
+        for (const t of actives) {
+            try {
+                const win = (t.direction === "UP" && exitPrice > t.entryPrice) || (t.direction === "DOWN" && exitPrice < t.entryPrice);
+                const tie = exitPrice === t.entryPrice;
+                const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount);
+
+                t.status = "closed";
+                t.exitPrice = exitPrice;
+                t.result = tie ? "TIE" : (win ? "WIN" : "LOSS");
+                t.pnl = pnl;
+                t.closeTime = new Date(); 
+                await t.save();
+
+                const userAfter = await User.findByIdAndUpdate(
+                    t.userId,
+                    {
+                        $inc: {
+                            balance: t.amount + pnl,
+                            totalTradeVolume: t.amount
+                        }
+                    },
+                    { new: true }
+                );
+
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+
+                const todayTrades = await Trade.find({
+                    userId: t.userId,
+                    status: "closed",
+                    closeTime: { $gte: today, $lt: tomorrow } 
+                });
+
+                const todayPnl = todayTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+
+                io.to(t.userId.toString()).emit("trade_result", { 
+                    trade: t, 
+                    balance: userAfter.balance,
+                    todayPnl: parseFloat(todayPnl.toFixed(2)) 
+                });
+
+            } catch (innerErr) {
+                // Silent error handling
+            }
+        }
+    } catch (err) {
+        // Silent error handling
+    }
 }
 
 module.exports = { initialize };
