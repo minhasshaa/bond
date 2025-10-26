@@ -1,4 +1,4 @@
-// index.js - FIXED VERSION
+// index.js - COMPLETE FIXED VERSION
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -224,9 +224,14 @@ async function initializeMarketData() {
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
             
+            // Start current candle with current price
+            const currentMinuteStart = new Date();
+            currentMinuteStart.setSeconds(0, 0);
+            currentMinuteStart.setMilliseconds(0);
+            
             marketData[pair].currentCandle = {
                 asset: pair,
-                timestamp: new Date(lastCandle.timestamp.getTime() + 60000),
+                timestamp: currentMinuteStart,
                 open: lastCandle.close,
                 high: lastCandle.close,
                 low: lastCandle.close,
@@ -245,12 +250,47 @@ async function initializeMarketData() {
 let isStreaming = false;
 let restPollingInterval = null;
 
-// ⭐ FIXED: REST API Polling with gap detection
+// ⭐ NEW: Price spike detection
+function isPriceSpike(currentPrice, currentCandle) {
+    if (!currentCandle || currentCandle.open === 0) return false;
+    
+    const typicalPrice = (currentCandle.high + currentCandle.low + currentCandle.close) / 3;
+    const priceDeviation = Math.abs(currentPrice - typicalPrice) / typicalPrice;
+    
+    // If price deviates more than 5% from typical price, it might be a spike
+    return priceDeviation > 0.05;
+}
+
+// ⭐ NEW: Candle validation function to prevent long wicks
+function validateCandle(candle, previousPrice) {
+    if (!candle || candle.open === 0) return candle;
+    
+    const bodySize = Math.abs(candle.open - candle.close);
+    const totalRange = candle.high - candle.low;
+    
+    // If wicks are too long compared to body (more than 5x), normalize them
+    if (totalRange > 0 && bodySize > 0 && (totalRange / bodySize) > 5) {
+        console.log(`⚠️ Normalizing candle with abnormal wicks: ${candle.asset}`);
+        
+        const midPrice = (candle.open + candle.close) / 2;
+        const allowedWick = bodySize * 2; // Allow wicks up to 2x body size
+        
+        return {
+            ...candle,
+            high: Math.min(candle.high, midPrice + allowedWick),
+            low: Math.max(candle.low, midPrice - allowedWick)
+        };
+    }
+    
+    return candle;
+}
+
+// ⭐ FIXED: REST API Polling with REAL-TIME candle updates
 function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
     
-    console.log("🔄 Starting REST API polling (Render compatible)...");
+    console.log("🔄 Starting REST API polling with real-time candle updates...");
     
     // Clear existing interval if any
     if (restPollingInterval) {
@@ -274,9 +314,9 @@ function startRESTPolling() {
                 currentMinuteStart.setSeconds(0, 0);
                 currentMinuteStart.setMilliseconds(0);
 
-                // ⭐ NEW: Detect data gaps and handle gracefully
+                // Detect data gaps and handle gracefully
                 if (md.currentCandle && !md.isWebSocketActive) {
-                    const timeDiff = now.getTime() - md.lastWebSocketUpdate;
+                    const timeDiff = now.getTime() - (md.lastWebSocketUpdate || now.getTime());
                     if (timeDiff > 120000) { // 2 minutes gap
                         console.log(`⚠️ Data gap detected for ${pair}: ${Math.round(timeDiff/1000)}s`);
                         // Don't update current candle with old data, start fresh
@@ -296,13 +336,14 @@ function startRESTPolling() {
                         low: price, 
                         close: price 
                     };
+                    console.log(`🆕 New candle initialized for ${pair}`);
                 }
                 
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
                     // Complete the current candle
-                    const completed = { ...md.currentCandle, close: price };
+                    const completed = { ...md.currentCandle, close: previousPrice || price };
                     
                     // Handle candle override if any
                     const override = candleOverride[pair];
@@ -320,7 +361,7 @@ function startRESTPolling() {
                         candleOverride[pair] = null;
                     }
                     
-                    // ⭐ FIX: Validate candle before saving (prevent long wicks)
+                    // Validate candle before saving (prevent long wicks)
                     const validatedCandle = validateCandle(completed, previousPrice);
                     
                     // Save completed candle
@@ -334,7 +375,7 @@ function startRESTPolling() {
                         });
                     }
                     
-                    // Start new candle
+                    // Start new candle with current price
                     md.currentCandle = { 
                         asset: pair, 
                         timestamp: currentMinuteStart, 
@@ -343,32 +384,37 @@ function startRESTPolling() {
                         low: price, 
                         close: price 
                     };
+                    
+                    console.log(`🕒 New candle started for ${pair} at ${currentMinuteStart.toISOString()}`);
                 } else {
-                    // ⭐ FIX: Update current candle in real-time with validation
-                    if (md.isWebSocketActive || !isPriceSpike(price, md.currentCandle)) {
+                    // ⭐ CRITICAL FIX: Update current candle in real-time with price movements
+                    // Only update if price is reasonable (not a spike)
+                    if (!isPriceSpike(price, md.currentCandle)) {
                         md.currentCandle.high = Math.max(md.currentCandle.high, price);
                         md.currentCandle.low = Math.min(md.currentCandle.low, price);
                         md.currentCandle.close = price;
                     }
                 }
 
-                // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
+                // ⭐ CRITICAL FIX: Emit REAL-TIME candle updates
                 const chartData = {
                     asset: pair, 
-                    candles: [...md.candles], // Don't include current candle in historical data
-                    currentCandle: md.currentCandle,
+                    candles: [...md.candles], // Historical completed candles only
+                    currentCandle: { ...md.currentCandle }, // Current active candle (real-time)
                     currentPrice: price,
                     timestamp: now.getTime(),
-                    dataSource: md.isWebSocketActive ? 'websocket' : 'rest'
+                    dataSource: md.isWebSocketActive ? 'websocket' : 'rest',
+                    isNewCandle: isNewMinute // Flag for frontend to handle new candle
                 };
 
+                // Emit to all connected clients
                 io.emit("market_data", chartData);
             }
             
         } catch (err) {
             console.error('❌ REST polling error:', err.message);
         }
-    }, 3000); // ⭐ INCREASED: Poll every 3 seconds (less aggressive)
+    }, 2000); // Poll every 2 seconds for better real-time updates
 
     // Return cleanup function
     return () => {
@@ -381,56 +427,21 @@ function startRESTPolling() {
     };
 }
 
-// ⭐ NEW: Candle validation function to prevent long wicks
-function validateCandle(candle, previousPrice) {
-    const bodySize = Math.abs(candle.open - candle.close);
-    const totalRange = candle.high - candle.low;
-    
-    // If wicks are too long compared to body (more than 5x), normalize them
-    if (totalRange > 0 && bodySize > 0 && (totalRange / bodySize) > 5) {
-        console.log(`⚠️ Normalizing candle with abnormal wicks: ${candle.asset}`);
-        
-        const midPrice = (candle.open + candle.close) / 2;
-        const allowedWick = bodySize * 2; // Allow wicks up to 2x body size
-        
-        return {
-            ...candle,
-            high: Math.min(candle.high, midPrice + allowedWick),
-            low: Math.max(candle.low, midPrice - allowedWick)
-        };
-    }
-    
-    return candle;
-}
-
-// ⭐ NEW: Price spike detection
-function isPriceSpike(currentPrice, currentCandle) {
-    if (!currentCandle) return false;
-    
-    const typicalPrice = (currentCandle.high + currentCandle.low + currentCandle.close) / 3;
-    const priceDeviation = Math.abs(currentPrice - typicalPrice) / typicalPrice;
-    
-    // If price deviates more than 2% from typical price, it might be a spike
-    return priceDeviation > 0.02;
-}
-
-// ⭐ IMPROVED: WebSocket with better reconnection logic
+// ⭐ FIXED: WebSocket with REAL-TIME candle updates
 function startMarketDataStream() {
     if (isStreaming) return;
     
     console.log("⚡ Attempting Binance WebSocket...");
     
-    // ⭐ INCREASED: Longer timeout (30 seconds)
     const connectionTimeout = setTimeout(() => {
         if (!isStreaming) {
             console.log("❌ WebSocket timeout after 30s, switching to REST polling");
-            // Mark all pairs as not using WebSocket
             TRADE_PAIRS.forEach(pair => {
                 marketData[pair].isWebSocketActive = false;
             });
             startRESTPolling();
         }
-    }, 30000); // ⭐ CHANGED: 30 seconds timeout
+    }, 30000);
     
     const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
     
@@ -443,7 +454,7 @@ function startMarketDataStream() {
                 
                 if (!md) return;
                 
-                // ⭐ NEW: Mark as WebSocket active and track last update
+                // Mark as WebSocket active and track last update
                 md.isWebSocketActive = true;
                 md.lastWebSocketUpdate = Date.now();
                 md.currentPrice = price;
@@ -484,7 +495,7 @@ function startMarketDataStream() {
                         candleOverride[pair] = null;
                     }
                     
-                    // ⭐ FIX: Validate candle before saving
+                    // Validate candle before saving
                     const validatedCandle = validateCandle(completed, md.currentPrice);
                     
                     if (validatedCandle.open > 0 && validatedCandle.close > 0) {
@@ -496,6 +507,7 @@ function startMarketDataStream() {
                         });
                     }
                     
+                    // Start new candle with current price
                     md.currentCandle = { 
                         asset: pair, 
                         timestamp: currentMinuteStart, 
@@ -504,21 +516,26 @@ function startMarketDataStream() {
                         low: price, 
                         close: price 
                     };
+                    
+                    console.log(`🕒 New WebSocket candle started for ${pair}`);
                 } else {
-                    // ⭐ FIX: Update current candle in real-time for WebSocket too
-                    md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                    md.currentCandle.low = Math.min(md.currentCandle.low, price);
-                    md.currentCandle.close = price;
+                    // ⭐ CRITICAL FIX: Update current candle in real-time for WebSocket
+                    if (!isPriceSpike(price, md.currentCandle)) {
+                        md.currentCandle.high = Math.max(md.currentCandle.high, price);
+                        md.currentCandle.low = Math.min(md.currentCandle.low, price);
+                        md.currentCandle.close = price;
+                    }
                 }
 
-                // ⭐ FIX: Emit proper data structure
+                // ⭐ CRITICAL FIX: Emit REAL-TIME WebSocket updates
                 io.emit("market_data", { 
                     asset: pair, 
-                    candles: [...md.candles], // Don't include current candle in historical
-                    currentCandle: md.currentCandle,
+                    candles: [...md.candles], // Historical candles only
+                    currentCandle: { ...md.currentCandle }, // Current active candle
                     currentPrice: price,
                     timestamp: now.getTime(),
-                    dataSource: 'websocket'
+                    dataSource: 'websocket',
+                    isNewCandle: isNewMinute
                 });
                 
             } catch (streamErr) {
