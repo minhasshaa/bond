@@ -117,35 +117,6 @@ app.use("/api/deposit", depositRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// ------------------ CANDLE VALIDATION FUNCTION ------------------
-function validateCandle(candle) {
-    const MAX_PERCENT_CHANGE = 0.05; // Max 5% change per minute
-    
-    if (!candle || !candle.open || !candle.close || candle.open <= 0) {
-        return candle;
-    }
-    
-    const percentChange = Math.abs((candle.close - candle.open) / candle.open);
-    
-    if (percentChange > MAX_PERCENT_CHANGE) {
-        console.warn(`⚠️ Abnormal candle detected for ${candle.asset}: ${(percentChange * 100).toFixed(2)}% change (capped at ${(MAX_PERCENT_CHANGE * 100).toFixed(2)}%)`);
-        
-        // Cap the change to maximum allowed
-        const direction = candle.close > candle.open ? 1 : -1;
-        candle.close = candle.open * (1 + direction * MAX_PERCENT_CHANGE);
-        
-        // Adjust high/low accordingly
-        candle.high = Math.max(candle.open, candle.close);
-        candle.low = Math.min(candle.open, candle.close);
-    }
-    
-    // Ensure high/low are consistent
-    candle.high = Math.max(candle.open, candle.close, candle.high);
-    candle.low = Math.min(candle.open, candle.close, candle.low);
-    
-    return candle;
-}
-
 // ----- DASHBOARD DATA FUNCTIONS START -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
@@ -246,7 +217,7 @@ async function initializeMarketData() {
                 marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
             }
             
-            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+            const klines = await binance.futuresCandles(pair, '1m', { limit: 100 });
             
             if (!Array.isArray(klines) || klines.length < 5) { 
                  console.warn(`⚠️ Historical load failed for ${pair}. Starting clean.`);
@@ -294,7 +265,7 @@ let isStreaming = false;
 function startMarketDataStream() {
     if (isStreaming) return;
     
-    console.log("⚡ Attempting Binance WebSocket for real-time candle updates...");
+    console.log("⚡ Starting Binance WebSocket for real-time candle updates...");
     
     const connectionTimeout = setTimeout(() => {
         if (!isStreaming) {
@@ -337,46 +308,60 @@ function startMarketDataStream() {
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
-                    // Complete the current candle
-                    let completed = { ...md.currentCandle, close: price };
+                    console.log(`🕒 New minute started for ${pair}, completing previous candle`);
                     
-                    // Validate the completed candle
-                    completed = validateCandle(completed);
+                    // Complete the previous candle
+                    const completedCandle = { ...md.currentCandle };
+                    completedCandle.close = price; // Final close price
                     
-                    // Save completed candle
-                    if (completed.open > 0 && completed.close > 0) {
-                        md.candles.push(completed);
-                        if (md.candles.length > 200) md.candles.shift();
+                    // Save completed candle to history
+                    if (completedCandle.open > 0 && completedCandle.close > 0) {
+                        md.candles.push(completedCandle);
+                        if (md.candles.length > 100) {
+                            md.candles.shift();
+                        }
                         
-                        // Save to database
-                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
-                            console.error(`DB Error saving completed candle for ${pair}:`, err.message);
-                        });
+                        // Save to database (async, don't wait)
+                        Candle.updateOne(
+                            { asset: pair, timestamp: completedCandle.timestamp }, 
+                            { $set: completedCandle }, 
+                            { upsert: true }
+                        ).catch(err => console.error(`DB Error saving candle for ${pair}:`, err.message));
                     }
                     
-                    // Start new candle
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
+                    // Start new candle with current price
+                    md.currentCandle = {
+                        asset: pair,
+                        timestamp: currentMinuteStart,
+                        open: price, // New candle opens at current price
+                        high: price, // Start high at current price
+                        low: price,  // Start low at current price
+                        close: price // Start close at current price
                     };
+                    
+                    console.log(`🆕 New candle started for ${pair} at price: ${price}`);
                 } else {
-                    // UPDATE CURRENT CANDLE IN REAL-TIME - THIS IS CRITICAL
-                    md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                    md.currentCandle.low = Math.min(md.currentCandle.low, price);
+                    // UPDATE CURRENT CANDLE IN REAL-TIME
+                    // Update high if current price is higher
+                    if (price > md.currentCandle.high) {
+                        md.currentCandle.high = price;
+                    }
+                    // Update low if current price is lower
+                    if (price < md.currentCandle.low) {
+                        md.currentCandle.low = price;
+                    }
+                    // Always update close to current price
                     md.currentCandle.close = price;
                 }
 
                 // EMIT REAL-TIME CANDLE DATA
                 const chartData = {
                     asset: pair, 
-                    candles: [...md.candles], // Completed candles
+                    candles: [...md.candles], // Only completed candles
                     currentCandle: md.currentCandle, // Current forming candle with real-time updates
                     currentPrice: price,
-                    timestamp: now.getTime()
+                    timestamp: now.getTime(),
+                    isNewCandle: isNewMinute
                 };
 
                 // Emit to all clients for real-time chart updates
@@ -389,7 +374,7 @@ function startMarketDataStream() {
             open: () => {
                 clearTimeout(connectionTimeout);
                 isStreaming = true;
-                console.log('✅ Binance WebSocket connected - Real-time candle updates active');
+                console.log('✅ Binance WebSocket connected - Real-time candles active');
             },
             close: (reason) => {
                 isStreaming = false;
@@ -400,7 +385,6 @@ function startMarketDataStream() {
                 clearTimeout(connectionTimeout);
                 isStreaming = false;
                 console.error('❌ WebSocket Error:', err.message);
-                console.log('🔄 Switching to REST polling...');
                 startRESTPolling();
             }
         });
@@ -415,7 +399,7 @@ function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
     
-    console.log("🔄 Starting REST API polling with real-time candle updates...");
+    console.log("🔄 Starting REST API polling with real-time candles...");
     
     const pollInterval = setInterval(async () => {
         try {
@@ -427,68 +411,71 @@ function startRESTPolling() {
                 if (!price || !marketData[pair]) continue;
                 
                 const md = marketData[pair];
-                const previousPrice = md.currentPrice;
                 md.currentPrice = price;
                 
                 const currentMinuteStart = new Date(now);
                 currentMinuteStart.setSeconds(0, 0);
                 currentMinuteStart.setMilliseconds(0);
 
-                // Initialize currentCandle if needed
                 if (!md.currentCandle) {
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
+                    md.currentCandle = {
+                        asset: pair,
+                        timestamp: currentMinuteStart,
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price
                     };
                 }
                 
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
-                    // Complete the current candle
-                    let completed = { ...md.currentCandle, close: price };
+                    console.log(`🕒 New minute started for ${pair} (REST), completing candle`);
                     
-                    // Validate candle to prevent abnormalities
-                    completed = validateCandle(completed);
+                    // Complete current candle
+                    const completedCandle = { ...md.currentCandle };
+                    completedCandle.close = price;
                     
-                    // Save completed candle
-                    if (completed.open > 0 && completed.close > 0) {
-                        md.candles.push(completed);
-                        if (md.candles.length > 200) md.candles.shift();
+                    if (completedCandle.open > 0 && completedCandle.close > 0) {
+                        md.candles.push(completedCandle);
+                        if (md.candles.length > 100) md.candles.shift();
                         
-                        // Save to database
-                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
-                            console.error(`DB Error saving completed candle for ${pair}:`, err.message);
-                        });
+                        Candle.updateOne(
+                            { asset: pair, timestamp: completedCandle.timestamp }, 
+                            { $set: completedCandle }, 
+                            { upsert: true }
+                        ).catch(err => console.error(`DB Error saving candle for ${pair}:`, err.message));
                     }
                     
                     // Start new candle
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
+                    md.currentCandle = {
+                        asset: pair,
+                        timestamp: currentMinuteStart,
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price
                     };
                 } else {
-                    // UPDATE CURRENT CANDLE IN REAL-TIME - THIS IS CRITICAL
-                    md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                    md.currentCandle.low = Math.min(md.currentCandle.low, price);
+                    // UPDATE CURRENT CANDLE IN REAL-TIME
+                    if (price > md.currentCandle.high) {
+                        md.currentCandle.high = price;
+                    }
+                    if (price < md.currentCandle.low) {
+                        md.currentCandle.low = price;
+                    }
                     md.currentCandle.close = price;
                 }
 
-                // Emit real-time market data
+                // Emit real-time data
                 const chartData = {
                     asset: pair, 
                     candles: [...md.candles],
                     currentCandle: md.currentCandle,
                     currentPrice: price,
-                    timestamp: now.getTime()
+                    timestamp: now.getTime(),
+                    isNewCandle: isNewMinute
                 };
 
                 io.emit("market_data", chartData);
@@ -499,7 +486,6 @@ function startRESTPolling() {
         }
     }, 1000); // Poll every 1 second for better real-time updates
 
-    // Return cleanup function
     return () => {
         clearInterval(pollInterval);
         isStreaming = false;
@@ -507,30 +493,16 @@ function startRESTPolling() {
     };
 }
 
-// ------------------ DASHBOARD PRICE EMITTER ------------------
+// ------------------ PRICE EMITTER ------------------
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
-    const payloadDashboard = {};
     const payloadTrading = {};
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
         if (!md || md.currentPrice === 0) continue; 
         
-        const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
-        let change = 0;
-        if (lastCandle && lastCandle.open !== 0) {
-            change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
-        }
-
-        const tickerForClient = `${pair.replace('USDT', '')}/USD`;
-        payloadDashboard[tickerForClient] = {
-            price: md.currentPrice,
-            change: parseFloat(change.toFixed(2)),
-            countdown: secondsUntilNextMinute
-        };
-
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
@@ -539,8 +511,7 @@ setInterval(() => {
     }
     
     if (Object.keys(payloadTrading).length > 0) {
-        io.emit("price_update", payloadTrading);           
-        io.emit("dashboard_price_update", payloadDashboard);
+        io.emit("price_update", payloadTrading);
     }
 }, 1000);
 
@@ -567,8 +538,6 @@ db.once("open", async () => {
 
   try {
     const TradeModel = mongoose.model('Trade');
-    const UserModel = mongoose.model('User');
-
     const tradeUpdateResult = await TradeModel.updateMany(
       { 
         status: { $ne: 'closed' },
@@ -587,19 +556,12 @@ db.once("open", async () => {
       }
     );
     console.log(`🧹 Safely closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
-
-    const userUpdateResult = await UserModel.updateMany(
-      { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
-      { $set: { createdAt: new Date() } }
-    );
-    console.log(`🧹 Safely fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
-
   } catch (error) {
     console.error("Warning: Pre-boot database cleanup failed:", error.message);
   }
 
   await initializeMarketData();
-  startMarketDataStream(); // This will automatically fall back to REST polling if WebSocket fails
+  startMarketDataStream();
 
   // Initialize trade module
   try {
@@ -609,16 +571,10 @@ db.once("open", async () => {
     
     if (typeof tradeModule.initialize === "function") {
         tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS);
-        console.log("✅ Trade module initialized successfully");
-    } else if (typeof tradeModule === "function") {
-        tradeModule(io, User, Trade, marketData, TRADE_PAIRS);
-        console.log("✅ Trade module initialized successfully");
-    } else {
-        console.warn("⚠️ Trade module export not recognized - trading features may not work");
+        console.log("✅ Trade module initialized with real-time candles");
     }
   } catch (error) {
     console.error("❌ Error loading trade module:", error.message);
-    console.log("⚠️ Continuing without trade module");
   }
 });
 
@@ -636,20 +592,11 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`✅ Server is running and listening on port ${PORT}`));
 
-// ------------------ GLOBAL ERROR HANDLING ------------------
+// Global error handling
 process.on('unhandledRejection', (err) => {
     console.error('❌ Unhandled Promise Rejection:', err);
 });
 
 process.on('uncaughtException', (err) => {
     console.error('❌ Uncaught Exception:', err);
-    process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
-    server.close(() => {
-        console.log('Process terminated');
-    });
 });
