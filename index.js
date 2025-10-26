@@ -1,4 +1,4 @@
-// index.js
+// index.js - FIXED VERSION
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -81,7 +81,13 @@ const io = socketIo(server, {
 
 const marketData = {};
 TRADE_PAIRS.forEach(pair => {
-  marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
+  marketData[pair] = { 
+    currentPrice: 0, 
+    candles: [], 
+    currentCandle: null,
+    lastWebSocketUpdate: null,
+    isWebSocketActive: false
+  };
 });
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
@@ -237,15 +243,21 @@ async function initializeMarketData() {
 }
 
 let isStreaming = false;
+let restPollingInterval = null;
 
-// ⭐ FIXED: REST API Polling with real-time candle updates
+// ⭐ FIXED: REST API Polling with gap detection
 function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
     
     console.log("🔄 Starting REST API polling (Render compatible)...");
     
-    const pollInterval = setInterval(async () => {
+    // Clear existing interval if any
+    if (restPollingInterval) {
+        clearInterval(restPollingInterval);
+    }
+    
+    restPollingInterval = setInterval(async () => {
         try {
             const prices = await binance.futuresPrices();
             const now = new Date();
@@ -261,6 +273,18 @@ function startRESTPolling() {
                 const currentMinuteStart = new Date(now);
                 currentMinuteStart.setSeconds(0, 0);
                 currentMinuteStart.setMilliseconds(0);
+
+                // ⭐ NEW: Detect data gaps and handle gracefully
+                if (md.currentCandle && !md.isWebSocketActive) {
+                    const timeDiff = now.getTime() - md.lastWebSocketUpdate;
+                    if (timeDiff > 120000) { // 2 minutes gap
+                        console.log(`⚠️ Data gap detected for ${pair}: ${Math.round(timeDiff/1000)}s`);
+                        // Don't update current candle with old data, start fresh
+                        if (md.currentCandle.timestamp.getTime() < currentMinuteStart.getTime() - 60000) {
+                            md.currentCandle = null;
+                        }
+                    }
+                }
 
                 // Initialize currentCandle if needed
                 if (!md.currentCandle) {
@@ -296,13 +320,16 @@ function startRESTPolling() {
                         candleOverride[pair] = null;
                     }
                     
+                    // ⭐ FIX: Validate candle before saving (prevent long wicks)
+                    const validatedCandle = validateCandle(completed, previousPrice);
+                    
                     // Save completed candle
-                    if (completed.open > 0 && completed.close > 0) {
-                        md.candles.push(completed);
+                    if (validatedCandle.open > 0 && validatedCandle.close > 0) {
+                        md.candles.push(validatedCandle);
                         if (md.candles.length > 200) md.candles.shift();
                         
                         // Save to database
-                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
+                        Candle.updateOne({ asset: pair, timestamp: validatedCandle.timestamp }, { $set: validatedCandle }, { upsert: true }).catch(err => {
                             console.error(`DB Error saving completed candle for ${pair}:`, err.message);
                         });
                     }
@@ -317,19 +344,22 @@ function startRESTPolling() {
                         close: price 
                     };
                 } else {
-                    // ⭐ FIX: Update current candle in real-time
-                    md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                    md.currentCandle.low = Math.min(md.currentCandle.low, price);
-                    md.currentCandle.close = price;
+                    // ⭐ FIX: Update current candle in real-time with validation
+                    if (md.isWebSocketActive || !isPriceSpike(price, md.currentCandle)) {
+                        md.currentCandle.high = Math.max(md.currentCandle.high, price);
+                        md.currentCandle.low = Math.min(md.currentCandle.low, price);
+                        md.currentCandle.close = price;
+                    }
                 }
 
                 // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
                 const chartData = {
                     asset: pair, 
-                    candles: [...md.candles, md.currentCandle], // Include current candle in chart data
+                    candles: [...md.candles], // Don't include current candle in historical data
                     currentCandle: md.currentCandle,
                     currentPrice: price,
-                    timestamp: now.getTime()
+                    timestamp: now.getTime(),
+                    dataSource: md.isWebSocketActive ? 'websocket' : 'rest'
                 };
 
                 io.emit("market_data", chartData);
@@ -338,28 +368,69 @@ function startRESTPolling() {
         } catch (err) {
             console.error('❌ REST polling error:', err.message);
         }
-    }, 2000); // Poll every 2 seconds
+    }, 3000); // ⭐ INCREASED: Poll every 3 seconds (less aggressive)
 
     // Return cleanup function
     return () => {
-        clearInterval(pollInterval);
+        if (restPollingInterval) {
+            clearInterval(restPollingInterval);
+            restPollingInterval = null;
+        }
         isStreaming = false;
         console.log('🔄 REST API polling stopped');
     };
 }
 
-// Keep the original WebSocket function but with fallback
+// ⭐ NEW: Candle validation function to prevent long wicks
+function validateCandle(candle, previousPrice) {
+    const bodySize = Math.abs(candle.open - candle.close);
+    const totalRange = candle.high - candle.low;
+    
+    // If wicks are too long compared to body (more than 5x), normalize them
+    if (totalRange > 0 && bodySize > 0 && (totalRange / bodySize) > 5) {
+        console.log(`⚠️ Normalizing candle with abnormal wicks: ${candle.asset}`);
+        
+        const midPrice = (candle.open + candle.close) / 2;
+        const allowedWick = bodySize * 2; // Allow wicks up to 2x body size
+        
+        return {
+            ...candle,
+            high: Math.min(candle.high, midPrice + allowedWick),
+            low: Math.max(candle.low, midPrice - allowedWick)
+        };
+    }
+    
+    return candle;
+}
+
+// ⭐ NEW: Price spike detection
+function isPriceSpike(currentPrice, currentCandle) {
+    if (!currentCandle) return false;
+    
+    const typicalPrice = (currentCandle.high + currentCandle.low + currentCandle.close) / 3;
+    const priceDeviation = Math.abs(currentPrice - typicalPrice) / typicalPrice;
+    
+    // If price deviates more than 2% from typical price, it might be a spike
+    return priceDeviation > 0.02;
+}
+
+// ⭐ IMPROVED: WebSocket with better reconnection logic
 function startMarketDataStream() {
     if (isStreaming) return;
     
     console.log("⚡ Attempting Binance WebSocket...");
     
+    // ⭐ INCREASED: Longer timeout (30 seconds)
     const connectionTimeout = setTimeout(() => {
         if (!isStreaming) {
-            console.log("❌ WebSocket timeout, switching to REST polling");
+            console.log("❌ WebSocket timeout after 30s, switching to REST polling");
+            // Mark all pairs as not using WebSocket
+            TRADE_PAIRS.forEach(pair => {
+                marketData[pair].isWebSocketActive = false;
+            });
             startRESTPolling();
         }
-    }, 10000);
+    }, 30000); // ⭐ CHANGED: 30 seconds timeout
     
     const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
     
@@ -372,6 +443,9 @@ function startMarketDataStream() {
                 
                 if (!md) return;
                 
+                // ⭐ NEW: Mark as WebSocket active and track last update
+                md.isWebSocketActive = true;
+                md.lastWebSocketUpdate = Date.now();
                 md.currentPrice = price;
                 
                 const now = new Date();
@@ -410,11 +484,14 @@ function startMarketDataStream() {
                         candleOverride[pair] = null;
                     }
                     
-                    if (completed.open > 0 && completed.close > 0) {
-                        md.candles.push(completed);
+                    // ⭐ FIX: Validate candle before saving
+                    const validatedCandle = validateCandle(completed, md.currentPrice);
+                    
+                    if (validatedCandle.open > 0 && validatedCandle.close > 0) {
+                        md.candles.push(validatedCandle);
                         if (md.candles.length > 200) md.candles.shift();
                         
-                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
+                        Candle.updateOne({ asset: pair, timestamp: validatedCandle.timestamp }, { $set: validatedCandle }, { upsert: true }).catch(err => {
                             console.error(`DB Error saving completed candle for ${pair}:`, err.message);
                         });
                     }
@@ -434,13 +511,14 @@ function startMarketDataStream() {
                     md.currentCandle.close = price;
                 }
 
-                // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
+                // ⭐ FIX: Emit proper data structure
                 io.emit("market_data", { 
                     asset: pair, 
-                    candles: [...md.candles, md.currentCandle], // Include current candle
+                    candles: [...md.candles], // Don't include current candle in historical
                     currentCandle: md.currentCandle,
                     currentPrice: price,
-                    timestamp: now.getTime()
+                    timestamp: now.getTime(),
+                    dataSource: 'websocket'
                 });
                 
             } catch (streamErr) {
@@ -450,16 +528,29 @@ function startMarketDataStream() {
             open: () => {
                 clearTimeout(connectionTimeout);
                 isStreaming = true;
+                // Mark all pairs as using WebSocket
+                TRADE_PAIRS.forEach(pair => {
+                    marketData[pair].isWebSocketActive = true;
+                    marketData[pair].lastWebSocketUpdate = Date.now();
+                });
                 console.log('✅ Binance WebSocket connected');
             },
             close: (reason) => {
                 isStreaming = false;
+                // Mark all pairs as not using WebSocket
+                TRADE_PAIRS.forEach(pair => {
+                    marketData[pair].isWebSocketActive = false;
+                });
                 console.warn(`⚠️ WebSocket closed: ${reason}. Switching to REST polling...`);
                 startRESTPolling();
             },
             error: (err) => {
                 clearTimeout(connectionTimeout);
                 isStreaming = false;
+                // Mark all pairs as not using WebSocket
+                TRADE_PAIRS.forEach(pair => {
+                    marketData[pair].isWebSocketActive = false;
+                });
                 console.error('❌ WebSocket Error:', err.message);
                 console.log('🔄 Switching to REST polling...');
                 startRESTPolling();
@@ -467,6 +558,10 @@ function startMarketDataStream() {
         });
     } catch (err) {
         console.error('❌ WebSocket setup failed:', err.message);
+        // Mark all pairs as not using WebSocket
+        TRADE_PAIRS.forEach(pair => {
+            marketData[pair].isWebSocketActive = false;
+        });
         startRESTPolling();
     }
 }
