@@ -545,9 +545,15 @@ function startRESTPolling() {
 }
 
 // ------------------ PRICE EMITTER ------------------
+let lastPriceEmitTime = 0;
+const PRICE_EMIT_INTERVAL = 500; // Emit every 500ms instead of every second
+
 setInterval(() => {
-    const now = new Date();
-    const secondsUntilNextMinute = 60 - now.getSeconds();
+    const now = Date.now();
+    if (now - lastPriceEmitTime < PRICE_EMIT_INTERVAL) return;
+    
+    lastPriceEmitTime = now;
+    const secondsUntilNextMinute = 60 - new Date().getSeconds();
     const payloadTrading = {};
 
     for (const pair of TRADE_PAIRS) {
@@ -557,14 +563,14 @@ setInterval(() => {
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
-            timestamp: now.getTime()
+            timestamp: now
         };
     }
     
     if (Object.keys(payloadTrading).length > 0) {
         io.emit("price_update", payloadTrading);
     }
-}, 1000);
+}, 100); // Check every 100ms but only emit every 500ms
 
 // ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI, { 
