@@ -97,17 +97,25 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
             const userId = req.userId;
             const frontFile = req.files.front[0];
-            const backFile = req.files.back[1];
+            const backFile = req.files.back[0]; // ✅ FIXED: Changed from [1] to [0]
             
-            // 3. Create container if it doesn't exist
+            // 3. Validate file buffers
+            if (!frontFile.buffer || !backFile.buffer) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Invalid file data. Please try uploading again.' 
+                });
+            }
+
+            // 4. Create container if it doesn't exist
             const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
             await containerClient.createIfNotExists({ access: 'blob' });
 
-            // 4. Define secure blob paths
+            // 5. Define secure blob paths
             const frontBlobPath = `kyc-${userId}/front_${Date.now()}_${frontFile.originalname}`;
             const backBlobPath = `kyc-${userId}/back_${Date.now()}_${backFile.originalname}`;
 
-            // 5. Upload Files to Azure Blob Storage
+            // 6. Upload Files to Azure Blob Storage
             const frontBlobClient = containerClient.getBlockBlobClient(frontBlobPath);
             await frontBlobClient.uploadData(frontFile.buffer, {
                 blobHTTPHeaders: { blobContentType: frontFile.mimetype }
@@ -118,7 +126,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 blobHTTPHeaders: { blobContentType: backFile.mimetype }
             });
 
-            // 6. Update User KYC Status in Database
+            // 7. Update User KYC Status in Database
             const user = await User.findById(userId);
             if (!user) {
                 return res.status(404).json({ 
@@ -137,7 +145,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
             await user.save();
 
-            // 7. Send successful response
+            // 8. Send successful response
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
