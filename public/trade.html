@@ -508,7 +508,7 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </main>
 </div>
 
-<!-- All modals included -->
+<!-- All your modals remain the same -->
 <div id="modal-overlay" class="modal-overlay hidden fixed inset-0 bg-black/70 items-center justify-center"></div>
 <div id="modal-pending" class="modal hidden fixed inset-0 items-center justify-center p-4">
     <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
@@ -621,6 +621,7 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </div>
 </div>
 
+
 <nav class="bottom-nav">
     <a href="dashboard.html" class="nav-link" id="nav-dashboard">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
@@ -709,7 +710,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let assetPrices = {};
     let activeTab = 'trade';
 
-    // --- Charting Functions (FIXED) ---
+    // --- Charting Functions ---
     function initChart(candles) {
         if (!candles || candles.length === 0) { 
             myChart.clear(); 
@@ -782,37 +783,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ⭐ FIX: Candle validation and normalization
-    function normalizeCandle(candle, currentPrice) {
-        if (!candle) {
-            return {
-                timestamp: Date.now(),
-                open: currentPrice,
-                high: currentPrice,
-                low: currentPrice,
-                close: currentPrice
-            };
-        }
-
-        // Fix abnormal opening prices
-        if (candle.open > currentPrice * 2 || candle.open < currentPrice / 2) {
-            console.warn('Fixing abnormal candle opening:', {
-                originalOpen: candle.open,
-                currentPrice: currentPrice,
-                fixedOpen: currentPrice
-            });
-            candle.open = currentPrice;
-        }
-
-        return {
-            timestamp: candle.timestamp || Date.now(),
-            open: candle.open,
-            high: Math.max(candle.open, candle.high || candle.open, currentPrice),
-            low: Math.min(candle.open, candle.low || candle.open, currentPrice),
-            close: currentPrice
-        };
-    }
-
     // --- Connection Status Functions ---
     function updateConnectionStatus(status, message) {
         const statusElem = document.getElementById('connection-status');
@@ -832,65 +802,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Socket.IO Event Handlers ---
     socket.on('connect', () => {
-        console.log('Connected to server');
+        console.log('✅ Connected to server');
         updateConnectionStatus('connected', 'Connected');
         showStatus('Connected to server', 'green');
     });
 
     socket.on('disconnect', (reason) => {
-        console.log('Disconnected:', reason);
+        console.log('❌ Disconnected:', reason);
         updateConnectionStatus('disconnected', 'Disconnected');
         showStatus('Disconnected from server', 'red');
     });
 
     socket.on('connect_error', (error) => {
-        console.log('Connection error:', error.message);
+        console.log('❌ Connection error:', error.message);
         updateConnectionStatus('disconnected', 'Connection failed');
     });
 
-    // ⭐ FIX: Proper market_data handler with candle normalization
-    socket.on('market_data', (data) => { 
-        if (data.asset === currentAsset) {
-            console.log('Market Data Received for:', data.asset);
-            
-            if (!marketData[data.asset]) {
-                marketData[data.asset] = {};
-            }
-            
-            const currentPrice = data.currentPrice || lastPrice;
-            
-            marketData[data.asset].candles = data.candles || [];
-            marketData[data.asset].currentPrice = currentPrice;
-            
-            // ⭐ FIX: Normalize current forming candle
-            marketData[data.asset].currentCandle = normalizeCandle(data.currentCandle, currentPrice);
-            
-            const completeCandles = [
-                ...(marketData[data.asset].candles || []),
-                marketData[data.asset].currentCandle
-            ].filter(candle => candle && typeof candle.open === 'number');
-            
-            console.log('Complete candles:', completeCandles.length);
-            
-            if (completeCandles.length > 0) {
-                updateChart(completeCandles);
-            }
-            
-            if (data.currentPrice && data.currentPrice !== lastPrice) {
-                currentPriceElem.classList.remove('price-up', 'price-down');
-                currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
-                currentPriceElem.textContent = formatPrice(data.currentPrice, currentAsset);
-                lastPrice = data.currentPrice;
-            }
-        }
-    });
-
     socket.on('init', (data) => {
-        console.log('Received init data');
-        
-        marketData = {};
-        
-        const assets = Object.keys(data.marketData || ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']);
+        console.log('📡 Received init data:', data);
+        marketData = data.marketData;
+        const assets = Object.keys(marketData);
         populateAssetSelector(assets);
 
         const lastAsset = localStorage.getItem('lastSelectedAsset');
@@ -900,35 +831,11 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBalance(data.balance);
 
         tradeHistoryContainer.innerHTML = '';
-        fullTradeHistory = data.tradeHistory || [];
+        fullTradeHistory = data.tradeHistory;
         visibleHistoryCount = 0;
         loadMoreTrades();
 
-        initChart([]);
-    });
-
-    socket.on('copy_trades_available', (data) => {
-        if (activeTab === 'copy-trade') {
-            availableCopyTrades = data.copyTrades || [];
-            renderCopyTrades();
-        }
-    });
-
-    socket.on('copy_trade_success', (data) => {
-        showCopySuccessPopup(data.asset || 'that trade'); 
-        socket.emit('request_copy_trades'); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
-        });
-    });
-
-    socket.on('copy_trade_executed', (data) => {
-        showCopyExecutedToast(data.trade);
-        updateBalance(data.balance);
-        addTradeToHistory(data.trade);
+        updateUIForCurrentAsset();
     });
 
     socket.on('price_update', (data) => {
@@ -962,6 +869,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    socket.on('market_data', (data) => { 
+        if (data.asset === currentAsset) updateChart(data.candles); 
+    });
+
     socket.on('trade_pending', (data) => { 
         updateBalance(data.balance); 
         addTradeToHistory(data.trade);
@@ -987,13 +898,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('trade_result', (data) => {
         updateBalance(data.balance);
+
         tradeHistoryData[data.trade._id] = data.trade;
+
         const tradeRow = document.getElementById(`trade-${data.trade._id}`);
         if (!tradeRow) {
             addTradeToHistory(data.trade);
         } else {
             updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
         }
+
         setTradeButtonsDisabled(false);
 
         if (data.trade.result === 'WIN') {
@@ -1012,6 +926,38 @@ document.addEventListener('DOMContentLoaded', () => {
         setTradeButtonsDisabled(false); 
     });
 
+    socket.on('copy_trades_available', (data) => {
+        if (activeTab === 'copy-trade') {
+            availableCopyTrades = data.copyTrades || [];
+            renderCopyTrades();
+
+            if (data.message && data.message.includes('Minimum $100')) {
+                copyTradeStatus.textContent = data.message;
+                copyTradeStatus.classList.remove('text-red-400');
+                copyTradeStatus.classList.add('text-yellow-400');
+            } else {
+                copyTradeStatus.textContent = '';
+            }
+        }
+    });
+
+    socket.on('copy_trade_success', (data) => {
+        showCopySuccessPopup(data.asset || 'that trade'); 
+        socket.emit('request_copy_trades'); 
+
+        const allCopyBtns = document.querySelectorAll('.copy-btn');
+        allCopyBtns.forEach(btn => {
+            btn.disabled = false;
+            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
+        });
+    });
+
+    socket.on('copy_trade_executed', (data) => {
+        showCopyExecutedToast(data.trade);
+        updateBalance(data.balance);
+        addTradeToHistory(data.trade);
+    });
+
     socket.on('error', (data) => { 
         showStatus(`Error: ${data.message}`, 'red'); 
         setTradeButtonsDisabled(false); 
@@ -1022,6 +968,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
         });
     });
+
+    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
 
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
@@ -1043,16 +991,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Helper Functions ---
+
     function formatPrice(price, asset) {
         const decimalMap = {
             'BTCUSDT': 2, 'ETHUSDT': 2, 'BNBUSDT': 2, 'LTCUSDT': 2, 'SOLUSDT': 2, 'AVAXUSDT': 2,
-            'ADAUSDT': 4, 'MATICUSDT': 4, 'XRPUSDT': 4, 'DOTUSDT': 3, 'DOGEUSDT': 5
+            'ADAUSDT': 4, 'MATICUSDT': 4, 'XRPUSDT': 4,
+            'DOTUSDT': 3,
+            'DOGEUSDT': 5
         };
         const decimals = decimalMap[asset] || 2;
         return price.toFixed(decimals);
     }
 
     // --- Copy Trading Functions ---
+
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
 
@@ -1073,6 +1025,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 availableCopyTrades = data.copyTrades || [];
                 renderCopyTrades();
+
+                if (data.message && data.message.includes('Minimum $100')) {
+                    copyTradeStatus.textContent = data.message;
+                    copyTradeStatus.classList.remove('text-red-400');
+                    copyTradeStatus.classList.add('text-yellow-400');
+                } else {
+                    copyTradeStatus.textContent = '';
+                }
             }
         } catch (error) {
             console.error('Error fetching copy trades:', error);
@@ -1141,6 +1101,7 @@ document.addEventListener('DOMContentLoaded', () => {
             copyTradesContainer.appendChild(tradeCard);
         });
 
+        // Attach listeners after rendering
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -1221,6 +1182,7 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduledBtn.addEventListener("click", () => setTradeMode(true));
 
     // --- Core Trade & UI Functions ---
+
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
@@ -1266,6 +1228,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Trade History Functions ---
+
     function createTradeHistoryRow(trade) {
         tradeHistoryData[trade._id] = trade;
         const tradeElement = document.createElement('div');
@@ -1350,6 +1313,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- UI Helper Functions ---
+
     function showStatus(message, color) { 
         const colorMap = { red: 'text-red-400', green: 'text-green-500', blue: 'text-blue-400', yellow: 'text-yellow-500', gray: 'text-gray-400' }; 
         tradeStatusElem.textContent = message; 
@@ -1365,17 +1329,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateUIForCurrentAsset() {
-        if (marketData[currentAsset] && marketData[currentAsset].candles) {
-            const completeCandles = [
-                ...(marketData[currentAsset].candles || []),
-                ...(marketData[currentAsset].currentCandle ? [marketData[currentAsset].currentCandle] : [])
-            ];
-            initChart(completeCandles);
+        if (marketData[currentAsset]) {
+            initChart(marketData[currentAsset].candles);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            initChart([]);
+            myChart.clear();
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
@@ -1386,6 +1346,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Popup & Modal Functions ---
+
     function showModal(modal) {
         hideAllModals(); 
         overlay.classList.remove('hide');
@@ -1428,6 +1389,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Popup Content Setters ---
+
     function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
@@ -1467,7 +1429,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showTradeDetails(tradeId) {
         const trade = tradeHistoryData[tradeId];
-        if (!trade) return;
+        if (!trade) {
+            console.error('Trade details not found for ID:', tradeId);
+            return;
+        }
 
         const asset = trade.asset || trade.tradingPair;
         const pnl = trade.pnl;
@@ -1476,6 +1441,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('detail-asset').textContent = asset;
         document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt).toLocaleString();
+
         document.getElementById('detail-opening-price').textContent = openingPrice ? `$${formatPrice(openingPrice, asset)}` : 'N/A';
         document.getElementById('detail-closing-price').textContent = closingPrice ? `$${formatPrice(closingPrice, asset)}` : 'N/A';
 
@@ -1496,6 +1462,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Event Listeners for Close Buttons ---
+
     const closeButtons = document.querySelectorAll('.btn-close, .close-trade-details');
     closeButtons.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1513,6 +1480,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Confetti Logic ---
+
     function triggerConfetti() {
         const container = document.getElementById('confetti-container');
         container.innerHTML = '';
@@ -1541,6 +1509,7 @@ document.addEventListener('DOMContentLoaded', () => {
     populateTimeSelector();
     setInterval(populateTimeSelector, 60000);
     setInterval(() => socket.emit('request_copy_trades'), 30000); 
+
 });
 </script>
 </body>
