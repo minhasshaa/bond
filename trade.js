@@ -188,7 +188,8 @@ async function settleTradesWrapper(io, User, Trade, pair, exitPrice) {
 // --- END NEW MONITORING LOGIC ---
 
 
-async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride) {
+async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
+    // ⭐ FIXED: Removed candleOverride parameter entirely
     globalMarketData = marketData; // Set global reference
 
     // ⭐ FIX: Ensure marketData is available globally
@@ -230,6 +231,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverri
     // START THE MONITORING LOOP
     runTradeMonitor(io, User, Trade, TRADE_PAIRS);
 
+    console.log("✅ Trade module initialized - NO CANDLE OVERRIDE FUNCTIONALITY");
 
     io.on("connection", async (socket) => {
         try {
