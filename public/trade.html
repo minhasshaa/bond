@@ -508,7 +508,7 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </main>
 </div>
 
-<!-- All your modals remain the same -->
+<!-- All modals included -->
 <div id="modal-overlay" class="modal-overlay hidden fixed inset-0 bg-black/70 items-center justify-center"></div>
 <div id="modal-pending" class="modal hidden fixed inset-0 items-center justify-center p-4">
     <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
@@ -626,7 +626,7 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
         <span>Home</span>
     </a>
-    <a href="trade.html" class="nav-link" id="nav-trade">
+    <a href="trade.html" class="nav-link active" id="nav-trade">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
         <span>Trade</span>
     </a>
@@ -651,22 +651,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     document.getElementById(`nav-${currentPage}`).classList.add('active');
 
-    // ⭐ FIX: Improved Socket.IO connection with auth fix
-    const token = localStorage.getItem('authToken');
-    if (!token) {
-        window.location.href = '/login.html';
-    }
-
-    const socket = io({ 
-        auth: { 
-            token: token
-        },
-        transports: ['websocket', 'polling'],
-        pingInterval: 10000, 
-        pingTimeout: 15000, 
-        reconnectionDelay: 5000, 
-        reconnectionDelayMax: 10000 
-    });
+    const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
     // --- DOM Elements ---
     const balanceElem = document.getElementById('balance-display');
@@ -696,7 +681,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noCopyTrades = document.getElementById('noCopyTrades');
     const copyTradeStatus = document.getElementById('copyTradeStatus');
 
-    // Charting - Initialize immediately
+    // Charting
     const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
     // Popup Elements
@@ -723,23 +708,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let tradeHistoryData = {};
     let assetPrices = {};
     let activeTab = 'trade';
-
-    // --- Connection Status Functions ---
-    function updateConnectionStatus(status, message) {
-        const statusElem = document.getElementById('connection-status');
-        if (!statusElem) return;
-        
-        const dot = statusElem.querySelector('span:first-child');
-        const text = statusElem.querySelector('span:last-child');
-        
-        dot.className = `inline-block w-2 h-2 rounded-full mr-1 ${
-            status === 'connected' ? 'bg-green-500' : 
-            status === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
-        }`;
-        text.textContent = message;
-        text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
-                         status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
-    }
 
     // --- Charting Functions (FIXED) ---
     function initChart(candles) {
@@ -817,7 +785,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // ⭐ FIX: Candle validation and normalization
     function normalizeCandle(candle, currentPrice) {
         if (!candle) {
-            // Create a default candle if none provided
             return {
                 timestamp: Date.now(),
                 open: currentPrice,
@@ -829,7 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Fix abnormal opening prices
         if (candle.open > currentPrice * 2 || candle.open < currentPrice / 2) {
-            console.warn('⚠️ Fixing abnormal candle opening:', {
+            console.warn('Fixing abnormal candle opening:', {
                 originalOpen: candle.open,
                 currentPrice: currentPrice,
                 fixedOpen: currentPrice
@@ -837,79 +804,78 @@ document.addEventListener('DOMContentLoaded', () => {
             candle.open = currentPrice;
         }
 
-        // Ensure candle values are logical
         return {
             timestamp: candle.timestamp || Date.now(),
             open: candle.open,
             high: Math.max(candle.open, candle.high || candle.open, currentPrice),
             low: Math.min(candle.open, candle.low || candle.open, currentPrice),
-            close: currentPrice // Current forming candle should close at current price
+            close: currentPrice
         };
     }
 
-    // --- Socket.IO Event Handlers with Connection Status ---
+    // --- Connection Status Functions ---
+    function updateConnectionStatus(status, message) {
+        const statusElem = document.getElementById('connection-status');
+        if (!statusElem) return;
+        
+        const dot = statusElem.querySelector('span:first-child');
+        const text = statusElem.querySelector('span:last-child');
+        
+        dot.className = `inline-block w-2 h-2 rounded-full mr-1 ${
+            status === 'connected' ? 'bg-green-500' : 
+            status === 'disconnected' ? 'bg-red-500' : 'bg-yellow-500'
+        }`;
+        text.textContent = message;
+        text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
+                         status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
+    }
+
+    // --- Socket.IO Event Handlers ---
     socket.on('connect', () => {
-        console.log('✅ Connected to server');
+        console.log('Connected to server');
         updateConnectionStatus('connected', 'Connected');
         showStatus('Connected to server', 'green');
     });
 
     socket.on('disconnect', (reason) => {
-        console.log('❌ Disconnected:', reason);
+        console.log('Disconnected:', reason);
         updateConnectionStatus('disconnected', 'Disconnected');
         showStatus('Disconnected from server', 'red');
     });
 
     socket.on('connect_error', (error) => {
-        console.log('❌ Connection error:', error.message);
+        console.log('Connection error:', error.message);
         updateConnectionStatus('disconnected', 'Connection failed');
-        
-        // If auth error, redirect to login
-        if (error.message.includes('auth') || error.message.includes('Authentication') || error.message.includes('token')) {
-            showStatus('Authentication failed - redirecting to login', 'red');
-            setTimeout(() => window.location.href = '/login.html', 2000);
-        } else {
-            showStatus('Connection failed', 'red');
-        }
     });
 
     // ⭐ FIX: Proper market_data handler with candle normalization
     socket.on('market_data', (data) => { 
         if (data.asset === currentAsset) {
-            console.log('📊 Market Data Received:', {
-                asset: data.asset,
-                historicalCandles: data.candles?.length,
-                currentCandle: data.currentCandle,
-                currentPrice: data.currentPrice
-            });
+            console.log('Market Data Received for:', data.asset);
             
-            // Update market data
             if (!marketData[data.asset]) {
                 marketData[data.asset] = {};
             }
             
             const currentPrice = data.currentPrice || lastPrice;
             
-            // Store historical candles
             marketData[data.asset].candles = data.candles || [];
             marketData[data.asset].currentPrice = currentPrice;
             
             // ⭐ FIX: Normalize current forming candle
             marketData[data.asset].currentCandle = normalizeCandle(data.currentCandle, currentPrice);
             
-            // Update chart with complete data
             const completeCandles = [
                 ...(marketData[data.asset].candles || []),
                 marketData[data.asset].currentCandle
             ].filter(candle => candle && typeof candle.open === 'number');
             
-            console.log('📊 Complete candles for chart:', completeCandles.length);
+            console.log('Complete candles:', completeCandles.length);
             
             if (completeCandles.length > 0) {
                 updateChart(completeCandles);
             }
             
-            // Update price display
             if (data.currentPrice && data.currentPrice !== lastPrice) {
                 currentPriceElem.classList.remove('price-up', 'price-down');
                 currentPriceElem.classList.add(data.currentPrice > lastPrice ? 'price-up' : 'price-down');
@@ -920,47 +886,31 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('init', (data) => {
-        console.log('📡 Received init data:', data);
+        console.log('Received init data');
         
-        // Initialize with empty market data structure
         marketData = {};
         
-        // Get default assets
-        const assets = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 
-                       'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'LINKUSDT', 'MATICUSDT'];
-        
+        const assets = Object.keys(data.marketData || ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']);
         populateAssetSelector(assets);
 
         const lastAsset = localStorage.getItem('lastSelectedAsset');
         currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
         setActiveAsset(currentAsset);
 
-        if (data.balance !== undefined) {
-            updateBalance(data.balance);
-        }
+        updateBalance(data.balance);
 
         tradeHistoryContainer.innerHTML = '';
         fullTradeHistory = data.tradeHistory || [];
         visibleHistoryCount = 0;
         loadMoreTrades();
 
-        // Initialize chart with empty data - it will be populated by market_data events
         initChart([]);
     });
 
-    // ... (rest of your existing socket event handlers remain the same)
     socket.on('copy_trades_available', (data) => {
         if (activeTab === 'copy-trade') {
             availableCopyTrades = data.copyTrades || [];
             renderCopyTrades();
-
-            if (data.message && data.message.includes('Minimum $100')) {
-                copyTradeStatus.textContent = data.message;
-                copyTradeStatus.classList.remove('text-red-400');
-                copyTradeStatus.classList.add('text-yellow-400');
-            } else {
-                copyTradeStatus.textContent = '';
-            }
         }
     });
 
@@ -1037,16 +987,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('trade_result', (data) => {
         updateBalance(data.balance);
-
         tradeHistoryData[data.trade._id] = data.trade;
-
         const tradeRow = document.getElementById(`trade-${data.trade._id}`);
         if (!tradeRow) {
             addTradeToHistory(data.trade);
         } else {
             updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
         }
-
         setTradeButtonsDisabled(false);
 
         if (data.trade.result === 'WIN') {
@@ -1096,20 +1043,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Helper Functions ---
-
     function formatPrice(price, asset) {
         const decimalMap = {
             'BTCUSDT': 2, 'ETHUSDT': 2, 'BNBUSDT': 2, 'LTCUSDT': 2, 'SOLUSDT': 2, 'AVAXUSDT': 2,
-            'ADAUSDT': 4, 'MATICUSDT': 4, 'XRPUSDT': 4,
-            'DOTUSDT': 3,
-            'DOGEUSDT': 5
+            'ADAUSDT': 4, 'MATICUSDT': 4, 'XRPUSDT': 4, 'DOTUSDT': 3, 'DOGEUSDT': 5
         };
         const decimals = decimalMap[asset] || 2;
         return price.toFixed(decimals);
     }
 
     // --- Copy Trading Functions ---
-
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
 
@@ -1130,14 +1073,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 availableCopyTrades = data.copyTrades || [];
                 renderCopyTrades();
-
-                if (data.message && data.message.includes('Minimum $100')) {
-                    copyTradeStatus.textContent = data.message;
-                    copyTradeStatus.classList.remove('text-red-400');
-                    copyTradeStatus.classList.add('text-yellow-400');
-                } else {
-                    copyTradeStatus.textContent = '';
-                }
             }
         } catch (error) {
             console.error('Error fetching copy trades:', error);
@@ -1206,7 +1141,6 @@ document.addEventListener('DOMContentLoaded', () => {
             copyTradesContainer.appendChild(tradeCard);
         });
 
-        // Attach listeners after rendering
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -1287,7 +1221,6 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduledBtn.addEventListener("click", () => setTradeMode(true));
 
     // --- Core Trade & UI Functions ---
-
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
@@ -1333,7 +1266,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Trade History Functions ---
-
     function createTradeHistoryRow(trade) {
         tradeHistoryData[trade._id] = trade;
         const tradeElement = document.createElement('div');
@@ -1418,7 +1350,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- UI Helper Functions ---
-
     function showStatus(message, color) { 
         const colorMap = { red: 'text-red-400', green: 'text-green-500', blue: 'text-blue-400', yellow: 'text-yellow-500', gray: 'text-gray-400' }; 
         tradeStatusElem.textContent = message; 
@@ -1435,37 +1366,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset] && marketData[currentAsset].candles) {
-            // Get the complete candle data including current forming candle
             const completeCandles = [
                 ...(marketData[currentAsset].candles || []),
                 ...(marketData[currentAsset].currentCandle ? [marketData[currentAsset].currentCandle] : [])
             ];
-            
             initChart(completeCandles);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            // Show empty chart while waiting for data
             initChart([]);
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
     }
 
-    // ⭐ FIX: Add resize handler and ensure chart is properly initialized
     window.addEventListener('resize', () => {
-        if (myChart) {
-            try {
-                myChart.resize();
-            } catch (e) {
-                console.log('Chart resize error:', e);
-            }
-        }
+        if (myChart) myChart.resize();
     });
 
     // --- Popup & Modal Functions ---
-
     function showModal(modal) {
         hideAllModals(); 
         overlay.classList.remove('hide');
@@ -1508,7 +1428,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Popup Content Setters ---
-
     function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
@@ -1548,10 +1467,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showTradeDetails(tradeId) {
         const trade = tradeHistoryData[tradeId];
-        if (!trade) {
-            console.error('Trade details not found for ID:', tradeId);
-            return;
-        }
+        if (!trade) return;
 
         const asset = trade.asset || trade.tradingPair;
         const pnl = trade.pnl;
@@ -1560,7 +1476,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('detail-asset').textContent = asset;
         document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt).toLocaleString();
-
         document.getElementById('detail-opening-price').textContent = openingPrice ? `$${formatPrice(openingPrice, asset)}` : 'N/A';
         document.getElementById('detail-closing-price').textContent = closingPrice ? `$${formatPrice(closingPrice, asset)}` : 'N/A';
 
@@ -1581,7 +1496,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Event Listeners for Close Buttons ---
-
     const closeButtons = document.querySelectorAll('.btn-close, .close-trade-details');
     closeButtons.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1599,7 +1513,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Confetti Logic ---
-
     function triggerConfetti() {
         const container = document.getElementById('confetti-container');
         container.innerHTML = '';
@@ -1628,7 +1541,6 @@ document.addEventListener('DOMContentLoaded', () => {
     populateTimeSelector();
     setInterval(populateTimeSelector, 60000);
     setInterval(() => socket.emit('request_copy_trades'), 30000); 
-
 });
 </script>
 </body>
