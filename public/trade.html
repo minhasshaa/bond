@@ -672,7 +672,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Charting
     const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
-
     // Popup Elements
     const overlay = document.getElementById('modal-overlay');
     const modalPending = document.getElementById('modal-pending');
@@ -697,6 +696,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let tradeHistoryData = {};
     let assetPrices = {};
     let activeTab = 'trade';
+
+    // ✅ ADD: Price update debouncing
+    let lastPriceUpdate = 0;
+    const PRICE_UPDATE_DEBOUNCE = 300; // Only update price display every 300ms
 
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
@@ -961,8 +964,12 @@ document.addEventListener('DOMContentLoaded', () => {
         addTradeToHistory(data.trade);
     });
 
-
+    // ✅ UPDATED: Price update with debouncing
     socket.on('price_update', (data) => {
+        const now = Date.now();
+        if (now - lastPriceUpdate < PRICE_UPDATE_DEBOUNCE) return;
+        lastPriceUpdate = now;
+        
         Object.entries(data).forEach(([asset, assetData]) => {
             assetPrices[asset] = assetData.price;
             if (marketData[asset]) {
@@ -1180,7 +1187,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     loadMoreBtn.addEventListener('click', loadMoreTrades);
 
-
     function addTradeToHistory(trade) {
         const tradeElement = createTradeHistoryRow(trade);
         tradeHistoryContainer.prepend(tradeElement); 
@@ -1375,7 +1381,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('copy-executed-text').textContent = `Copy trade for ${trade.asset || trade.tradingPair} is now active!`;
         showToast(toastCopyExecuted);
     }
-
 
     function showTradeDetails(tradeId) {
         const trade = tradeHistoryData[tradeId];
