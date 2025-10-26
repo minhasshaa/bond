@@ -65,6 +65,7 @@ app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
 // Admin routes with proper Azure configuration
+// Admin routes with proper Azure configuration
 try {
     let adminRoutes;
     const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
@@ -74,9 +75,16 @@ try {
         const { BlobServiceClient } = require('@azure/storage-blob');
         const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
         
+        // Extract account name and key from connection string
+        const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+        const accountName = connectionString.match(/AccountName=([^;]+)/)?.[1];
+        const accountKey = connectionString.match(/AccountKey=([^;]+)/)?.[1];
+        
         adminRoutes = require("./routes/admin")({
             blobServiceClient,
             KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents',
+            STORAGE_ACCOUNT_NAME: accountName,
+            STORAGE_ACCOUNT_KEY: accountKey,
             azureEnabled: true
         });
         console.log('✅ Admin routes loaded with Azure Storage for KYC');
