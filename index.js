@@ -178,7 +178,7 @@ async function getDashboardData(userId) {
 
         return {
             name: pair.replace('USDT', ''),
-            ticker: `${pair.replace('USDT', '')}/USD',
+            ticker: `${pair.replace('USDT', '')}/USD`,
             price: data.currentPrice,
             change: parseFloat(change.toFixed(2)),
             candles: data.candles
@@ -209,7 +209,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`);
+    console.log(`User connected: ${socket.id}`); // FIXED: This was line 212 with syntax error
 
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
@@ -410,7 +410,7 @@ mongoose.connect(process.env.MONGO_URI, {
     socketTimeoutMS: 45000,
 }).then(() => {
     console.log('✅ MongoDB connected successfully');
-}).catch(err) {
+}).catch(err => {
     console.error('❌ MongoDB connection failed:', err.message);
     process.exit(1);
 });
