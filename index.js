@@ -33,11 +33,6 @@ const TRADE_PAIRS = [
 ];
 module.exports.TRADE_PAIRS = TRADE_PAIRS;
 
-// REMOVED CANDLE OVERRIDE FUNCTIONALITY
-// const candleOverride = {};
-// TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
-// module.exports.candleOverride = candleOverride;
-
 // ------------------ MODELS & ROUTES ------------------
 // Ensure models are registered
 const User = require("./models/User");
@@ -123,30 +118,32 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
 // ------------------ CANDLE VALIDATION FUNCTION ------------------
-function validateCandle(candle) {
-    const MAX_PERCENT_CHANGE = 0.05; // Max 5% change per minute (reduced from 10%)
-    
+function validateCandle(candle, previousCandle = null) {
     if (!candle || !candle.open || !candle.close || candle.open <= 0) {
         return candle;
     }
     
+    const MAX_PERCENT_CHANGE = 0.02; // Max 2% change per minute (very conservative)
+    
+    // Calculate percentage change
     const percentChange = Math.abs((candle.close - candle.open) / candle.open);
     
     if (percentChange > MAX_PERCENT_CHANGE) {
-        console.warn(`⚠️ Abnormal candle detected for ${candle.asset}: ${(percentChange * 100).toFixed(2)}% change (capped at ${(MAX_PERCENT_CHANGE * 100).toFixed(2)}%)`);
+        console.warn(`🚨 CAPPING ABNORMAL CANDLE: ${candle.asset} had ${(percentChange * 100).toFixed(2)}% change, capping to ${(MAX_PERCENT_CHANGE * 100).toFixed(2)}%`);
         
-        // Cap the change to maximum allowed
+        // Cap to maximum allowed change
         const direction = candle.close > candle.open ? 1 : -1;
-        candle.close = candle.open * (1 + direction * MAX_PERCENT_CHANGE);
+        const cappedClose = candle.open * (1 + direction * MAX_PERCENT_CHANGE);
         
-        // Adjust high/low accordingly
-        candle.high = Math.max(candle.open, candle.close);
-        candle.low = Math.min(candle.open, candle.close);
+        // Apply the cap
+        candle.close = cappedClose;
+        candle.high = Math.max(candle.open, cappedClose, candle.high || candle.open);
+        candle.low = Math.min(candle.open, cappedClose, candle.low || candle.open);
     }
     
-    // Ensure high/low are consistent
-    candle.high = Math.max(candle.open, candle.close, candle.high);
-    candle.low = Math.min(candle.open, candle.close, candle.low);
+    // Ensure high/low make sense
+    candle.high = Math.max(candle.open, candle.close, candle.high || candle.open);
+    candle.low = Math.min(candle.open, candle.close, candle.low || candle.open);
     
     return candle;
 }
@@ -295,7 +292,7 @@ async function initializeMarketData() {
 
 let isStreaming = false;
 
-// ⭐ FIXED: REST API Polling with real-time candle updates (NO OVERRIDE)
+// ⭐ CLEANED: REST API Polling without any override functionality
 function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
@@ -312,7 +309,6 @@ function startRESTPolling() {
                 if (!price || !marketData[pair]) continue;
                 
                 const md = marketData[pair];
-                const previousPrice = md.currentPrice;
                 md.currentPrice = price;
                 
                 const currentMinuteStart = new Date(now);
@@ -334,15 +330,13 @@ function startRESTPolling() {
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
-                    // Complete the current candle
+                    // Complete the current candle with REAL price only
                     let completed = { ...md.currentCandle, close: price };
                     
-                    // ⭐ REMOVED CANDLE OVERRIDE LOGIC
-                    
-                    // Validate candle to prevent abnormalities
+                    // Validate the completed candle
                     completed = validateCandle(completed);
                     
-                    // Save completed candle
+                    // Save completed candle only if valid
                     if (completed.open > 0 && completed.close > 0) {
                         md.candles.push(completed);
                         if (md.candles.length > 200) md.candles.shift();
@@ -353,7 +347,7 @@ function startRESTPolling() {
                         });
                     }
                     
-                    // Start new candle
+                    // Start new candle with current price
                     md.currentCandle = { 
                         asset: pair, 
                         timestamp: currentMinuteStart, 
@@ -363,19 +357,16 @@ function startRESTPolling() {
                         close: price 
                     };
                 } else {
-                    // ⭐ FIX: Update current candle in real-time
+                    // Update current candle in real-time with REAL price only
                     md.currentCandle.high = Math.max(md.currentCandle.high, price);
                     md.currentCandle.low = Math.min(md.currentCandle.low, price);
                     md.currentCandle.close = price;
-                    
-                    // Validate current candle in real-time
-                    md.currentCandle = validateCandle(md.currentCandle);
                 }
 
-                // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
+                // Emit clean market data
                 const chartData = {
                     asset: pair, 
-                    candles: [...md.candles, md.currentCandle], // Include current candle in chart data
+                    candles: [...md.candles],
                     currentCandle: md.currentCandle,
                     currentPrice: price,
                     timestamp: now.getTime()
@@ -387,7 +378,7 @@ function startRESTPolling() {
         } catch (err) {
             console.error('❌ REST polling error:', err.message);
         }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
 
     // Return cleanup function
     return () => {
@@ -397,7 +388,7 @@ function startRESTPolling() {
     };
 }
 
-// WebSocket function without override
+// ⭐ CLEANED: WebSocket without any override functionality
 function startMarketDataStream() {
     if (isStreaming) return;
     
@@ -442,11 +433,10 @@ function startMarketDataStream() {
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
+                    // Complete current candle with REAL price only
                     let completed = { ...md.currentCandle, close: price };
                     
-                    // ⭐ REMOVED CANDLE OVERRIDE LOGIC
-                    
-                    // Validate candle
+                    // Validate completed candle
                     completed = validateCandle(completed);
                     
                     if (completed.open > 0 && completed.close > 0) {
@@ -458,6 +448,7 @@ function startMarketDataStream() {
                         });
                     }
                     
+                    // Start new candle with current price
                     md.currentCandle = { 
                         asset: pair, 
                         timestamp: currentMinuteStart, 
@@ -467,19 +458,16 @@ function startMarketDataStream() {
                         close: price 
                     };
                 } else {
-                    // ⭐ FIX: Update current candle in real-time for WebSocket too
+                    // Update current candle with REAL price only
                     md.currentCandle.high = Math.max(md.currentCandle.high, price);
                     md.currentCandle.low = Math.min(md.currentCandle.low, price);
                     md.currentCandle.close = price;
-                    
-                    // Validate current candle
-                    md.currentCandle = validateCandle(md.currentCandle);
                 }
 
-                // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
+                // Emit clean market data
                 io.emit("market_data", { 
                     asset: pair, 
-                    candles: [...md.candles, md.currentCandle], // Include current candle
+                    candles: [...md.candles],
                     currentCandle: md.currentCandle,
                     currentPrice: price,
                     timestamp: now.getTime()
@@ -492,7 +480,7 @@ function startMarketDataStream() {
             open: () => {
                 clearTimeout(connectionTimeout);
                 isStreaming = true;
-                console.log('✅ Binance WebSocket connected');
+                console.log('✅ Binance WebSocket connected - NO OVERRIDE FUNCTIONALITY');
             },
             close: (reason) => {
                 isStreaming = false;
@@ -605,21 +593,26 @@ db.once("open", async () => {
   }
 
   await initializeMarketData();
-  startMarketDataStream(); // This will automatically fall back to REST polling if WebSocket fails
+  startMarketDataStream();
 
-  // Fix trade module initialization
-  const tradeModule = require("./trade");
-  
-  // Get fresh references to models after connection
-  const User = mongoose.model('User');
-  const Trade = mongoose.model('Trade');
-  
-  if (typeof tradeModule.initialize === "function") {
-      tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, {}); // Pass empty object instead of candleOverride
-  } else if (typeof tradeModule === "function") {
-      tradeModule(io, User, Trade, marketData, TRADE_PAIRS, {}); // Pass empty object instead of candleOverride
-  } else {
-      console.warn("⚠️ Trade module export not recognized - trading features may not work");
+  // ⭐ IMPORTANT: Check if trade module exists and initialize WITHOUT override
+  try {
+    const tradeModule = require("./trade");
+    const User = mongoose.model('User');
+    const Trade = mongoose.model('Trade');
+    
+    if (typeof tradeModule.initialize === "function") {
+        console.log("✅ Initializing trade module WITHOUT candle override");
+        tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, {});
+    } else if (typeof tradeModule === "function") {
+        console.log("✅ Initializing trade module WITHOUT candle override");
+        tradeModule(io, User, Trade, marketData, TRADE_PAIRS, {});
+    } else {
+        console.warn("⚠️ Trade module export not recognized - trading features may not work");
+    }
+  } catch (error) {
+    console.error("❌ Error loading trade module:", error.message);
+    console.log("⚠️ Continuing without trade module");
   }
 });
 
