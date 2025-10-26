@@ -1,19 +1,22 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const { 
-    generateBlobSas, 
-    BlobSASPermissions, 
-    StorageSharedKeyCredential 
-} = require('@azure/storage-blob');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const { candleOverride, TRADE_PAIRS } = require('../index'); 
+const AdminCopyTrade = require('../models/AdminCopyTrade');
 
 // The entire module is now a function that accepts Azure dependencies
-module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }) {
+module.exports = function(azureConfig = {}) {
+    const { 
+        blobServiceClient = null, 
+        KYC_CONTAINER_NAME = null, 
+        STORAGE_ACCOUNT_NAME = null, 
+        STORAGE_ACCOUNT_KEY = null 
+    } = azureConfig;
+
     const router = express.Router();
 
-    // Admin security middleware (remains the same)
+    // Admin security middleware
     const adminAuth = (req, res, next) => {
         const adminKey = req.headers['x-admin-key'];
         if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
@@ -30,8 +33,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
-        if (!blobServiceClient || !STORAGE_ACCOUNT_KEY) {
-            return res.status(503).json({ success: false, message: 'Azure Storage not configured for review.' });
+        if (!blobServiceClient) {
+            return res.status(503).json({ success: false, message: 'Azure Storage not configured for KYC review.' });
         }
 
         try {
@@ -86,7 +89,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         }
     });
 
-
     // [POST] /api/admin/kyc/update - Update a user's KYC status
     router.post('/kyc/update', async (req, res) => {
         const { userId, newStatus, reason } = req.body;
@@ -119,7 +121,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
     });
 
     // ----------------------------------------------------------------------
-    // CORRECTED DEPOSIT/WITHDRAWAL ENDPOINTS
+    // CORRECTED ADMIN DATA ENDPOINT
     // ----------------------------------------------------------------------
 
     // GET all admin data
@@ -132,12 +134,13 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             }
 
             const users = await User.find(userQuery)
-                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions')
-                .populate('referredBy', 'username');
+                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt')
+                .populate('referredBy', 'username')
+                .lean();
 
             // Calculate total volume by pair and direction
             const tradeVolume = await Trade.aggregate([
-                { $match: { status: { $ne: 'closed' } } },
+                { $match: { status: { $in: ['pending', 'active', 'scheduled'] } } },
                 { 
                     $group: { 
                         _id: { asset: '$asset', direction: '$direction' },
@@ -148,10 +151,16 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
 
             const marketStatus = {};
             TRADE_PAIRS.forEach(pair => {
-                marketStatus[pair] = candleOverride[pair];
+                marketStatus[pair] = candleOverride[pair] || 'auto';
             });
 
-            res.json({ success: true, users, tradeVolume, marketStatus, tradePairs: TRADE_PAIRS });
+            res.json({ 
+                success: true, 
+                users, 
+                tradeVolume, 
+                marketStatus, 
+                tradePairs: TRADE_PAIRS 
+            });
 
         } catch (error) {
             console.error('Admin Data Fetch Error:', error);
@@ -177,7 +186,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Find transaction by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -200,7 +209,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             // Update transaction status
             transaction.status = 'completed';
             transaction.processedAt = new Date();
-            transaction.amount = amount; // Set the amount definitively on completion
+            transaction.amount = amount;
 
             await user.save({ session });
             await session.commitTransaction();
@@ -226,7 +235,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Find transaction by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -262,7 +271,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Find transaction by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -306,7 +315,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Find transaction by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -444,172 +453,179 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         res.json({ success: true, message });
     });
 
-// ----------------------------------------------------------------------
-// COPY TRADE MANAGEMENT ROUTES
-// ----------------------------------------------------------------------
+    // ----------------------------------------------------------------------
+    // COPY TRADE MANAGEMENT ROUTES
+    // ----------------------------------------------------------------------
 
-const AdminCopyTrade = require('../models/AdminCopyTrade');
+    // [POST] /api/admin/copy-trade/create - Create new copy trade
+    router.post('/copy-trade/create', async (req, res) => {
+        const { tradingPair, direction, percentage, executionTime } = req.body;
 
-// [POST] /api/admin/copy-trade/create - Create new copy trade
-router.post('/copy-trade/create', async (req, res) => {
-    const { tradingPair, direction, percentage, executionTime } = req.body;
-
-    // Validation
-    if (!tradingPair || !direction || !percentage || !executionTime) {
-        return res.status(400).json({ 
-            success: false, 
-            message: "Missing required fields: tradingPair, direction, percentage, executionTime" 
-        });
-    }
-
-    if (!['CALL', 'PUT'].includes(direction.toUpperCase())) {
-        return res.status(400).json({ 
-            success: false, 
-            message: "Direction must be either 'CALL' or 'PUT'" 
-        });
-    }
-
-    if (percentage < 1 || percentage > 100) {
-        return res.status(400).json({ 
-            success: false, 
-            message: "Percentage must be between 1 and 100" 
-        });
-    }
-
-    try {
-        // Create the copy trade (admin user ID can be fixed or from session)
-        const copyTrade = new AdminCopyTrade({
-            tradingPair: tradingPair.toUpperCase(),
-            direction: direction.toUpperCase(),
-            percentage: parseFloat(percentage),
-            executionTime: new Date(executionTime),
-            createdBy: req.headers['x-admin-user-id'] || new mongoose.Types.ObjectId() // You can adjust this
-        });
-
-        await copyTrade.save();
-
-        res.json({ 
-            success: true, 
-            message: "Copy trade created successfully",
-            copyTrade: {
-                id: copyTrade._id,
-                tradingPair: copyTrade.tradingPair,
-                direction: copyTrade.direction,
-                percentage: copyTrade.percentage,
-                executionTime: copyTrade.executionTime
-            }
-        });
-
-    } catch (error) {
-        console.error('Copy Trade Creation Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to create copy trade" 
-        });
-    }
-});
-
-// [GET] /api/admin/copy-trade/active - Get active copy trades
-router.get('/copy-trade/active', async (req, res) => {
-    try {
-        const activeTrades = await AdminCopyTrade.find({ 
-            status: 'active',
-            executionTime: { $gt: new Date() }
-        })
-        .populate('createdBy', 'username')
-        .populate('userCopies.userId', 'username')
-        .sort({ executionTime: 1 });
-
-        res.json({ 
-            success: true, 
-            copyTrades: activeTrades 
-        });
-
-    } catch (error) {
-        console.error('Active Copy Trades Fetch Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to fetch active copy trades" 
-        });
-    }
-});
-
-// [GET] /api/admin/copy-trade/history - Get copy trade history
-router.get('/copy-trade/history', async (req, res) => {
-    try {
-        const { page = 1, limit = 20 } = req.query;
-
-        const history = await AdminCopyTrade.find()
-            .populate('createdBy', 'username')
-            .populate('userCopies.userId', 'username')
-            .sort({ createdAt: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit);
-
-        const total = await AdminCopyTrade.countDocuments();
-
-        res.json({ 
-            success: true, 
-            history,
-            totalPages: Math.ceil(total / limit),
-            currentPage: page
-        });
-
-    } catch (error) {
-        console.error('Copy Trade History Fetch Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to fetch copy trade history" 
-        });
-    }
-});
-
-// [DELETE] /api/admin/copy-trade/:id - Delete copy trade
-router.delete('/copy-trade/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const deletedTrade = await AdminCopyTrade.findByIdAndDelete(id);
-
-        if (!deletedTrade) {
-            return res.status(404).json({ 
+        // Validation
+        if (!tradingPair || !direction || !percentage || !executionTime) {
+            return res.status(400).json({ 
                 success: false, 
-                message: "Copy trade not found" 
+                message: "Missing required fields: tradingPair, direction, percentage, executionTime" 
             });
         }
 
-        res.json({ 
-            success: true, 
-            message: "Copy trade deleted successfully" 
-        });
+        if (!['CALL', 'PUT'].includes(direction.toUpperCase())) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Direction must be either 'CALL' or 'PUT'" 
+            });
+        }
 
-    } catch (error) {
-        console.error('Copy Trade Deletion Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to delete copy trade" 
-        });
-    }
-});
+        if (percentage < 1 || percentage > 100) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Percentage must be between 1 and 100" 
+            });
+        }
 
-// [POST] /api/admin/copy-trade/cleanup - Manual cleanup of expired trades
-router.post('/copy-trade/cleanup', async (req, res) => {
-    try {
-        const result = await AdminCopyTrade.cleanupExpiredTrades();
+        try {
+            // Create the copy trade
+            const copyTrade = new AdminCopyTrade({
+                tradingPair: tradingPair.toUpperCase(),
+                direction: direction.toUpperCase(),
+                percentage: parseFloat(percentage),
+                executionTime: new Date(executionTime),
+                createdBy: req.headers['x-admin-user-id'] || new mongoose.Types.ObjectId()
+            });
 
-        res.json({ 
-            success: true, 
-            message: `Cleaned up ${result.modifiedCount} expired copy trades` 
-        });
+            await copyTrade.save();
 
-    } catch (error) {
-        console.error('Copy Trade Cleanup Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to cleanup expired copy trades" 
-        });
-    }
-});
+            res.json({ 
+                success: true, 
+                message: "Copy trade created successfully",
+                copyTrade: {
+                    id: copyTrade._id,
+                    tradingPair: copyTrade.tradingPair,
+                    direction: copyTrade.direction,
+                    percentage: copyTrade.percentage,
+                    executionTime: copyTrade.executionTime
+                }
+            });
+
+        } catch (error) {
+            console.error('Copy Trade Creation Error:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: "Failed to create copy trade" 
+            });
+        }
+    });
+
+    // [GET] /api/admin/copy-trade/active - Get active copy trades
+    router.get('/copy-trade/active', async (req, res) => {
+        try {
+            const activeTrades = await AdminCopyTrade.find({ 
+                status: 'active',
+                executionTime: { $gt: new Date() }
+            })
+            .populate('createdBy', 'username')
+            .populate('userCopies.userId', 'username')
+            .sort({ executionTime: 1 });
+
+            res.json({ 
+                success: true, 
+                copyTrades: activeTrades 
+            });
+
+        } catch (error) {
+            console.error('Active Copy Trades Fetch Error:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: "Failed to fetch active copy trades" 
+            });
+        }
+    });
+
+    // [GET] /api/admin/copy-trade/history - Get copy trade history
+    router.get('/copy-trade/history', async (req, res) => {
+        try {
+            const { page = 1, limit = 20 } = req.query;
+
+            const history = await AdminCopyTrade.find()
+                .populate('createdBy', 'username')
+                .populate('userCopies.userId', 'username')
+                .sort({ createdAt: -1 })
+                .limit(limit * 1)
+                .skip((page - 1) * limit);
+
+            const total = await AdminCopyTrade.countDocuments();
+
+            res.json({ 
+                success: true, 
+                history,
+                totalPages: Math.ceil(total / limit),
+                currentPage: page
+            });
+
+        } catch (error) {
+            console.error('Copy Trade History Fetch Error:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: "Failed to fetch copy trade history" 
+            });
+        }
+    });
+
+    // [DELETE] /api/admin/copy-trade/:id - Delete copy trade
+    router.delete('/copy-trade/:id', async (req, res) => {
+        try {
+            const { id } = req.params;
+
+            const deletedTrade = await AdminCopyTrade.findByIdAndDelete(id);
+
+            if (!deletedTrade) {
+                return res.status(404).json({ 
+                    success: false, 
+                    message: "Copy trade not found" 
+                });
+            }
+
+            res.json({ 
+                success: true, 
+                message: "Copy trade deleted successfully" 
+            });
+
+        } catch (error) {
+            console.error('Copy Trade Deletion Error:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: "Failed to delete copy trade" 
+            });
+        }
+    });
+
+    // [POST] /api/admin/copy-trade/cleanup - Manual cleanup of expired trades
+    router.post('/copy-trade/cleanup', async (req, res) => {
+        try {
+            const now = new Date();
+            const result = await AdminCopyTrade.updateMany(
+                { 
+                    status: 'active',
+                    executionTime: { $lte: now }
+                },
+                { 
+                    $set: { status: 'executed' }
+                }
+            );
+
+            res.json({ 
+                success: true, 
+                message: `Cleaned up ${result.modifiedCount} expired copy trades` 
+            });
+
+        } catch (error) {
+            console.error('Copy Trade Cleanup Error:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: "Failed to cleanup expired copy trades" 
+            });
+        }
+    });
 
     return router;
 };
