@@ -4,23 +4,17 @@ const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
 
-// Define TRADE_PAIRS locally instead of importing from index (which causes circular dependency)
+// Define TRADE_PAIRS locally to avoid circular dependency
 const TRADE_PAIRS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 
-// Create candleOverride object for market control
+// Create candleOverride object for market control (same as in your working code)
 const candleOverride = {};
 
 // The entire module is now a function that accepts Azure dependencies
-module.exports = function(azureConfig = {}) {
-    const { 
-        blobServiceClient = null, 
-        KYC_CONTAINER_NAME = null,
-        azureEnabled = false
-    } = azureConfig;
-
+module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY, azureEnabled = false }) {
     const router = express.Router();
 
     // Admin security middleware
@@ -35,31 +29,22 @@ module.exports = function(azureConfig = {}) {
     router.use(adminAuth);
 
     // ----------------------------------------------------------------------
-    // FIXED KYC REVIEW ENDPOINTS - Works with or without Azure
+    // CORRECTED KYC REVIEW ENDPOINTS (from your working code)
     // ----------------------------------------------------------------------
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
-        try {
-            // Find users who have uploaded documents and are awaiting review
-            const usersToReview = await User.find({ 
-                $or: [
-                    { kycStatus: 'review' },
-                    { kycStatus: 'under_review' },
-                    { kycStatus: 'pending' }
-                ]
-            }).select('username kycStatus kycDocuments kycRejectionReason createdAt');
+        if (!azureEnabled || !blobServiceClient || !STORAGE_ACCOUNT_KEY) {
+            // Return users without URLs when Azure is not configured
+            try {
+                const usersToReview = await User.find({ 
+                    $or: [
+                        { kycStatus: 'review' },
+                        { kycStatus: 'under_review' },
+                        { kycStatus: 'pending' }
+                    ]
+                }).select('username kycStatus kycDocuments createdAt kycRejectionReason');
 
-            if (usersToReview.length === 0) {
-                return res.json({ 
-                    success: true, 
-                    users: [],
-                    message: 'No pending KYC reviews found.' 
-                });
-            }
-
-            // If Azure is not configured, return users without document URLs
-            if (!azureEnabled || !blobServiceClient) {
                 const usersWithoutUrls = usersToReview.map(user => ({
                     _id: user._id,
                     username: user.username,
@@ -71,22 +56,35 @@ module.exports = function(azureConfig = {}) {
                         back: user.kycDocuments?.back ? 'Document uploaded (Azure not configured)' : null,
                         uploadDate: user.kycDocuments?.uploadDate,
                         hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back)
-                    },
-                    azureConfigured: false
+                    }
                 }));
 
                 return res.json({ 
                     success: true, 
                     users: usersWithoutUrls,
                     count: usersWithoutUrls.length,
-                    message: 'KYC users found, but Azure Storage not configured for document access'
+                    message: 'Azure Storage not configured - document URLs unavailable'
                 });
+            } catch (error) {
+                console.error('Admin KYC Fetch Error:', error);
+                return res.status(500).json({ success: false, message: 'Failed to fetch pending KYC users.' });
             }
+        }
 
-            // Azure is configured - generate signed URLs
-            const { BlobSASPermissions, generateBlobSASQueryParameters } = require('@azure/storage-blob');
+        try {
+            // Find users who have uploaded documents and are awaiting review
+            const usersToReview = await User.find({ 
+                $or: [
+                    { kycStatus: 'review' },
+                    { kycStatus: 'under_review' },
+                    { kycStatus: 'pending' }
+                ]
+            }).select('username kycStatus kycDocuments createdAt kycRejectionReason');
+
+            const { BlobSASPermissions } = require('@azure/storage-blob');
             
             const usersWithSignedUrls = await Promise.all(usersToReview.map(async (user) => {
+
                 const getSignedUrl = async (blobPath) => {
                     if (!blobPath) return null;
 
@@ -94,26 +92,16 @@ module.exports = function(azureConfig = {}) {
                         const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
                         const blobClient = containerClient.getBlobClient(blobPath);
 
-                        // Check if blob exists
-                        try {
-                            await blobClient.getProperties();
-                        } catch (error) {
-                            console.error(`Blob not found: ${blobPath}`);
-                            return null;
-                        }
-
-                        // Generate SAS token
+                        // Generate SAS token - simplified approach (from your working code)
                         const expiresOn = new Date();
                         expiresOn.setHours(expiresOn.getHours() + 1); // 1 hour expiry
 
-                        const sasToken = generateBlobSASQueryParameters({
-                            containerName: KYC_CONTAINER_NAME,
-                            blobName: blobPath,
+                        const sasUrl = await blobClient.generateSasUrl({
                             permissions: BlobSASPermissions.parse("r"),
                             expiresOn: expiresOn
-                        }, blobServiceClient.credential);
+                        });
 
-                        return `${blobClient.url}?${sasToken}`;
+                        return sasUrl;
                     } catch (error) {
                         console.error(`Error generating SAS URL for ${blobPath}:`, error);
                         return null;
@@ -132,24 +120,15 @@ module.exports = function(azureConfig = {}) {
                     documents: {
                         front: frontUrl,
                         back: backUrl,
-                        uploadDate: user.kycDocuments?.uploadDate
-                    },
-                    azureConfigured: true
+                    }
                 };
             }));
 
-            res.json({ 
-                success: true, 
-                users: usersWithSignedUrls,
-                count: usersWithSignedUrls.length
-            });
+            res.json({ success: true, users: usersWithSignedUrls });
 
         } catch (error) {
             console.error('Admin KYC Fetch Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: 'Failed to fetch pending KYC users: ' + error.message 
-            });
+            res.status(500).json({ success: false, message: 'Failed to fetch pending KYC users.' });
         }
     });
 
@@ -244,6 +223,7 @@ module.exports = function(azureConfig = {}) {
                 };
             }));
 
+            // Market status from candleOverride (from your working code)
             const marketStatus = {};
             TRADE_PAIRS.forEach(pair => {
                 marketStatus[pair] = candleOverride[pair] || 'auto';
@@ -254,17 +234,16 @@ module.exports = function(azureConfig = {}) {
                 users: usersWithPending, 
                 tradeVolume, 
                 marketStatus, 
-                tradePairs: TRADE_PAIRS,
-                kycEnabled: azureEnabled
+                tradePairs: TRADE_PAIRS 
             });
 
         } catch (error) {
             console.error('Admin Data Fetch Error:', error);
-            res.status(500).json({ success: false, message: "Server error fetching data: " + error.message });
+            res.status(500).json({ success: false, message: "Server error fetching data." });
         }
     });
 
-    // --- CORRECTED DEPOSIT & WITHDRAWAL MANAGEMENT ---
+    // --- CORRECTED DEPOSIT & WITHDRAWAL MANAGEMENT (from your working code) ---
     router.post('/approve-deposit', async (req, res) => {
         const { userId, txid, amount } = req.body;
         if (!userId || !txid || typeof amount !== 'number' || amount <= 0) {
@@ -282,7 +261,7 @@ module.exports = function(azureConfig = {}) {
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // Find transaction by txid
+            // FIXED: Use find() to search by txid instead of id()
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -305,7 +284,7 @@ module.exports = function(azureConfig = {}) {
             // Update transaction status
             transaction.status = 'completed';
             transaction.processedAt = new Date();
-            transaction.amount = amount;
+            transaction.amount = amount; // Set the amount definitively on completion
 
             await user.save({ session });
             await session.commitTransaction();
@@ -331,7 +310,7 @@ module.exports = function(azureConfig = {}) {
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // Find transaction by txid
+            // FIXED: Use find() to search by txid instead of id()
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -367,7 +346,7 @@ module.exports = function(azureConfig = {}) {
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // Find transaction by txid
+            // FIXED: Use find() to search by txid instead of id()
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -411,7 +390,7 @@ module.exports = function(azureConfig = {}) {
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // Find transaction by txid
+            // FIXED: Use find() to search by txid instead of id()
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -448,7 +427,7 @@ module.exports = function(azureConfig = {}) {
         }
     });
 
-    // --- FIXED: MANUAL USER CREDIT ---
+    // --- FIXED: MANUAL USER CREDIT (from your working code) ---
     router.post('/credit-user', async (req, res) => {
         const { username, amount } = req.body;
         const creditAmount = parseFloat(amount);
@@ -489,7 +468,7 @@ module.exports = function(azureConfig = {}) {
         }
     });
 
-    // --- FIXED: REFERRAL COMMISSION ---
+    // --- FIXED: REFERRAL COMMISSION (from your working code) ---
     router.post('/give-commission', async (req, res) => {
         const { username, amount } = req.body;
         const commissionAmount = parseFloat(amount);
@@ -531,45 +510,22 @@ module.exports = function(azureConfig = {}) {
         }
     });
 
-    // --- FIXED: MARKET CONTROL ---
+    // --- MARKET CONTROL (from your working code) ---
     router.post('/market-control', (req, res) => {
         const { pair, direction } = req.body;
 
-        if (!pair) {
-            return res.status(400).json({ success: false, message: "Trading pair is required." });
-        }
-
-        if (direction !== 'up' && direction !== 'down' && direction !== 'auto' && direction !== null) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Invalid direction. Must be 'up', 'down', 'auto', or null." 
-            });
+        if (!pair || (direction !== 'up' && direction !== 'down' && direction !== null)) {
+            return res.status(400).json({ success: false, message: "Invalid pair or direction. Direction must be 'up', 'down', or null to disable." });
         }
 
         if (!TRADE_PAIRS.includes(pair)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: `Invalid trading pair. Available pairs: ${TRADE_PAIRS.join(', ')}` 
-            });
+            return res.status(400).json({ success: false, message: "Invalid trading pair." });
         }
 
-        // Update market control
-        if (direction === 'auto' || direction === null) {
-            delete candleOverride[pair];
-        } else {
-            candleOverride[pair] = direction;
-        }
+        candleOverride[pair] = direction;
 
-        const message = direction && direction !== 'auto' 
-            ? `Market control set to ${direction.toUpperCase()} for ${pair}.` 
-            : `Market control disabled for ${pair}.`;
-
-        res.json({ 
-            success: true, 
-            message,
-            pair,
-            direction: direction === 'auto' || direction === null ? 'auto' : direction
-        });
+        const message = direction ? `Market control set to ${direction.toUpperCase()} for ${pair}.` : `Market control disabled for ${pair}.`;
+        res.json({ success: true, message });
     });
 
     // [GET] /api/admin/market-control/status - Get current market control status
@@ -586,7 +542,7 @@ module.exports = function(azureConfig = {}) {
     });
 
     // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES
+    // COPY TRADE MANAGEMENT ROUTES (from your working code)
     // ----------------------------------------------------------------------
 
     // [POST] /api/admin/copy-trade/create - Create new copy trade
