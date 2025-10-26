@@ -64,23 +64,32 @@ app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// Admin routes (if you have them)
+// Admin routes - CORRECTED VERSION
 try {
     let adminRoutes;
-    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    
+    // Check if Azure config exists
+    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
+                          process.env.KYC_CONTAINER_NAME;
+    
     if (hasAzureConfig) {
         const { BlobServiceClient } = require('@azure/storage-blob');
         const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+        
         adminRoutes = require("./routes/admin")({
             blobServiceClient,
             KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents'
         });
+        console.log('✅ Admin routes loaded with Azure KYC support');
     } else {
+        // Load without Azure config - KYC features will be disabled
         adminRoutes = require("./routes/admin")({});
+        console.log('✅ Admin routes loaded (KYC features disabled)');
     }
+    
     app.use("/api/admin", adminRoutes);
 } catch (error) {
-    console.log('⚠️ Admin routes disabled');
+    console.log('❌ Admin routes disabled:', error.message);
 }
 
 // Utility Functions
