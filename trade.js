@@ -9,8 +9,8 @@ const POLL_INTERVAL_MS = 1000; // Check every second
 // Track activation state per pair
 const activationState = {};
 
-// Track trade activation candles
-const tradeActivationCandles = {};
+// Track current active candle for each pair
+const currentActiveCandle = {};
 
 // --- Copy Trade Execution Logic ---
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
@@ -104,10 +104,9 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
     }
 }
 
-// Trade monitoring logic - UPDATED
+// Trade monitoring logic
 async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedCompletedCandleTs = {};
-    const lastProcessedActivationTs = {};
     const lastCopyTradeCleanup = {};
 
     // Initialize activation state for each pair
@@ -116,6 +115,7 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
             lastActivationMinute: null,
             activatedTrades: new Set()
         };
+        currentActiveCandle[pair] = null;
     });
 
     setInterval(async () => {
@@ -124,38 +124,49 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
 
             for (const pair of TRADE_PAIRS) {
                 const md = globalMarketData[pair];
-                if (!md) continue;
+                if (!md || !md.candles || md.candles.length === 0) continue;
 
                 const pairState = activationState[pair];
 
-                // 1. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW minute starts)
-                if (pairState.lastActivationMinute !== currentMinute) {
-                    // New minute detected - activate pending trades
+                // Get the latest candle (should be the current active one)
+                const latestCandle = md.candles[md.candles.length - 1];
+                const latestCandleTs = new Date(latestCandle.timestamp).getTime();
+                
+                // Check if we have a new active candle
+                if (!currentActiveCandle[pair] || currentActiveCandle[pair].timestamp !== latestCandle.timestamp) {
+                    // New candle detected - update our tracking
+                    currentActiveCandle[pair] = {
+                        timestamp: latestCandle.timestamp,
+                        open: latestCandle.open,
+                        close: latestCandle.close
+                    };
+                    
+                    // Reset activation state for new candle
+                    pairState.activatedTrades.clear();
+                    
+                    // Activate any pending/scheduled trades for this new candle
                     const pendingTrades = await Trade.countDocuments({ 
                         status: { $in: ["pending", "scheduled"] }, 
                         asset: pair 
                     });
                     
                     if (pendingTrades > 0) {
-                        const currentPrice = md.currentPrice || (md.currentCandle ? md.currentCandle.open : 0);
-                        await activateTradesWrapper(io, User, Trade, pair, currentPrice);
+                        await activateTradesWrapper(io, User, Trade, pair, latestCandle.open);
                     }
-                    
-                    // Update state for this minute
-                    pairState.lastActivationMinute = currentMinute;
-                    pairState.activatedTrades.clear();
                 }
 
-                // 2. SETTLE ACTIVE TRADES (when a candle is complete)
-                if (md.candles?.length > 0) {
-                    const lastCompleted = md.candles[md.candles.length - 1];
-                    const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
+                // 1. ACTIVATE SCHEDULED/PENDING TRADES (at the start of each new candle)
+                // This is now handled above when new candle is detected
+
+                // 2. SETTLE ACTIVE TRADES (when a candle is complete and we have a new one)
+                if (md.candles.length > 1) {
+                    const previousCandle = md.candles[md.candles.length - 2];
+                    const previousCandleTs = new Date(previousCandle.timestamp).getTime();
                     
-                    if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
-                        if (Date.now() > lastCompletedTs) { 
-                            await settleTradesWrapper(io, User, Trade, pair, lastCompleted);
-                            lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
-                        }
+                    // If we haven't processed this completed candle yet
+                    if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < previousCandleTs) {
+                        await settleTradesWrapper(io, User, Trade, pair, previousCandle);
+                        lastProcessedCompletedCandleTs[pair] = previousCandleTs;
                     }
                 }
             }
@@ -166,7 +177,9 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 await cleanupExpiredCopyTrades(io, User, Trade);
                 lastCopyTradeCleanup.global = now;
             }
-        } catch (err) {}
+        } catch (err) {
+            console.error('Trade monitor error:', err);
+        }
     }, POLL_INTERVAL_MS);
 }
 
@@ -175,14 +188,18 @@ async function activateTradesWrapper(io, User, Trade, pair, entryPrice) {
     try {
         await activateScheduledTradesForPair(io, Trade, pair, entryPrice);
         await activatePendingTradesForPair(io, User, Trade, pair, entryPrice);
-    } catch (err) {}
+    } catch (err) {
+        console.error('Activation error:', err);
+    }
 }
 
-// UPDATED: Modified to pass the entire candle object
+// Wrapper for Settlement Logic
 async function settleTradesWrapper(io, User, Trade, pair, completedCandle) {
     try {
         await settleActiveTradesForPair(io, User, Trade, pair, completedCandle);
-    } catch (err) {}
+    } catch (err) {
+        console.error('Settlement error:', err);
+    }
 }
 
 async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
@@ -519,22 +536,16 @@ async function activateScheduledTradesForPair(io, Trade, pair, entryPrice) {
                 const tradeId = t._id.toString();
                 const pairState = activationState[pair];
                 
-                // Only activate if not already activated this minute
+                // Only activate if not already activated this candle
                 if (!pairState.activatedTrades.has(tradeId)) {
-                    // Get current candle timestamp to track which candle this trade belongs to
-                    const md = globalMarketData[pair];
-                    const currentCandleTimestamp = md.currentCandle ? md.currentCandle.timestamp : new Date();
-                    
                     t.status = "active";
                     t.entryPrice = entryPrice;
                     t.activationTimestamp = new Date();
-                    t.activationCandleTimestamp = currentCandleTimestamp; // Track which candle this trade was activated on
+                    // Store which candle this trade was activated on
+                    t.activationCandleTimestamp = currentActiveCandle[pair] ? currentActiveCandle[pair].timestamp : new Date();
                     await t.save();
                     
-                    // Store in memory for quick lookup
-                    tradeActivationCandles[tradeId] = currentCandleTimestamp;
                     pairState.activatedTrades.add(tradeId);
-                    
                     io.to(t.userId.toString()).emit("trade_active", { trade: t });
                 }
             } catch (innerErr) {}
@@ -542,7 +553,6 @@ async function activateScheduledTradesForPair(io, Trade, pair, entryPrice) {
     } catch (err) {}
 }
 
-// UPDATED: Modified activation to track which candle the trade belongs to
 async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
     try {
         const pendings = await Trade.find({ status: "pending", asset: pair });
@@ -551,22 +561,16 @@ async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
                 const tradeId = t._id.toString();
                 const pairState = activationState[pair];
                 
-                // Only activate if not already activated this minute
+                // Only activate if not already activated this candle
                 if (!pairState.activatedTrades.has(tradeId)) {
-                    // Get current candle timestamp to track which candle this trade belongs to
-                    const md = globalMarketData[pair];
-                    const currentCandleTimestamp = md.currentCandle ? md.currentCandle.timestamp : new Date();
-                    
                     t.status = "active";
                     t.entryPrice = entryPrice;
                     t.activationTimestamp = new Date();
-                    t.activationCandleTimestamp = currentCandleTimestamp; // Track which candle this trade was activated on
+                    // Store which candle this trade was activated on
+                    t.activationCandleTimestamp = currentActiveCandle[pair] ? currentActiveCandle[pair].timestamp : new Date();
                     await t.save();
                     
-                    // Store in memory for quick lookup
-                    tradeActivationCandles[tradeId] = currentCandleTimestamp;
                     pairState.activatedTrades.add(tradeId);
-                    
                     io.to(t.userId.toString()).emit("trade_active", { trade: t });
                 }
             } catch (innerErr) {}
@@ -574,12 +578,11 @@ async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
     } catch (err) {}
 }
 
-// UPDATED: Modified settlement to only settle trades that match the completed candle
 async function settleActiveTradesForPair(io, User, Trade, pair, completedCandle) {
     try {
         const completedCandleTs = new Date(completedCandle.timestamp).getTime();
         
-        // Find active trades that were activated on this specific candle
+        // Find all active trades for this pair
         const actives = await Trade.find({ 
             status: "active", 
             asset: pair
@@ -589,7 +592,7 @@ async function settleActiveTradesForPair(io, User, Trade, pair, completedCandle)
             try {
                 const tradeActivationTs = t.activationCandleTimestamp ? new Date(t.activationCandleTimestamp).getTime() : null;
                 
-                // Only settle trades that were activated on this completed candle
+                // Settle trades that were activated during the completed candle
                 if (tradeActivationTs === completedCandleTs) {
                     const win = (t.direction === "UP" && completedCandle.close > t.entryPrice) || 
                                (t.direction === "DOWN" && completedCandle.close < t.entryPrice);
@@ -602,9 +605,6 @@ async function settleActiveTradesForPair(io, User, Trade, pair, completedCandle)
                     t.pnl = pnl;
                     t.closeTime = new Date(); 
                     await t.save();
-
-                    // Clean up memory tracking
-                    delete tradeActivationCandles[t._id.toString()];
 
                     const userAfter = await User.findByIdAndUpdate(
                         t.userId,
