@@ -2,16 +2,17 @@ const express = require('express');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
-const { candleOverride, TRADE_PAIRS } = require('../index'); 
+const { TRADE_PAIRS } = require('../index'); 
 const AdminCopyTrade = require('../models/AdminCopyTrade');
+
+// Create candleOverride object since it doesn't exist in index
+const candleOverride = {};
 
 // The entire module is now a function that accepts Azure dependencies
 module.exports = function(azureConfig = {}) {
     const { 
         blobServiceClient = null, 
-        KYC_CONTAINER_NAME = null, 
-        STORAGE_ACCOUNT_NAME = null, 
-        STORAGE_ACCOUNT_KEY = null 
+        KYC_CONTAINER_NAME = null
     } = azureConfig;
 
     const router = express.Router();
@@ -38,6 +39,9 @@ module.exports = function(azureConfig = {}) {
         }
 
         try {
+            // Import BlobSASPermissions only when needed
+            const { BlobSASPermissions } = require('@azure/storage-blob');
+            
             // Find users who have uploaded documents and are awaiting review
             const usersToReview = await User.find({ kycStatus: 'review' }).select('username kycStatus kycDocuments createdAt');
 
