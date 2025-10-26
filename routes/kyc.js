@@ -27,11 +27,15 @@ const userAuth = async (req, res, next) => {
 };
 
 // The entire module is a function that accepts Azure dependencies
-module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME }) {
+module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false }) {
     const router = express.Router();
 
-    // Check if Azure Storage is properly configured - ALWAYS RETURN TRUE TO ENABLE KYC
-    const isAzureConfigured = true; // ⭐ FORCE ENABLED
+    // Helper function to check Azure connection
+    const checkAzureConnection = () => {
+        if (!azureEnabled || !blobServiceClient || !KYC_CONTAINER_NAME) {
+            throw new Error('KYC service connection failed. Azure Storage not configured.');
+        }
+    };
 
     // ----------------------------------------------------------------------
     // [GET] /api/kyc/status - Fetch current KYC status (used on Profile load)
@@ -43,30 +47,32 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME }) {
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
             
+            // Check if Azure is properly configured for KYC functionality
+            if (!azureEnabled) {
+                return res.json({ 
+                    success: true, 
+                    kycStatus: user.kycStatus || 'pending',
+                    rejectionReason: user.kycRejectionReason,
+                    serviceStatus: 'disabled',
+                    message: 'KYC service is currently unavailable'
+                });
+            }
+            
             res.json({ 
                 success: true, 
                 kycStatus: user.kycStatus || 'pending',
                 rejectionReason: user.kycRejectionReason,
-                azureConfigured: true // ⭐ ALWAYS TRUE
+                serviceStatus: 'active'
             });
 
         } catch (error) {
             console.error('KYC Status Fetch Error:', error);
-            res.status(500).json({ success: false, message: 'Failed to fetch KYC status.' });
+            res.status(500).json({ 
+                success: false, 
+                message: 'Failed to fetch KYC status.',
+                serviceStatus: 'error'
+            });
         }
-    });
-
-    // ----------------------------------------------------------------------
-    // [GET] /api/kyc/config - Check KYC service availability
-    // ----------------------------------------------------------------------
-    router.get('/config', userAuth, (req, res) => {
-        res.json({
-            success: true,
-            azureConfigured: true, // ⭐ ALWAYS TRUE
-            serviceAvailable: true, // ⭐ ALWAYS TRUE
-            maxFileSize: 5 * 1024 * 1024, // 5MB
-            allowedTypes: ['image/jpeg', 'image/png', 'application/pdf']
-        });
     });
 
     // ----------------------------------------------------------------------
@@ -76,52 +82,52 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME }) {
         { name: 'front', maxCount: 1 },
         { name: 'back', maxCount: 1 }
     ]), async (req, res) => {
-        // ⭐ REMOVED AZURE CHECK - ALOW UPLOAD TO PROCEED
-
-        // 1. Validation Checks
-        if (!req.files || !req.files.front || !req.files.back) {
-            console.error("KYC Upload Error: Missing files or field name mismatch.");
-            return res.status(400).json({ success: false, message: 'Please select both front and back ID files.' });
-        }
-
-        const userId = req.userId;
-        const frontFile = req.files.front[0];
-        const backFile = req.files.back[1];
-        
         try {
-            // 2. Upload Files to Azure Blob Storage (if configured)
-            let frontBlobPath = null;
-            let backBlobPath = null;
-
-            if (blobServiceClient && KYC_CONTAINER_NAME) {
-                // Define secure blob paths
-                const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-                frontBlobPath = `${userId}/front_${Date.now()}_${frontFile.originalname}`;
-                backBlobPath = `${userId}/back_${Date.now()}_${backFile.originalname}`;
-
-                const frontBlobClient = containerClient.getBlockBlobClient(frontBlobPath);
-                await frontBlobClient.uploadData(frontFile.buffer, {
-                    blobHTTPHeaders: { blobContentType: frontFile.mimetype }
+            // 1. Validation Checks
+            if (!req.files || !req.files.front || !req.files.back) {
+                console.error("KYC Upload Error: Missing files or field name mismatch.");
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Please select both front and back ID files.' 
                 });
-                
-                const backBlobClient = containerClient.getBlockBlobClient(backBlobPath);
-                await backBlobClient.uploadData(backFile.buffer, {
-                    blobHTTPHeaders: { blobContentType: backFile.mimetype }
-                });
-            } else {
-                // If Azure not available, store file info directly
-                console.log('⚠️ Azure Storage not available, storing file info directly');
-                frontBlobPath = `local_${userId}_front_${Date.now()}_${frontFile.originalname}`;
-                backBlobPath = `local_${userId}_back_${Date.now()}_${backFile.originalname}`;
             }
 
-            // 3. Update User KYC Status in Database
+            // 2. Check Azure Connection
+            checkAzureConnection();
+
+            const userId = req.userId;
+            const frontFile = req.files.front[0];
+            const backFile = req.files.back[1];
+            
+            // 3. Create container if it doesn't exist
+            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            await containerClient.createIfNotExists({ access: 'blob' });
+
+            // 4. Define secure blob paths
+            const frontBlobPath = `kyc-${userId}/front_${Date.now()}_${frontFile.originalname}`;
+            const backBlobPath = `kyc-${userId}/back_${Date.now()}_${backFile.originalname}`;
+
+            // 5. Upload Files to Azure Blob Storage
+            const frontBlobClient = containerClient.getBlockBlobClient(frontBlobPath);
+            await frontBlobClient.uploadData(frontFile.buffer, {
+                blobHTTPHeaders: { blobContentType: frontFile.mimetype }
+            });
+            
+            const backBlobClient = containerClient.getBlockBlobClient(backBlobPath);
+            await backBlobClient.uploadData(backFile.buffer, {
+                blobHTTPHeaders: { blobContentType: backFile.mimetype }
+            });
+
+            // 6. Update User KYC Status in Database
             const user = await User.findById(userId);
             if (!user) {
-                return res.status(404).json({ success: false, message: 'User record not found.' });
+                return res.status(404).json({ 
+                    success: false, 
+                    message: 'User record not found.' 
+                });
             }
 
-            user.kycStatus = 'review';
+            user.kycStatus = 'under_review';
             user.kycDocuments = {
                 front: frontBlobPath,
                 back: backBlobPath,
@@ -131,47 +137,66 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME }) {
 
             await user.save();
 
-            // 4. Send successful response
+            // 7. Send successful response
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
-                kycStatus: 'review'
+                kycStatus: 'under_review',
+                serviceStatus: 'active'
             });
 
         } catch (error) {
             console.error('KYC Upload/Save Error:', error);
             
-            // Check if it's an Azure connection error
-            if (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND') || error.message.includes('Azure')) {
-                console.log('⚠️ Azure storage error, falling back to local storage');
-                
-                // Fallback: Store without Azure
-                try {
-                    const user = await User.findById(userId);
-                    if (user) {
-                        user.kycStatus = 'review';
-                        user.kycDocuments = {
-                            front: `fallback_${userId}_front_${Date.now()}`,
-                            back: `fallback_${userId}_back_${Date.now()}`,
-                            uploadDate: new Date()
-                        };
-                        user.kycRejectionReason = undefined; 
-                        await user.save();
-                        
-                        return res.json({ 
-                            success: true, 
-                            message: 'Documents uploaded successfully. Your KYC status is now under review.',
-                            kycStatus: 'review'
-                        });
-                    }
-                } catch (fallbackError) {
-                    console.error('Fallback save error:', fallbackError);
-                }
+            if (error.message.includes('Azure Storage not configured')) {
+                return res.status(503).json({ 
+                    success: false, 
+                    message: 'KYC service is currently unavailable. Please try again later.',
+                    serviceStatus: 'disabled',
+                    currentStatus: 'Service connection failed'
+                });
             }
             
             res.status(500).json({ 
                 success: false, 
-                message: 'Failed to complete KYC submission. Please try again.' 
+                message: 'Failed to complete KYC submission due to a server error.',
+                serviceStatus: 'error'
+            });
+        }
+    });
+
+    // ----------------------------------------------------------------------
+    // [GET] /api/kyc/service-status - Check if KYC service is available
+    // ----------------------------------------------------------------------
+    router.get('/service-status', userAuth, async (req, res) => {
+        try {
+            if (!azureEnabled) {
+                return res.json({
+                    success: true,
+                    serviceAvailable: false,
+                    status: 'KYC service connection failed - Azure not configured',
+                    currentStatus: 'Service connection failed'
+                });
+            }
+
+            // Test Azure connection
+            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            await containerClient.getProperties();
+            
+            res.json({
+                success: true,
+                serviceAvailable: true,
+                status: 'KYC service is active and connected',
+                currentStatus: 'Service connected'
+            });
+
+        } catch (error) {
+            console.error('KYC Service Status Check Error:', error);
+            res.json({
+                success: true,
+                serviceAvailable: false,
+                status: 'KYC service connection failed - ' + error.message,
+                currentStatus: 'Service connection failed'
             });
         }
     });
