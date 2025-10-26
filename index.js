@@ -64,32 +64,67 @@ app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// Admin routes - CORRECTED VERSION
+// Admin routes (if you have them)
 try {
     let adminRoutes;
-    
-    // Check if Azure config exists
-    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
-                          process.env.KYC_CONTAINER_NAME;
-    
+    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING;
     if (hasAzureConfig) {
         const { BlobServiceClient } = require('@azure/storage-blob');
         const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
-        
         adminRoutes = require("./routes/admin")({
             blobServiceClient,
             KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents'
         });
-        console.log('✅ Admin routes loaded with Azure KYC support');
     } else {
-        // Load without Azure config - KYC features will be disabled
         adminRoutes = require("./routes/admin")({});
-        console.log('✅ Admin routes loaded (KYC features disabled)');
     }
-    
     app.use("/api/admin", adminRoutes);
 } catch (error) {
-    console.log('❌ Admin routes disabled:', error.message);
+    console.log('⚠️ Admin routes disabled');
+}
+
+// KYC routes - ADDED THIS SECTION
+try {
+    let kycRoutes;
+    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    
+    if (hasAzureConfig && process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=')) {
+        const { BlobServiceClient } = require('@azure/storage-blob');
+        const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+        
+        kycRoutes = require("./routes/kyc")({
+            blobServiceClient,
+            KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents',
+            azureEnabled: true
+        });
+        console.log('✅ KYC routes loaded with Azure Storage');
+    } else {
+        console.log('⚠️ KYC routes loaded without Azure Storage');
+        kycRoutes = require("./routes/kyc")({
+            azureEnabled: false
+        });
+    }
+    
+    app.use("/api/kyc", kycRoutes);
+} catch (error) {
+    console.error('❌ KYC routes failed to load:', error.message);
+    // Provide basic KYC fallback
+    const basicKycRouter = require('express').Router();
+    basicKycRouter.get('/status', (req, res) => {
+        res.status(503).json({ 
+            success: false, 
+            message: 'KYC service temporarily unavailable',
+            currentStatus: 'Service connection failed'
+        });
+    });
+    basicKycRouter.post('/upload', (req, res) => {
+        res.status(503).json({ 
+            success: false, 
+            message: 'KYC service temporarily unavailable',
+            currentStatus: 'Service connection failed'
+        });
+    });
+    app.use("/api/kyc", basicKycRouter);
 }
 
 // Utility Functions
@@ -143,7 +178,7 @@ async function getDashboardData(userId) {
 
         return {
             name: pair.replace('USDT', ''),
-            ticker: `${pair.replace('USDT', '')}/USD`,
+            ticker: `${pair.replace('USDT', '')}/USD',
             price: data.currentPrice,
             change: parseFloat(change.toFixed(2)),
             candles: data.candles
@@ -375,7 +410,7 @@ mongoose.connect(process.env.MONGO_URI, {
     socketTimeoutMS: 45000,
 }).then(() => {
     console.log('✅ MongoDB connected successfully');
-}).catch(err => {
+}).catch(err) {
     console.error('❌ MongoDB connection failed:', err.message);
     process.exit(1);
 });
