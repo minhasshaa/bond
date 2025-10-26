@@ -10,7 +10,7 @@ const TRADE_PAIRS = [
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 
-// Create candleOverride object for market control (same as in your working code)
+// Create candleOverride object for market control
 const candleOverride = {};
 
 // The entire module is now a function that accepts Azure dependencies
@@ -29,48 +29,11 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
     router.use(adminAuth);
 
     // ----------------------------------------------------------------------
-    // CORRECTED KYC REVIEW ENDPOINTS (from your working code)
+    // FIXED KYC REVIEW ENDPOINTS
     // ----------------------------------------------------------------------
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
-        if (!azureEnabled || !blobServiceClient || !STORAGE_ACCOUNT_KEY) {
-            // Return users without URLs when Azure is not configured
-            try {
-                const usersToReview = await User.find({ 
-                    $or: [
-                        { kycStatus: 'review' },
-                        { kycStatus: 'under_review' },
-                        { kycStatus: 'pending' }
-                    ]
-                }).select('username kycStatus kycDocuments createdAt kycRejectionReason');
-
-                const usersWithoutUrls = usersToReview.map(user => ({
-                    _id: user._id,
-                    username: user.username,
-                    kycStatus: user.kycStatus,
-                    rejectionReason: user.kycRejectionReason,
-                    joined: user.createdAt,
-                    documents: {
-                        front: user.kycDocuments?.front ? 'Document uploaded (Azure not configured)' : null,
-                        back: user.kycDocuments?.back ? 'Document uploaded (Azure not configured)' : null,
-                        uploadDate: user.kycDocuments?.uploadDate,
-                        hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back)
-                    }
-                }));
-
-                return res.json({ 
-                    success: true, 
-                    users: usersWithoutUrls,
-                    count: usersWithoutUrls.length,
-                    message: 'Azure Storage not configured - document URLs unavailable'
-                });
-            } catch (error) {
-                console.error('Admin KYC Fetch Error:', error);
-                return res.status(500).json({ success: false, message: 'Failed to fetch pending KYC users.' });
-            }
-        }
-
         try {
             // Find users who have uploaded documents and are awaiting review
             const usersToReview = await User.find({ 
@@ -81,18 +44,62 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 ]
             }).select('username kycStatus kycDocuments createdAt kycRejectionReason');
 
+            if (usersToReview.length === 0) {
+                return res.json({ 
+                    success: true, 
+                    users: [],
+                    message: 'No pending KYC reviews found.' 
+                });
+            }
+
+            // If Azure is not configured, return basic user info
+            if (!azureEnabled || !blobServiceClient) {
+                const usersWithoutUrls = usersToReview.map(user => ({
+                    _id: user._id,
+                    username: user.username,
+                    kycStatus: user.kycStatus,
+                    rejectionReason: user.kycRejectionReason,
+                    joined: user.createdAt,
+                    documents: {
+                        front: user.kycDocuments?.front ? 'Document uploaded (view unavailable)' : null,
+                        back: user.kycDocuments?.back ? 'Document uploaded (view unavailable)' : null,
+                        uploadDate: user.kycDocuments?.uploadDate,
+                        hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back)
+                    }
+                }));
+
+                return res.json({ 
+                    success: true, 
+                    users: usersWithoutUrls,
+                    count: usersWithoutUrls.length,
+                    message: 'KYC users found, but Azure Storage not configured for document access'
+                });
+            }
+
+            // Azure is configured - generate signed URLs
             const { BlobSASPermissions } = require('@azure/storage-blob');
             
             const usersWithSignedUrls = await Promise.all(usersToReview.map(async (user) => {
-
                 const getSignedUrl = async (blobPath) => {
-                    if (!blobPath) return null;
+                    if (!blobPath) {
+                        console.log('No blob path provided for user:', user.username);
+                        return null;
+                    }
 
                     try {
                         const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
                         const blobClient = containerClient.getBlobClient(blobPath);
 
-                        // Generate SAS token - simplified approach (from your working code)
+                        // Check if blob exists
+                        try {
+                            await blobClient.getProperties();
+                            console.log('Blob found:', blobPath);
+                        } catch (error) {
+                            console.error(`Blob not found: ${blobPath} for user ${user.username}`);
+                            return null;
+                        }
+
+                        // Generate SAS token
                         const expiresOn = new Date();
                         expiresOn.setHours(expiresOn.getHours() + 1); // 1 hour expiry
 
@@ -101,15 +108,21 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                             expiresOn: expiresOn
                         });
 
+                        console.log('Generated SAS URL for:', blobPath);
                         return sasUrl;
+
                     } catch (error) {
-                        console.error(`Error generating SAS URL for ${blobPath}:`, error);
+                        console.error(`Error generating SAS URL for ${blobPath}:`, error.message);
                         return null;
                     }
                 };
 
                 const frontUrl = await getSignedUrl(user.kycDocuments?.front);
                 const backUrl = await getSignedUrl(user.kycDocuments?.back);
+
+                // If URLs are null but documents exist, provide fallback
+                const hasDocuments = !!(user.kycDocuments?.front && user.kycDocuments?.back);
+                const documentsAvailable = !!(frontUrl || backUrl);
 
                 return {
                     _id: user._id,
@@ -118,17 +131,27 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                     rejectionReason: user.kycRejectionReason,
                     joined: user.createdAt,
                     documents: {
-                        front: frontUrl,
-                        back: backUrl,
+                        front: frontUrl || (hasDocuments ? 'Document exists but URL generation failed' : null),
+                        back: backUrl || (hasDocuments ? 'Document exists but URL generation failed' : null),
+                        uploadDate: user.kycDocuments?.uploadDate,
+                        hasDocuments: hasDocuments,
+                        documentsAvailable: documentsAvailable
                     }
                 };
             }));
 
-            res.json({ success: true, users: usersWithSignedUrls });
+            res.json({ 
+                success: true, 
+                users: usersWithSignedUrls,
+                count: usersWithSignedUrls.length
+            });
 
         } catch (error) {
             console.error('Admin KYC Fetch Error:', error);
-            res.status(500).json({ success: false, message: 'Failed to fetch pending KYC users.' });
+            res.status(500).json({ 
+                success: false, 
+                message: 'Failed to fetch pending KYC users: ' + error.message 
+            });
         }
     });
 
@@ -172,6 +195,57 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         } catch (error) {
             console.error('Admin KYC Update Error:', error);
             res.status(500).json({ success: false, message: 'Failed to update KYC status.' });
+        }
+    });
+
+    // [GET] /api/admin/debug/azure - Debug Azure connection
+    router.get('/debug/azure', async (req, res) => {
+        try {
+            if (!azureEnabled || !blobServiceClient) {
+                return res.json({
+                    success: true,
+                    azureEnabled: false,
+                    message: 'Azure Storage not configured'
+                });
+            }
+
+            // Test Azure connection
+            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            
+            try {
+                const containerExists = await containerClient.exists();
+                const properties = await containerClient.getProperties();
+                
+                // List some blobs to verify access
+                let blobs = [];
+                for await (const blob of containerClient.listBlobsFlat()) {
+                    blobs.push(blob.name);
+                }
+
+                res.json({
+                    success: true,
+                    azureEnabled: true,
+                    containerExists: containerExists,
+                    containerName: KYC_CONTAINER_NAME,
+                    blobCount: blobs.length,
+                    sampleBlobs: blobs.slice(0, 5), // First 5 blobs
+                    connectionTest: 'SUCCESS'
+                });
+
+            } catch (azureError) {
+                res.json({
+                    success: false,
+                    azureEnabled: true,
+                    connectionTest: 'FAILED',
+                    error: azureError.message
+                });
+            }
+
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: 'Debug failed: ' + error.message
+            });
         }
     });
 
@@ -223,7 +297,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 };
             }));
 
-            // Market status from candleOverride (from your working code)
+            // Market status from candleOverride
             const marketStatus = {};
             TRADE_PAIRS.forEach(pair => {
                 marketStatus[pair] = candleOverride[pair] || 'auto';
@@ -243,7 +317,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         }
     });
 
-    // --- CORRECTED DEPOSIT & WITHDRAWAL MANAGEMENT (from your working code) ---
+    // --- CORRECTED DEPOSIT & WITHDRAWAL MANAGEMENT ---
     router.post('/approve-deposit', async (req, res) => {
         const { userId, txid, amount } = req.body;
         if (!userId || !txid || typeof amount !== 'number' || amount <= 0) {
@@ -261,7 +335,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -284,7 +358,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             // Update transaction status
             transaction.status = 'completed';
             transaction.processedAt = new Date();
-            transaction.amount = amount; // Set the amount definitively on completion
+            transaction.amount = amount;
 
             await user.save({ session });
             await session.commitTransaction();
@@ -310,7 +384,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -346,7 +420,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -390,7 +464,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // FIXED: Use find() to search by txid instead of id()
+            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -427,7 +501,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         }
     });
 
-    // --- FIXED: MANUAL USER CREDIT (from your working code) ---
+    // --- FIXED: MANUAL USER CREDIT ---
     router.post('/credit-user', async (req, res) => {
         const { username, amount } = req.body;
         const creditAmount = parseFloat(amount);
@@ -468,7 +542,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         }
     });
 
-    // --- FIXED: REFERRAL COMMISSION (from your working code) ---
+    // --- FIXED: REFERRAL COMMISSION ---
     router.post('/give-commission', async (req, res) => {
         const { username, amount } = req.body;
         const commissionAmount = parseFloat(amount);
@@ -510,7 +584,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
         }
     });
 
-    // --- MARKET CONTROL (from your working code) ---
+    // --- MARKET CONTROL ---
     router.post('/market-control', (req, res) => {
         const { pair, direction } = req.body;
 
@@ -542,7 +616,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
     });
 
     // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES (from your working code)
+    // COPY TRADE MANAGEMENT ROUTES
     // ----------------------------------------------------------------------
 
     // [POST] /api/admin/copy-trade/create - Create new copy trade
