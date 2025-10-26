@@ -211,7 +211,7 @@ async function initializeMarketData() {
 
 let isStreaming = false;
 
-// ⭐ FIXED: REST API Polling instead of WebSocket for Render compatibility
+// ⭐ FIXED: REST API Polling with real-time candle updates
 function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
@@ -221,6 +221,7 @@ function startRESTPolling() {
     const pollInterval = setInterval(async () => {
         try {
             const prices = await binance.futuresPrices();
+            const now = new Date();
             
             for (const pair of TRADE_PAIRS) {
                 const price = parseFloat(prices[pair]);
@@ -230,7 +231,6 @@ function startRESTPolling() {
                 const previousPrice = md.currentPrice;
                 md.currentPrice = price;
                 
-                const now = new Date();
                 const currentMinuteStart = new Date(now);
                 currentMinuteStart.setSeconds(0, 0);
                 currentMinuteStart.setMilliseconds(0);
@@ -290,20 +290,22 @@ function startRESTPolling() {
                         close: price 
                     };
                 } else {
-                    // Update current candle
+                    // ⭐ FIX: Update current candle in real-time
                     md.currentCandle.high = Math.max(md.currentCandle.high, price);
                     md.currentCandle.low = Math.min(md.currentCandle.low, price);
                     md.currentCandle.close = price;
                 }
 
-                // Emit market data for charts
-                io.emit("market_data", { 
+                // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
+                const chartData = {
                     asset: pair, 
-                    candles: md.candles,
+                    candles: [...md.candles, md.currentCandle], // Include current candle in chart data
                     currentCandle: md.currentCandle,
                     currentPrice: price,
                     timestamp: now.getTime()
-                });
+                };
+
+                io.emit("market_data", chartData);
             }
             
         } catch (err) {
@@ -399,14 +401,16 @@ function startMarketDataStream() {
                         close: price 
                     };
                 } else {
+                    // ⭐ FIX: Update current candle in real-time for WebSocket too
                     md.currentCandle.high = Math.max(md.currentCandle.high, price);
                     md.currentCandle.low = Math.min(md.currentCandle.low, price);
                     md.currentCandle.close = price;
                 }
 
+                // ⭐ FIX: Emit BOTH completed candles AND current candle for real-time updates
                 io.emit("market_data", { 
                     asset: pair, 
-                    candles: md.candles,
+                    candles: [...md.candles, md.currentCandle], // Include current candle
                     currentCandle: md.currentCandle,
                     currentPrice: price,
                     timestamp: now.getTime()
