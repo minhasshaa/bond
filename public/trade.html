@@ -361,6 +361,7 @@
         background: #1f2937;
         border-radius: 0.5rem;
         border: 1px solid #374151;
+        min-height: 400px;
     }
 
 </style>
@@ -434,8 +435,8 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
             <div id="trade-content" class="p-4 sm:p-6 space-y-6">
 
                 <div class="flex justify-center gap-4 bg-gray-900/50 p-2 rounded-xl">
-                    <button id="instantTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all">Instant Trade</button>
-                    <button id="scheduledTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all">Scheduled Trade</button>
+                    <button id="instantTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all bg-blue-600">Instant Trade</button>
+                    <button id="scheduledTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all opacity-60">Scheduled Trade</button>
                 </div>
 
                 <div id="scheduledContainer" class="hidden">
@@ -499,6 +500,12 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
             <div class="p-4 space-y-4">
                 <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">Trade History</h2>
                 <div id="tradeHistoryContainer" class="overflow-y-auto h-96 pr-2 space-y-2">
+                    <div class="text-center text-gray-400 py-8">
+                        <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p>Loading trade history...</p>
+                    </div>
                 </div>
                 <button id="loadMoreTradesBtn" class="w-full mt-4 py-2 px-4 font-semibold rounded-lg hidden bg-gray-700/50">
                     Load More
@@ -652,8 +659,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     document.getElementById(`nav-${currentPage}`).classList.add('active');
 
-    const socket = io({ auth: { token: localStorage.getItem('authToken') } });
-
     // --- DOM Elements ---
     const balanceElem = document.getElementById('balance-display');
     const currentPriceElem = document.getElementById('currentPrice');
@@ -709,78 +714,337 @@ document.addEventListener('DOMContentLoaded', () => {
     let tradeHistoryData = {};
     let assetPrices = {};
     let activeTab = 'trade';
+    let socket = null;
+
+    // --- Initialize Socket Connection ---
+    function initializeSocket() {
+        const authToken = localStorage.getItem('authToken');
+        if (!authToken) {
+            window.location.href = '/login.html';
+            return;
+        }
+
+        console.log('🔌 Initializing socket connection...');
+        
+        socket = io({
+            auth: { 
+                token: authToken 
+            },
+            transports: ['websocket', 'polling']
+        });
+
+        // --- Socket.IO Event Handlers ---
+        socket.on('connect', () => {
+            console.log('✅ Connected to server');
+            updateConnectionStatus('connected', 'Connected');
+            showStatus('Connected to server', 'green');
+            
+            // Request initial data immediately after connection
+            console.log('📡 Requesting initial data...');
+            socket.emit('request_init_data');
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('❌ Disconnected:', reason);
+            updateConnectionStatus('disconnected', 'Disconnected');
+            showStatus('Disconnected from server', 'red');
+            
+            // Try to reconnect after 3 seconds
+            setTimeout(() => {
+                console.log('🔄 Attempting to reconnect...');
+                socket.connect();
+            }, 3000);
+        });
+
+        socket.on('connect_error', (error) => {
+            console.log('❌ Connection error:', error.message);
+            updateConnectionStatus('disconnected', 'Connection failed');
+            showStatus('Connection failed. Retrying...', 'red');
+        });
+
+        socket.on('init', (data) => {
+            console.log('📡 Received init data:', data);
+            
+            if (!data || !data.marketData) {
+                console.error('❌ Invalid init data received');
+                showStatus('Failed to load market data', 'red');
+                return;
+            }
+            
+            marketData = data.marketData || {};
+            const assets = Object.keys(marketData);
+            
+            if (assets.length === 0) {
+                console.error('❌ No assets available in market data');
+                showStatus('No assets available', 'red');
+                return;
+            }
+            
+            console.log('📊 Available assets:', assets);
+            populateAssetSelector(assets);
+
+            const lastAsset = localStorage.getItem('lastSelectedAsset');
+            currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
+            setActiveAsset(currentAsset);
+
+            if (data.balance !== undefined) {
+                updateBalance(data.balance);
+            } else {
+                console.warn('⚠️ No balance in init data');
+            }
+
+            // Initialize trade history
+            tradeHistoryContainer.innerHTML = '';
+            fullTradeHistory = data.tradeHistory || [];
+            visibleHistoryCount = 0;
+            loadMoreTrades();
+
+            // Update UI with current asset data
+            updateUIForCurrentAsset();
+            
+            showStatus('Market data loaded successfully', 'green');
+        });
+
+        socket.on('price_update', (data) => {
+            if (!data) return;
+            
+            Object.entries(data).forEach(([asset, assetData]) => {
+                if (assetData && assetData.price !== undefined) {
+                    assetPrices[asset] = assetData.price;
+                    if (marketData[asset]) {
+                        marketData[asset].currentPrice = assetData.price;
+                    }
+                }
+            });
+
+            if (data[currentAsset] && data[currentAsset].price !== undefined) {
+                const newPrice = data[currentAsset].price;
+                const countdown = data[currentAsset].countdown;
+
+                currentPriceElem.classList.remove('price-up', 'price-down');
+                if (lastPrice !== 0 && newPrice !== lastPrice) {
+                    currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
+                }
+
+                currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
+
+                if (countdown !== undefined) {
+                    countdownSecondsElem.textContent = `${countdown}s`;
+                    countdownSecondsElem.classList.remove('warning', 'critical');
+                    if (countdown <= 10) {
+                        countdownSecondsElem.classList.add('critical');
+                    } else if (countdown <= 30) {
+                        countdownSecondsElem.classList.add('warning');
+                    }
+                }
+
+                lastPrice = newPrice;
+            }
+        });
+
+        socket.on('market_data', (data) => { 
+            if (data && data.asset === currentAsset && data.candles) {
+                updateChart(data.candles); 
+            }
+        });
+
+        socket.on('trade_pending', (data) => { 
+            if (data.balance !== undefined) updateBalance(data.balance); 
+            if (data.trade) addTradeToHistory(data.trade);
+            showPendingPopup(data.trade);
+        });
+
+        socket.on('trade_scheduled', (data) => { 
+            if (data.balance !== undefined) updateBalance(data.balance); 
+            if (data.trade) addTradeToHistory(data.trade);
+            showScheduledPopup(data.trade);
+        });
+
+        socket.on('trade_active', (data) => {
+            if (data.trade) {
+                tradeHistoryData[data.trade._id] = data.trade;
+                const tradeRow = document.getElementById(`trade-${data.trade._id}`);
+                if (!tradeRow) {
+                    addTradeToHistory(data.trade);
+                } else {
+                    updateTradeStatus(data.trade._id, 'Active');
+                }
+                showToast(toastActive);
+            }
+        });
+
+        socket.on('trade_result', (data) => {
+            if (data.balance !== undefined) updateBalance(data.balance);
+
+            if (data.trade) {
+                tradeHistoryData[data.trade._id] = data.trade;
+
+                const tradeRow = document.getElementById(`trade-${data.trade._id}`);
+                if (!tradeRow) {
+                    addTradeToHistory(data.trade);
+                } else {
+                    updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
+                }
+
+                setTradeButtonsDisabled(false);
+
+                if (data.trade.result === 'WIN') {
+                    showWinPopup(data.trade);
+                } else if (data.trade.result === 'LOSS') {
+                    showLossPopup(data.trade);
+                }
+            }
+        });
+
+        socket.on('trade_cancelled', (data) => { 
+            if (data.balance !== undefined) updateBalance(data.balance); 
+            if (data.tradeId) {
+                delete tradeHistoryData[data.tradeId];
+                const row = document.getElementById(`trade-${data.tradeId}`); 
+                if (row) row.remove(); 
+            }
+            showStatus('Trade cancelled.', 'gray'); 
+            setTradeButtonsDisabled(false); 
+        });
+
+        socket.on('copy_trades_available', (data) => {
+            if (activeTab === 'copy-trade') {
+                availableCopyTrades = data.copyTrades || [];
+                renderCopyTrades();
+
+                if (data.message && data.message.includes('Minimum $100')) {
+                    copyTradeStatus.textContent = data.message;
+                    copyTradeStatus.classList.remove('text-red-400');
+                    copyTradeStatus.classList.add('text-yellow-400');
+                } else {
+                    copyTradeStatus.textContent = '';
+                }
+            }
+        });
+
+        socket.on('copy_trade_success', (data) => {
+            showCopySuccessPopup(data.asset || 'that trade'); 
+            if (socket) socket.emit('request_copy_trades'); 
+
+            const allCopyBtns = document.querySelectorAll('.copy-btn');
+            allCopyBtns.forEach(btn => {
+                btn.disabled = false;
+                if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
+            });
+        });
+
+        socket.on('copy_trade_executed', (data) => {
+            showCopyExecutedToast(data.trade);
+            if (data.balance !== undefined) updateBalance(data.balance);
+            if (data.trade) addTradeToHistory(data.trade);
+        });
+
+        socket.on('error', (data) => { 
+            showStatus(`Error: ${data.message}`, 'red'); 
+            setTradeButtonsDisabled(false); 
+
+            const allCopyBtns = document.querySelectorAll('.copy-btn');
+            allCopyBtns.forEach(btn => {
+                btn.disabled = false;
+                if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
+            });
+        });
+    }
 
     // --- Charting Functions ---
     function initChart(candles) {
         if (!candles || candles.length === 0) { 
+            console.warn('No candle data available for chart');
             myChart.clear(); 
+            
+            // Show placeholder
+            myChart.setOption({
+                title: {
+                    text: 'No data available',
+                    left: 'center',
+                    top: 'center',
+                    textStyle: {
+                        color: '#9ca3af',
+                        fontSize: 16
+                    }
+                }
+            });
             return; 
         }
         
-        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        }));
-        
-        const options = {
-            backgroundColor: 'transparent',
-            tooltip: { 
-                trigger: 'axis', 
-                axisPointer: { type: 'cross' } 
-            },
-            xAxis: { 
-                type: 'category', 
-                data: chartDates, 
-                axisLine: { lineStyle: { color: '#8392A5' } },
-                axisLabel: {
-                    rotate: 45,
-                    color: '#9ca3af'
-                }
-            },
-            yAxis: { 
-                scale: true, 
-                axisLine: { lineStyle: { color: '#8392A5' } }, 
-                splitLine: { lineStyle: { color: '#2a2e39' } },
-                axisLabel: {
-                    color: '#9ca3af'
-                }
-            },
-            grid: { left: '10%', right: '5%', bottom: '15%', top: '5%' },
-            dataZoom: [{ 
-                type: 'inside', 
-                startValue: Math.max(0, chartDates.length - 50), 
-                endValue: chartDates.length - 1,
-                zoomOnMouseWheel: 'shift'
-            }],
-            series: [{ 
-                type: 'candlestick', 
-                data: chartData, 
-                itemStyle: { 
-                    color: '#22c55e', 
-                    color0: '#ef4444', 
-                    borderColor: '#22c55e', 
-                    borderColor0: '#ef4444' 
-                } 
-            }]
-        };
-        
-        myChart.setOption(options, true);
+        try {
+            const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
+            const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            }));
+            
+            const options = {
+                backgroundColor: 'transparent',
+                tooltip: { 
+                    trigger: 'axis', 
+                    axisPointer: { type: 'cross' } 
+                },
+                xAxis: { 
+                    type: 'category', 
+                    data: chartDates, 
+                    axisLine: { lineStyle: { color: '#8392A5' } },
+                    axisLabel: {
+                        rotate: 45,
+                        color: '#9ca3af'
+                    }
+                },
+                yAxis: { 
+                    scale: true, 
+                    axisLine: { lineStyle: { color: '#8392A5' } }, 
+                    splitLine: { lineStyle: { color: '#2a2e39' } },
+                    axisLabel: {
+                        color: '#9ca3af'
+                    }
+                },
+                grid: { left: '10%', right: '5%', bottom: '15%', top: '5%' },
+                dataZoom: [{ 
+                    type: 'inside', 
+                    startValue: Math.max(0, chartDates.length - 50), 
+                    endValue: chartDates.length - 1,
+                    zoomOnMouseWheel: 'shift'
+                }],
+                series: [{ 
+                    type: 'candlestick', 
+                    data: chartData, 
+                    itemStyle: { 
+                        color: '#22c55e', 
+                        color0: '#ef4444', 
+                        borderColor: '#22c55e', 
+                        borderColor0: '#ef4444' 
+                    } 
+                }]
+            };
+            
+            myChart.setOption(options, true);
+            console.log('📈 Chart initialized with', candles.length, 'candles');
+        } catch (error) {
+            console.error('Error initializing chart:', error);
+        }
     }
 
     function updateChart(candles) {
         if (!candles || candles.length === 0) return;
         
-        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit'
-        }));
-        
-        myChart.setOption({
-            xAxis: { data: chartDates },
-            series: [{ data: chartData }]
-        });
+        try {
+            const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
+            const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            }));
+            
+            myChart.setOption({
+                xAxis: { data: chartDates },
+                series: [{ data: chartData }]
+            });
+        } catch (error) {
+            console.error('Error updating chart:', error);
+        }
     }
 
     // --- Connection Status Functions ---
@@ -799,177 +1063,6 @@ document.addEventListener('DOMContentLoaded', () => {
         text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
                          status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
     }
-
-    // --- Socket.IO Event Handlers ---
-    socket.on('connect', () => {
-        console.log('✅ Connected to server');
-        updateConnectionStatus('connected', 'Connected');
-        showStatus('Connected to server', 'green');
-    });
-
-    socket.on('disconnect', (reason) => {
-        console.log('❌ Disconnected:', reason);
-        updateConnectionStatus('disconnected', 'Disconnected');
-        showStatus('Disconnected from server', 'red');
-    });
-
-    socket.on('connect_error', (error) => {
-        console.log('❌ Connection error:', error.message);
-        updateConnectionStatus('disconnected', 'Connection failed');
-    });
-
-    socket.on('init', (data) => {
-        console.log('📡 Received init data:', data);
-        marketData = data.marketData;
-        const assets = Object.keys(marketData);
-        populateAssetSelector(assets);
-
-        const lastAsset = localStorage.getItem('lastSelectedAsset');
-        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
-        setActiveAsset(currentAsset);
-
-        updateBalance(data.balance);
-
-        tradeHistoryContainer.innerHTML = '';
-        fullTradeHistory = data.tradeHistory;
-        visibleHistoryCount = 0;
-        loadMoreTrades();
-
-        updateUIForCurrentAsset();
-    });
-
-    socket.on('price_update', (data) => {
-        Object.entries(data).forEach(([asset, assetData]) => {
-            assetPrices[asset] = assetData.price;
-            if (marketData[asset]) {
-                marketData[asset].currentPrice = assetData.price;
-            }
-        });
-
-        if (data[currentAsset]) {
-            const newPrice = data[currentAsset].price;
-            const countdown = data[currentAsset].countdown;
-
-            currentPriceElem.classList.remove('price-up', 'price-down');
-            if (lastPrice !== 0 && newPrice !== lastPrice) {
-                currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
-            }
-
-            currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
-
-            countdownSecondsElem.textContent = `${countdown}s`;
-            countdownSecondsElem.classList.remove('warning', 'critical');
-            if (countdown <= 10) {
-                countdownSecondsElem.classList.add('critical');
-            } else if (countdown <= 30) {
-                countdownSecondsElem.classList.add('warning');
-            }
-
-            lastPrice = newPrice;
-        }
-    });
-
-    socket.on('market_data', (data) => { 
-        if (data.asset === currentAsset) updateChart(data.candles); 
-    });
-
-    socket.on('trade_pending', (data) => { 
-        updateBalance(data.balance); 
-        addTradeToHistory(data.trade);
-        showPendingPopup(data.trade);
-    });
-
-    socket.on('trade_scheduled', (data) => { 
-        updateBalance(data.balance); 
-        addTradeToHistory(data.trade);
-        showScheduledPopup(data.trade);
-    });
-
-    socket.on('trade_active', (data) => {
-        tradeHistoryData[data.trade._id] = data.trade;
-        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
-        if (!tradeRow) {
-            addTradeToHistory(data.trade);
-        } else {
-            updateTradeStatus(data.trade._id, 'Active');
-        }
-        showToast(toastActive);
-    });
-
-    socket.on('trade_result', (data) => {
-        updateBalance(data.balance);
-
-        tradeHistoryData[data.trade._id] = data.trade;
-
-        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
-        if (!tradeRow) {
-            addTradeToHistory(data.trade);
-        } else {
-            updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
-        }
-
-        setTradeButtonsDisabled(false);
-
-        if (data.trade.result === 'WIN') {
-            showWinPopup(data.trade);
-        } else if (data.trade.result === 'LOSS') {
-            showLossPopup(data.trade);
-        }
-    });
-
-    socket.on('trade_cancelled', (data) => { 
-        updateBalance(data.balance); 
-        delete tradeHistoryData[data.tradeId];
-        const row = document.getElementById(`trade-${data.tradeId}`); 
-        if (row) row.remove(); 
-        showStatus('Trade cancelled.', 'gray'); 
-        setTradeButtonsDisabled(false); 
-    });
-
-    socket.on('copy_trades_available', (data) => {
-        if (activeTab === 'copy-trade') {
-            availableCopyTrades = data.copyTrades || [];
-            renderCopyTrades();
-
-            if (data.message && data.message.includes('Minimum $100')) {
-                copyTradeStatus.textContent = data.message;
-                copyTradeStatus.classList.remove('text-red-400');
-                copyTradeStatus.classList.add('text-yellow-400');
-            } else {
-                copyTradeStatus.textContent = '';
-            }
-        }
-    });
-
-    socket.on('copy_trade_success', (data) => {
-        showCopySuccessPopup(data.asset || 'that trade'); 
-        socket.emit('request_copy_trades'); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
-        });
-    });
-
-    socket.on('copy_trade_executed', (data) => {
-        showCopyExecutedToast(data.trade);
-        updateBalance(data.balance);
-        addTradeToHistory(data.trade);
-    });
-
-    socket.on('error', (data) => { 
-        showStatus(`Error: ${data.message}`, 'red'); 
-        setTradeButtonsDisabled(false); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
-        });
-    });
-
-    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
 
     // --- Tab Switching Logic ---
     tradeTabContainer.addEventListener('click', (e) => {
@@ -993,6 +1086,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Helper Functions ---
 
     function formatPrice(price, asset) {
+        if (price === undefined || price === null) return '-.--';
+        
         const decimalMap = {
             'BTCUSDT': 2, 'ETHUSDT': 2, 'BNBUSDT': 2, 'LTCUSDT': 2, 'SOLUSDT': 2, 'AVAXUSDT': 2,
             'ADAUSDT': 4, 'MATICUSDT': 4, 'XRPUSDT': 4,
@@ -1013,37 +1108,24 @@ document.addEventListener('DOMContentLoaded', () => {
         copyTradesContainer.innerHTML = ''; 
 
         try {
-            const response = await fetch('/api/user/copy-trades/available', {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            if (!response.ok) throw new Error('Failed to fetch copy trades');
-
-            const data = await response.json();
-            if (data.success) {
-                availableCopyTrades = data.copyTrades || [];
-                renderCopyTrades();
-
-                if (data.message && data.message.includes('Minimum $100')) {
-                    copyTradeStatus.textContent = data.message;
-                    copyTradeStatus.classList.remove('text-red-400');
-                    copyTradeStatus.classList.add('text-yellow-400');
-                } else {
-                    copyTradeStatus.textContent = '';
-                }
+            // Use socket to request copy trades
+            if (socket) {
+                socket.emit('request_copy_trades');
+            } else {
+                throw new Error('Socket not connected');
             }
         } catch (error) {
             console.error('Error fetching copy trades:', error);
             copyTradeStatus.textContent = 'Error loading copy trades';
-        } finally {
             loadingPlaceholder.classList.add('hidden');
+            noCopyTrades.classList.remove('hidden');
         }
     }
 
     function renderCopyTrades() {
-        if (availableCopyTrades.length === 0) {
+        loadingPlaceholder.classList.add('hidden');
+        
+        if (!availableCopyTrades || availableCopyTrades.length === 0) {
             noCopyTrades.classList.remove('hidden');
             copyTradesContainer.innerHTML = '';
             copyTradesContainer.appendChild(noCopyTrades);
@@ -1054,6 +1136,8 @@ document.addEventListener('DOMContentLoaded', () => {
         copyTradesContainer.innerHTML = '';
 
         availableCopyTrades.forEach(trade => {
+            if (!trade) return;
+            
             const now = new Date();
             const executionTime = new Date(trade.executionTime);
             const timeLeft = executionTime - now;
@@ -1071,20 +1155,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="flex justify-between items-start mb-2">
                     <div class="flex items-center gap-2">
                         ${directionIcon}
-                        <span class="font-bold text-white text-lg">${trade.tradingPair}</span>
+                        <span class="font-bold text-white text-lg">${trade.tradingPair || 'Unknown'}</span>
                     </div>
                     <span class="text-sm px-2 py-1 rounded-full ${trade.direction === 'CALL' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
-                        ${trade.direction}
+                        ${trade.direction || 'UNKNOWN'}
                     </span>
                 </div>
                 <div class="grid grid-cols-2 gap-2 text-sm mb-3">
                     <div>
                         <span class="text-gray-300">Percentage:</span>
-                        <span class="text-yellow-400 font-semibold ml-1">${trade.percentage}%</span>
+                        <span class="text-yellow-400 font-semibold ml-1">${trade.percentage || 0}%</span>
                     </div>
                     <div>
                         <span class="text-gray-300">Your Investment:</span>
-                        <span class="text-green-400 font-semibold ml-1">${trade.percentage.toFixed(2)}% of balance</span>
+                        <span class="text-green-400 font-semibold ml-1">${(trade.percentage || 0).toFixed(2)}% of balance</span>
                     </div>
                     <div class="col-span-2">
                         <span class="text-gray-300">Executes in:</span>
@@ -1108,6 +1192,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const copyTradeId = btn.getAttribute('data-id');
                 const asset = btn.getAttribute('data-asset');
 
+                if (!socket) {
+                    showStatus('Not connected to server', 'red');
+                    return;
+                }
+
                 btn.textContent = 'Copying...';
                 btn.disabled = true;
 
@@ -1127,9 +1216,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function populateAssetSelector(assets) {
         assetDropdownContent.innerHTML = '';
+        
+        if (!assets || assets.length === 0) {
+            console.error('No assets available to populate selector');
+            const link = document.createElement('a');
+            link.href = "#"; 
+            link.textContent = 'No assets available';
+            link.style.color = '#ef4444';
+            assetDropdownContent.appendChild(link);
+            return;
+        }
+        
+        console.log('Populating asset selector with:', assets);
+        
         assets.forEach(asset => {
             const link = document.createElement('a');
-            link.href = "#"; link.textContent = asset; link.dataset.asset = asset;
+            link.href = "#"; 
+            link.textContent = asset; 
+            link.dataset.asset = asset;
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 currentAsset = asset;
@@ -1137,6 +1241,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectedAssetSpan.textContent = currentAsset;
                 assetDropdownContent.classList.remove('show');
                 updateUIForCurrentAsset();
+                
+                // Request market data for the new asset
+                if (socket) {
+                    socket.emit('request_market_data', { asset: currentAsset });
+                }
             });
             assetDropdownContent.appendChild(link);
         });
@@ -1154,7 +1263,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const futureTime = new Date(now.getTime() + i * 60 * 1000);
             const timeString = `${futureTime.getHours().toString().padStart(2, '0')}:${futureTime.getMinutes().toString().padStart(2, '0')}`;
             const button = document.createElement('button');
-            button.className = 'time-option'; button.textContent = timeString; button.dataset.time = timeString;
+            button.className = 'time-option'; 
+            button.textContent = timeString; 
+            button.dataset.time = timeString;
             if (i === 1) button.classList.add('active');
 
             button.addEventListener('click', () => {
@@ -1168,13 +1279,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function setTradeMode(scheduled) {
         isScheduled = scheduled;
         if (isScheduled) {
-            scheduledBtn.classList.add('bg-yellow-600'); scheduledBtn.classList.remove('opacity-60');
-            instantBtn.classList.remove('bg-blue-600'); instantBtn.classList.add('opacity-60');
+            scheduledBtn.classList.add('bg-yellow-600'); 
+            scheduledBtn.classList.remove('opacity-60');
+            instantBtn.classList.remove('bg-blue-600'); 
+            instantBtn.classList.add('opacity-60');
             populateTimeSelector();
             scheduledContainer.classList.remove("hidden");
         } else {
-            instantBtn.classList.add('bg-blue-600'); instantBtn.classList.remove('opacity-60');
-            scheduledBtn.classList.remove('bg-yellow-600'); scheduledBtn.classList.add('opacity-60');
+            instantBtn.classList.add('bg-blue-600'); 
+            instantBtn.classList.remove('opacity-60');
+            scheduledBtn.classList.remove('bg-yellow-600'); 
+            scheduledBtn.classList.add('opacity-60');
             scheduledContainer.classList.add("hidden");
         }
     }
@@ -1184,10 +1299,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Core Trade & UI Functions ---
 
     const requestTrade = (direction) => {
+        if (!socket || !socket.connected) {
+            showStatus('Not connected to server', 'red');
+            return;
+        }
+
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
         if (isNaN(amount) || amount < 0.5) {
             showStatus('Invalid amount. Minimum is $0.50.', 'red');
+            setTradeButtonsDisabled(false);
+            return;
+        }
+
+        if (!currentAsset) {
+            showStatus('Please select an asset first.', 'red');
             setTradeButtonsDisabled(false);
             return;
         }
@@ -1223,13 +1349,22 @@ document.addEventListener('DOMContentLoaded', () => {
     tradeDownBtn.addEventListener("click", () => requestTrade("DOWN"));
 
     function updateBalance(newBalance) {
+        if (newBalance === undefined || newBalance === null) return;
+        
         balanceElem.textContent = `$${newBalance.toFixed(2)}`;
-        socket.emit('request_copy_trades'); 
+        if (socket) {
+            socket.emit('request_copy_trades'); 
+        }
     }
 
     // --- Trade History Functions ---
 
     function createTradeHistoryRow(trade) {
+        if (!trade || !trade._id) {
+            console.error('Invalid trade data:', trade);
+            return null;
+        }
+        
         tradeHistoryData[trade._id] = trade;
         const tradeElement = document.createElement('div');
         tradeElement.id = `trade-${trade._id}`;
@@ -1245,8 +1380,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="flex items-center gap-3">
                 ${directionIcon}
                 <div>
-                    <p class="font-bold text-white">${trade.asset || trade.tradingPair}</p>
-                    <p class="text-xs text-gray-400">Amount: $${trade.amount.toFixed(2)}</p>
+                    <p class="font-bold text-white">${trade.asset || trade.tradingPair || 'Unknown'}</p>
+                    <p class="text-xs text-gray-400">Amount: $${(trade.amount || 0).toFixed(2)}</p>
                 </div>
             </div>
             <div id="status-${trade._id}" class="text-right"></div>
@@ -1255,19 +1390,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadMoreTrades() {
+        if (!fullTradeHistory || fullTradeHistory.length === 0) {
+            tradeHistoryContainer.innerHTML = '<div class="text-center text-gray-400 py-4">No trade history found</div>';
+            loadMoreBtn.classList.add('hidden');
+            return;
+        }
+
         const startIndex = visibleHistoryCount;
         const endIndex = startIndex + TRADES_PER_PAGE;
         const tradesToLoad = fullTradeHistory.slice(startIndex, endIndex);
 
         if (tradesToLoad.length === 0 && startIndex === 0) {
+            tradeHistoryContainer.innerHTML = '<div class="text-center text-gray-400 py-4">No trades yet</div>';
             loadMoreBtn.classList.add('hidden');
             return;
         }
 
         tradesToLoad.forEach(trade => {
             const tradeElement = createTradeHistoryRow(trade);
-            tradeHistoryContainer.append(tradeElement); 
-            updateTradeStatus(trade._id, trade.status, trade.result);
+            if (tradeElement) {
+                tradeHistoryContainer.appendChild(tradeElement); 
+                updateTradeStatus(trade._id, trade.status, trade.result);
+            }
         });
 
         visibleHistoryCount = endIndex;
@@ -1285,37 +1429,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addTradeToHistory(trade) {
         const tradeElement = createTradeHistoryRow(trade);
-        tradeHistoryContainer.prepend(tradeElement); 
-        updateTradeStatus(trade._id, trade.status, trade.result);
+        if (tradeElement) {
+            tradeHistoryContainer.prepend(tradeElement); 
+            updateTradeStatus(trade._id, trade.status, trade.result);
+        }
     }
 
     function updateTradeStatus(tradeId, status, result = null) {
         const statusContainer = document.getElementById(`status-${tradeId}`);
         if (!statusContainer) return;
 
-        let statusText = (result || status).toUpperCase();
+        let statusText = (result || status || 'Unknown').toUpperCase();
         let statusClass = 'status-default';
 
         if (result === 'WIN') statusClass = 'status-win';
         else if (result === 'LOSS') statusClass = 'status-loss';
-        else if (status.toLowerCase() === 'active') statusClass = 'status-active';
-        else if (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled') statusClass = 'status-pending';
+        else if (status && status.toLowerCase() === 'active') statusClass = 'status-active';
+        else if (status && (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled')) statusClass = 'status-pending';
 
         let statusContent = `<span class="status-badge ${statusClass}">${statusText}</span>`;
-        if (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled') {
+        if (status && (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled')) {
             statusContent += ` <button onclick="event.stopPropagation(); cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
         }
         statusContainer.innerHTML = statusContent;
     }
 
     window.cancelTrade = (tradeId) => {
-        socket.emit('cancel_trade', { tradeId });
+        if (socket) {
+            socket.emit('cancel_trade', { tradeId });
+        }
     };
 
     // --- UI Helper Functions ---
 
     function showStatus(message, color) { 
-        const colorMap = { red: 'text-red-400', green: 'text-green-500', blue: 'text-blue-400', yellow: 'text-yellow-500', gray: 'text-gray-400' }; 
+        const colorMap = { 
+            red: 'text-red-400', 
+            green: 'text-green-500', 
+            blue: 'text-blue-400', 
+            yellow: 'text-yellow-500', 
+            gray: 'text-gray-400' 
+        }; 
         tradeStatusElem.textContent = message; 
         tradeStatusElem.className = `text-center mt-4 min-h-[24px] font-semibold ${colorMap[color] || 'text-gray-400'}`; 
     }
@@ -1335,6 +1489,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
+            console.warn('No market data for asset:', currentAsset);
             myChart.clear();
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
@@ -1391,39 +1546,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Popup Content Setters ---
 
     function showPendingPopup(trade) {
+        if (!trade) return;
+        
         document.getElementById('pending-title').textContent = 'Trade Pending';
-        document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
-        document.getElementById('pending-asset').textContent = trade.asset;
+        document.getElementById('pending-amount').textContent = `$${(trade.amount || 0).toFixed(2)}`;
+        document.getElementById('pending-asset').textContent = trade.asset || 'Unknown';
         document.getElementById('pending-time-container').style.display = 'none';
         showModal(modalPending);
     }
 
     function showScheduledPopup(trade) {
+        if (!trade) return;
+        
         document.getElementById('pending-title').textContent = 'Trade Scheduled';
-        document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
-        document.getElementById('pending-asset').textContent = trade.asset;
-        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
+        document.getElementById('pending-amount').textContent = `$${(trade.amount || 0).toFixed(2)}`;
+        document.getElementById('pending-asset').textContent = trade.asset || 'Unknown';
+        document.getElementById('pending-time').textContent = trade.scheduledTime ? new Date(trade.scheduledTime).toLocaleTimeString() : 'Unknown';
         document.getElementById('pending-time-container').style.display = 'inline';
         showModal(modalPending);
     }
 
     function showWinPopup(trade) {
-        document.getElementById('win-amount').textContent = `+ $${trade.pnl.toFixed(2)}`;
+        if (!trade) return;
+        
+        document.getElementById('win-amount').textContent = `+ $${(trade.pnl || 0).toFixed(2)}`;
         showModal(modalWin);
     }
 
     function showLossPopup(trade) {
-        document.getElementById('loss-amount').textContent = `$${Math.abs(trade.pnl).toFixed(2)}`;
+        if (!trade) return;
+        
+        document.getElementById('loss-amount').textContent = `$${Math.abs(trade.pnl || 0).toFixed(2)}`;
         showModal(modalLoss);
     }
 
     function showCopySuccessPopup(asset) { 
-        document.getElementById('copy-success-asset').textContent = asset;
+        document.getElementById('copy-success-asset').textContent = asset || 'that trade';
         showModal(modalCopySuccess);
     }
 
     function showCopyExecutedToast(trade) { 
-        document.getElementById('copy-executed-text').textContent = `Copy trade for ${trade.asset || trade.tradingPair} is now active!`;
+        document.getElementById('copy-executed-text').textContent = `Copy trade for ${trade.asset || trade.tradingPair || 'unknown'} is now active!`;
         showToast(toastCopyExecuted);
     }
 
@@ -1434,13 +1597,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const asset = trade.asset || trade.tradingPair;
+        const asset = trade.asset || trade.tradingPair || 'Unknown';
         const pnl = trade.pnl;
         const openingPrice = trade.openingPrice || trade.entryPrice;
         const closingPrice = trade.closingPrice || trade.exitPrice;
 
         document.getElementById('detail-asset').textContent = asset;
-        document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt).toLocaleString();
+        document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt || Date.now()).toLocaleString();
 
         document.getElementById('detail-opening-price').textContent = openingPrice ? `$${formatPrice(openingPrice, asset)}` : 'N/A';
         document.getElementById('detail-closing-price').textContent = closingPrice ? `$${formatPrice(closingPrice, asset)}` : 'N/A';
@@ -1507,9 +1670,26 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Initializations ---
     setTradeMode(false);
     populateTimeSelector();
+    
+    // Initialize socket connection
+    initializeSocket();
+    
+    // Set up intervals
     setInterval(populateTimeSelector, 60000);
-    setInterval(() => socket.emit('request_copy_trades'), 30000); 
+    setInterval(() => {
+        if (socket && socket.connected) {
+            socket.emit('request_copy_trades');
+        }
+    }, 30000);
 
+    // Handle page visibility changes
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && myChart) {
+            setTimeout(() => myChart.resize(), 100);
+        }
+    });
+
+    console.log('🚀 Trade page initialized');
 });
 </script>
 </body>
