@@ -6,8 +6,8 @@ const AdminCopyTrade = require('./models/AdminCopyTrade');
 let globalMarketData = {};
 const POLL_INTERVAL_MS = 1000; // Check every second
 
-// Track which trades have been activated this candle period
-const activatedTradesThisPeriod = new Set();
+// Track activation state per pair
+const activationState = {};
 
 // --- Copy Trade Execution Logic ---
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
@@ -107,20 +107,27 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedActivationTs = {};
     const lastCopyTradeCleanup = {};
 
+    // Initialize activation state for each pair
+    TRADE_PAIRS.forEach(pair => {
+        activationState[pair] = {
+            lastActivationMinute: null,
+            activatedTrades: new Set()
+        };
+    });
+
     setInterval(async () => {
         try {
+            const currentMinute = Math.floor(Date.now() / 60000);
+
             for (const pair of TRADE_PAIRS) {
                 const md = globalMarketData[pair];
                 if (!md) continue;
 
-                // 1. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW candle starts)
-                const now = Date.now();
-                const currentMinute = Math.floor(now / 60000);
-                
-                if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < currentMinute) {
-                    // Clear activated trades for new period
-                    activatedTradesThisPeriod.clear();
-                    
+                const pairState = activationState[pair];
+
+                // 1. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW minute starts)
+                if (pairState.lastActivationMinute !== currentMinute) {
+                    // New minute detected - activate pending trades
                     const pendingTrades = await Trade.countDocuments({ 
                         status: { $in: ["pending", "scheduled"] }, 
                         asset: pair 
@@ -128,15 +135,15 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                     
                     if (pendingTrades > 0) {
                         const currentPrice = md.currentPrice || (md.currentCandle ? md.currentCandle.open : 0);
-                        const currentTimestamp = new Date();
-                        
-                        await activateTradesWrapper(io, User, Trade, pair, currentTimestamp, currentPrice);
+                        await activateTradesWrapper(io, User, Trade, pair, currentPrice);
                     }
                     
-                    lastProcessedActivationTs[pair] = currentMinute;
+                    // Update state for this minute
+                    pairState.lastActivationMinute = currentMinute;
+                    pairState.activatedTrades.clear();
                 }
 
-                // 2. SETTLE ACTIVE TRADES (when a candle is complete) - ONLY settle trades that were activated in PREVIOUS period
+                // 2. SETTLE ACTIVE TRADES (when a candle is complete)
                 if (md.candles?.length > 0) {
                     const lastCompleted = md.candles[md.candles.length - 1];
                     const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
@@ -161,9 +168,9 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
 }
 
 // Wrapper for Activation Logic
-async function activateTradesWrapper(io, User, Trade, pair, candleTimestamp, entryPrice) {
+async function activateTradesWrapper(io, User, Trade, pair, entryPrice) {
     try {
-        await activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice);
+        await activateScheduledTradesForPair(io, Trade, pair, entryPrice);
         await activatePendingTradesForPair(io, User, Trade, pair, entryPrice);
     } catch (err) {}
 }
@@ -276,7 +283,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
-            // ... rest of your socket event handlers remain the same ...
+            // ... rest of your socket event handlers (copy_trade, schedule_trade, cancel_trade) remain the same ...
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
@@ -487,7 +494,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
 // --- Helper Functions ---
 
-async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
+async function activateScheduledTradesForPair(io, Trade, pair, entryPrice) {
     try {
         const now = new Date();
         
@@ -507,13 +514,16 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
 
         for (const t of scheduleds) {
             try {
-                // Only activate if not already activated this period
-                if (!activatedTradesThisPeriod.has(t._id.toString())) {
+                const tradeId = t._id.toString();
+                const pairState = activationState[pair];
+                
+                // Only activate if not already activated this minute
+                if (!pairState.activatedTrades.has(tradeId)) {
                     t.status = "active";
                     t.entryPrice = entryPrice;
                     t.activationTimestamp = new Date(); 
                     await t.save();
-                    activatedTradesThisPeriod.add(t._id.toString());
+                    pairState.activatedTrades.add(tradeId);
                     io.to(t.userId.toString()).emit("trade_active", { trade: t });
                 }
             } catch (innerErr) {}
@@ -526,13 +536,16 @@ async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
         const pendings = await Trade.find({ status: "pending", asset: pair });
         for (const t of pendings) {
             try {
-                // Only activate if not already activated this period
-                if (!activatedTradesThisPeriod.has(t._id.toString())) {
+                const tradeId = t._id.toString();
+                const pairState = activationState[pair];
+                
+                // Only activate if not already activated this minute
+                if (!pairState.activatedTrades.has(tradeId)) {
                     t.status = "active";
                     t.entryPrice = entryPrice;
                     t.activationTimestamp = new Date();
                     await t.save();
-                    activatedTradesThisPeriod.add(t._id.toString());
+                    pairState.activatedTrades.add(tradeId);
                     io.to(t.userId.toString()).emit("trade_active", { trade: t });
                 }
             } catch (innerErr) {}
@@ -542,11 +555,12 @@ async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
 
 async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
     try {
-        // Only settle trades that were activated in PREVIOUS periods (not the current one)
+        // Only settle trades that were activated in previous minutes
+        const oneMinuteAgo = new Date(Date.now() - 60000);
         const actives = await Trade.find({ 
             status: "active", 
             asset: pair,
-            activationTimestamp: { $lt: new Date(Date.now() - 30000) } // Only settle trades activated more than 30 seconds ago
+            activationTimestamp: { $lt: oneMinuteAgo } // Only settle trades activated more than 1 minute ago
         });
         
         for (const t of actives) {
