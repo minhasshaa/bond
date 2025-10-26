@@ -790,7 +790,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tradeCard = document.createElement('div');
             tradeCard.className = `copy-trade-card p-4 rounded-lg shadow-lg ${isExpiringSoon ? 'expiring' : ''}`;
 
-            const directionIcon = trade.direction === 'CALL' 
+            const directionIcon = trade.direction === 'CALL' 
                 ? `<svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>`
                 : `<svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>`;
 
@@ -838,7 +838,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.textContent = 'Copying...';
                 btn.disabled = true;
 
-                socket.emit('copy_trade', { copyTradeId, asset }); 
+                socket.emit('copy_trade', { copyTradeId, asset }); 
             });
         });
     }
@@ -869,7 +869,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function setActiveAsset(asset) { 
+    function setActiveAsset(asset) { 
         selectedAssetSpan.textContent = asset;
     }
 
@@ -922,7 +922,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBalance(data.balance);
 
         tradeHistoryContainer.innerHTML = '';
-        fullTradeHistory = data.tradeHistory; 
+        fullTradeHistory = data.tradeHistory; 
         visibleHistoryCount = 0;
         loadMoreTrades(); 
 
@@ -945,7 +945,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('copy_trade_success', (data) => {
-        showCopySuccessPopup(data.asset || 'that trade'); 
+        showCopySuccessPopup(data.asset || 'that trade'); 
         socket.emit('request_copy_trades'); 
 
         const allCopyBtns = document.querySelectorAll('.copy-btn');
@@ -993,18 +993,33 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    socket.on('market_data', (data) => { 
-        if (data.asset === currentAsset) updateChart(data.candles); 
+    // ✅ CRITICAL FIX: Updated market_data handler for real-time candle movement
+    socket.on('market_data', (data) => { 
+        if (data.asset === currentAsset) {
+            // ✅ Pass both completed candles AND current forming candle for real-time updates
+            updateChart(data.candles, data.currentCandle); 
+            
+            // Also update current price in real-time from market_data
+            if (data.currentPrice) {
+                const newPrice = data.currentPrice;
+                currentPriceElem.classList.remove('price-up', 'price-down');
+                if (lastPrice !== 0 && newPrice !== lastPrice) {
+                    currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
+                }
+                currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
+                lastPrice = newPrice;
+            }
+        }
     });
 
-    socket.on('trade_pending', (data) => { 
-        updateBalance(data.balance); 
+    socket.on('trade_pending', (data) => { 
+        updateBalance(data.balance); 
         addTradeToHistory(data.trade);
         showPendingPopup(data.trade);
     });
 
-    socket.on('trade_scheduled', (data) => { 
-        updateBalance(data.balance); 
+    socket.on('trade_scheduled', (data) => { 
+        updateBalance(data.balance); 
         addTradeToHistory(data.trade);
         showScheduledPopup(data.trade);
     });
@@ -1041,18 +1056,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    socket.on('trade_cancelled', (data) => { 
-        updateBalance(data.balance); 
+    socket.on('trade_cancelled', (data) => { 
+        updateBalance(data.balance); 
         delete tradeHistoryData[data.tradeId];
-        const row = document.getElementById(`trade-${data.tradeId}`); 
-        if (row) row.remove(); 
-        showStatus('Trade cancelled.', 'gray'); 
-        setTradeButtonsDisabled(false); 
+        const row = document.getElementById(`trade-${data.tradeId}`); 
+        if (row) row.remove(); 
+        showStatus('Trade cancelled.', 'gray'); 
+        setTradeButtonsDisabled(false); 
     });
 
-    socket.on('error', (data) => { 
-        showStatus(`Error: ${data.message}`, 'red'); 
-        setTradeButtonsDisabled(false); 
+    socket.on('error', (data) => { 
+        showStatus(`Error: ${data.message}`, 'red'); 
+        setTradeButtonsDisabled(false); 
 
         const allCopyBtns = document.querySelectorAll('.copy-btn');
         allCopyBtns.forEach(btn => {
@@ -1081,19 +1096,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const tradeData = { 
-            direction, 
-            asset: currentAsset, 
+        const tradeData = { 
+            direction, 
+            asset: currentAsset, 
             amount,
             openingPrice: currentPrice
         };
 
         if (isScheduled) {
             const activeTimeButton = timeScroller.querySelector('.time-option.active');
-            if (!activeTimeButton) { 
-                showStatus('Please select a time.', 'red'); 
-                setTradeButtonsDisabled(false); 
-                return; 
+            if (!activeTimeButton) { 
+                showStatus('Please select a time.', 'red'); 
+                setTradeButtonsDisabled(false); 
+                return; 
             }
             tradeData.scheduledTime = activeTimeButton.dataset.time;
             socket.emit("schedule_trade", tradeData);
@@ -1197,26 +1212,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- UI Helper Functions ---
 
-    function showStatus(message, color) { 
-        const colorMap = { red: 'text-red-400', green: 'text-green-500', blue: 'text-blue-400', yellow: 'text-yellow-500', gray: 'text-gray-400' }; 
-        tradeStatusElem.textContent = message; 
-        tradeStatusElem.className = `text-center mt-4 min-h-[24px] font-semibold ${colorMap[color] || 'text-gray-400'}`; 
+    function showStatus(message, color) { 
+        const colorMap = { red: 'text-red-400', green: 'text-green-500', blue: 'text-blue-400', yellow: 'text-yellow-500', gray: 'text-gray-400' }; 
+        tradeStatusElem.textContent = message; 
+        tradeStatusElem.className = `text-center mt-4 min-h-[24px] font-semibold ${colorMap[color] || 'text-gray-400'}`; 
     }
 
-    function setTradeButtonsDisabled(disabled) { 
-        [tradeUpBtn, tradeDownBtn].forEach(btn => { 
-            btn.disabled = disabled; 
-            btn.classList.toggle('opacity-50', disabled); 
-            btn.classList.toggle('cursor-not-allowed', disabled); 
-        }); 
+    function setTradeButtonsDisabled(disabled) { 
+        [tradeUpBtn, tradeDownBtn].forEach(btn => { 
+            btn.disabled = disabled; 
+            btn.classList.toggle('opacity-50', disabled); 
+            btn.classList.toggle('cursor-not-allowed', disabled); 
+        }); 
     }
 
     // --- Charting Functions ---
 
-    function initChart(candles) {
-        if (!candles || candles.length === 0) { myChart.clear(); return; }
-        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    // ✅ CRITICAL FIX: Updated initChart to handle current forming candle
+    function initChart(candles, currentCandle) {
+        if ((!candles || candles.length === 0) && !currentCandle) { 
+            myChart.clear(); 
+            return; 
+        }
+        
+        // ✅ Combine completed candles + current forming candle for real-time display
+        const allCandles = [...(candles || [])];
+        if (currentCandle) {
+            allCandles.push(currentCandle);
+        }
+        
+        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = allCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        
         const options = {
             backgroundColor: 'transparent',
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
@@ -1229,19 +1256,30 @@ document.addEventListener('DOMContentLoaded', () => {
         myChart.setOption(options, { notMerge: true });
     }
 
-    function updateChart(candles) {
-        if (!candles || candles.length === 0) return;
-        const chartData = candles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = candles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    // ✅ CRITICAL FIX: Updated updateChart to handle current forming candle
+    function updateChart(candles, currentCandle) {
+        if ((!candles || candles.length === 0) && !currentCandle) return;
+        
+        // ✅ Combine completed candles + current forming candle for real-time display
+        const allCandles = [...(candles || [])];
+        if (currentCandle) {
+            allCandles.push(currentCandle);
+        }
+        
+        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
+        const chartDates = allCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        
         myChart.setOption({
             xAxis: { data: chartDates },
             series: [{ data: chartData }]
         });
     }
 
+    // ✅ CRITICAL FIX: Updated to pass currentCandle to initChart
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset]) {
-            initChart(marketData[currentAsset].candles);
+            // ✅ Pass both completed candles AND current forming candle
+            initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
@@ -1259,7 +1297,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Popup & Modal Functions ---
 
     function showModal(modal) {
-        hideAllModals(); 
+        hideAllModals(); 
         overlay.classList.remove('hide');
         overlay.classList.add('show');
         modal.classList.remove('hide');
