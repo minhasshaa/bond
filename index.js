@@ -47,6 +47,9 @@ TRADE_PAIRS.forEach(pair => {
   };
 });
 
+// ADDED: Market control override
+const candleOverride = {};
+
 const binance = new Binance().options({});
 
 // Middleware
@@ -64,7 +67,6 @@ app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// Admin routes with proper Azure configuration
 // Admin routes with proper Azure configuration
 try {
     let adminRoutes;
@@ -85,13 +87,15 @@ try {
             KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents',
             STORAGE_ACCOUNT_NAME: accountName,
             STORAGE_ACCOUNT_KEY: accountKey,
-            azureEnabled: true
+            azureEnabled: true,
+            candleOverride: candleOverride // PASS THE candleOverride OBJECT
         });
         console.log('✅ Admin routes loaded with Azure Storage for KYC');
     } else {
         console.log('⚠️ Admin routes loaded without Azure Storage');
         adminRoutes = require("./routes/admin")({
-            azureEnabled: false
+            azureEnabled: false,
+            candleOverride: candleOverride // PASS THE candleOverride OBJECT
         });
     }
     
@@ -232,7 +236,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`); // FIXED: This was line 212 with syntax error
+    console.log(`User connected: ${socket.id}`);
 
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
