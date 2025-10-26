@@ -319,7 +319,7 @@
             };
 
             // ==========================================
-            // KYC FUNCTIONS
+            // KYC FUNCTIONS - FIXED VERSION
             // ==========================================
 
             async function fetchKycStatus() {
@@ -364,7 +364,7 @@
                             kycFormContainer.style.display = 'block';
                             kycRejectedMessage.style.display = 'block';
                             rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
-                        } else if (status === 'review') {
+                        } else if (status === 'under_review') {
                             kycStatusSpan.classList.add('text-warning');
                             kycReviewMessage.style.display = 'block';
                         } else if (status === 'verified') {
@@ -417,10 +417,12 @@
                     // Validate files before upload
                     validateFiles(frontFile, backFile);
 
+                    // FIXED: Only include Authorization header, let browser set Content-Type automatically
                     const response = await fetch(`${KYC_API_BASE_URL}/upload`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${token}`
+                            // NO Content-Type header - browser will set multipart/form-data with boundary automatically
                         },
                         body: formData
                     });
