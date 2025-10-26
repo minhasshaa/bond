@@ -17,7 +17,8 @@ const candleOverride = {};
 module.exports = function(azureConfig = {}) {
     const { 
         blobServiceClient = null, 
-        KYC_CONTAINER_NAME = null
+        KYC_CONTAINER_NAME = null,
+        azureEnabled = false
     } = azureConfig;
 
     const router = express.Router();
@@ -39,19 +40,35 @@ module.exports = function(azureConfig = {}) {
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
-        if (!blobServiceClient) {
-            return res.status(503).json({ success: false, message: 'Azure Storage not configured for KYC review.' });
-        }
-
         try {
-            // Import BlobSASPermissions only when needed
-            const { BlobSASPermissions } = require('@azure/storage-blob');
-            
+            // Check if Azure is configured
+            if (!azureEnabled || !blobServiceClient) {
+                return res.status(503).json({ 
+                    success: false, 
+                    message: 'KYC service connection failed - Azure Storage not configured.' 
+                });
+            }
+
             // Find users who have uploaded documents and are awaiting review
-            const usersToReview = await User.find({ kycStatus: 'review' }).select('username kycStatus kycDocuments createdAt');
+            const usersToReview = await User.find({ 
+                $or: [
+                    { kycStatus: 'review' },
+                    { kycStatus: 'under_review' },
+                    { kycStatus: 'pending' }
+                ],
+                kycDocuments: { $exists: true, $ne: null }
+            }).select('username kycStatus kycDocuments kycRejectionReason createdAt');
 
+            if (usersToReview.length === 0) {
+                return res.json({ 
+                    success: true, 
+                    users: [],
+                    message: 'No pending KYC reviews found.' 
+                });
+            }
+
+            const { BlobSASPermissions, generateBlobSASQueryParameters } = require('@azure/storage-blob');
             const usersWithSignedUrls = await Promise.all(usersToReview.map(async (user) => {
-
                 const getSignedUrl = async (blobPath) => {
                     if (!blobPath) return null;
 
@@ -59,16 +76,26 @@ module.exports = function(azureConfig = {}) {
                         const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
                         const blobClient = containerClient.getBlobClient(blobPath);
 
-                        // Generate SAS token - simplified approach
+                        // Check if blob exists
+                        try {
+                            await blobClient.getProperties();
+                        } catch (error) {
+                            console.error(`Blob not found: ${blobPath}`);
+                            return null;
+                        }
+
+                        // Generate SAS token
                         const expiresOn = new Date();
                         expiresOn.setHours(expiresOn.getHours() + 1); // 1 hour expiry
 
-                        const sasUrl = await blobClient.generateSasUrl({
+                        const sasToken = generateBlobSASQueryParameters({
+                            containerName: KYC_CONTAINER_NAME,
+                            blobName: blobPath,
                             permissions: BlobSASPermissions.parse("r"),
                             expiresOn: expiresOn
-                        });
+                        }, blobServiceClient.credential);
 
-                        return sasUrl;
+                        return `${blobClient.url}?${sasToken}`;
                     } catch (error) {
                         console.error(`Error generating SAS URL for ${blobPath}:`, error);
                         return null;
@@ -82,19 +109,28 @@ module.exports = function(azureConfig = {}) {
                     _id: user._id,
                     username: user.username,
                     kycStatus: user.kycStatus,
+                    rejectionReason: user.kycRejectionReason,
                     joined: user.createdAt,
                     documents: {
                         front: frontUrl,
                         back: backUrl,
+                        uploadDate: user.kycDocuments?.uploadDate
                     }
                 };
             }));
 
-            res.json({ success: true, users: usersWithSignedUrls });
+            res.json({ 
+                success: true, 
+                users: usersWithSignedUrls,
+                count: usersWithSignedUrls.length
+            });
 
         } catch (error) {
             console.error('Admin KYC Fetch Error:', error);
-            res.status(500).json({ success: false, message: 'Failed to fetch pending KYC users.' });
+            res.status(500).json({ 
+                success: false, 
+                message: 'Failed to fetch pending KYC users: ' + error.message 
+            });
         }
     });
 
@@ -102,7 +138,7 @@ module.exports = function(azureConfig = {}) {
     router.post('/kyc/update', async (req, res) => {
         const { userId, newStatus, reason } = req.body;
 
-        if (!['verified', 'rejected'].includes(newStatus)) {
+        if (!['verified', 'rejected', 'approved', 'declined'].includes(newStatus)) {
             return res.status(400).json({ success: false, message: 'Invalid status provided.' });
         }
 
@@ -112,16 +148,28 @@ module.exports = function(azureConfig = {}) {
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
 
-            user.kycStatus = newStatus;
-            if (newStatus === 'rejected') {
+            // Map status to consistent format
+            const statusMap = {
+                'verified': 'verified',
+                'approved': 'verified', 
+                'rejected': 'rejected',
+                'declined': 'rejected'
+            };
+
+            user.kycStatus = statusMap[newStatus];
+            if (statusMap[newStatus] === 'rejected') {
                 user.kycRejectionReason = reason || 'Documents did not meet requirements.';
-            } else if (newStatus === 'verified') {
+            } else {
                 user.kycRejectionReason = undefined;
             }
 
             await user.save();
 
-            res.json({ success: true, message: `KYC status updated to ${newStatus}.` });
+            res.json({ 
+                success: true, 
+                message: `KYC status updated to ${user.kycStatus}.`,
+                newStatus: user.kycStatus
+            });
 
         } catch (error) {
             console.error('Admin KYC Update Error:', error);
@@ -138,12 +186,12 @@ module.exports = function(azureConfig = {}) {
         const { search } = req.query;
         try {
             let userQuery = {};
-            if (search) {
-                userQuery = { username: { $regex: search, $options: 'i' } };
+            if (search && search.trim() !== '') {
+                userQuery = { username: { $regex: search.trim(), $options: 'i' } };
             }
 
             const users = await User.find(userQuery)
-                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt')
+                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt kycStatus')
                 .populate('referredBy', 'username')
                 .lean();
 
@@ -158,6 +206,23 @@ module.exports = function(azureConfig = {}) {
                 }
             ]);
 
+            // Calculate pending deposits and withdrawals
+            const usersWithPending = await Promise.all(users.map(async (user) => {
+                const pendingDeposits = user.transactions?.filter(tx => 
+                    tx.type === 'deposit' && tx.status === 'pending_review'
+                ) || [];
+
+                const pendingWithdrawals = user.transactions?.filter(tx => 
+                    tx.type === 'withdrawal' && tx.status === 'pending_processing'
+                ) || [];
+
+                return {
+                    ...user,
+                    pendingDeposits: pendingDeposits.length,
+                    pendingWithdrawals: pendingWithdrawals.length
+                };
+            }));
+
             const marketStatus = {};
             TRADE_PAIRS.forEach(pair => {
                 marketStatus[pair] = candleOverride[pair] || 'auto';
@@ -165,15 +230,16 @@ module.exports = function(azureConfig = {}) {
 
             res.json({ 
                 success: true, 
-                users, 
+                users: usersWithPending, 
                 tradeVolume, 
                 marketStatus, 
-                tradePairs: TRADE_PAIRS 
+                tradePairs: TRADE_PAIRS,
+                kycEnabled: azureEnabled
             });
 
         } catch (error) {
             console.error('Admin Data Fetch Error:', error);
-            res.status(500).json({ success: false, message: "Server error fetching data." });
+            res.status(500).json({ success: false, message: "Server error fetching data: " + error.message });
         }
     });
 
@@ -444,22 +510,58 @@ module.exports = function(azureConfig = {}) {
         }
     });
 
-    // --- MARKET CONTROL ---
+    // --- FIXED: MARKET CONTROL ---
     router.post('/market-control', (req, res) => {
         const { pair, direction } = req.body;
 
-        if (!pair || (direction !== 'up' && direction !== 'down' && direction !== null)) {
-            return res.status(400).json({ success: false, message: "Invalid pair or direction. Direction must be 'up', 'down', or null to disable." });
+        if (!pair) {
+            return res.status(400).json({ success: false, message: "Trading pair is required." });
+        }
+
+        if (direction !== 'up' && direction !== 'down' && direction !== 'auto' && direction !== null) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Invalid direction. Must be 'up', 'down', 'auto', or null." 
+            });
         }
 
         if (!TRADE_PAIRS.includes(pair)) {
-            return res.status(400).json({ success: false, message: "Invalid trading pair." });
+            return res.status(400).json({ 
+                success: false, 
+                message: `Invalid trading pair. Available pairs: ${TRADE_PAIRS.join(', ')}` 
+            });
         }
 
-        candleOverride[pair] = direction;
+        // Update market control
+        if (direction === 'auto' || direction === null) {
+            delete candleOverride[pair];
+        } else {
+            candleOverride[pair] = direction;
+        }
 
-        const message = direction ? `Market control set to ${direction.toUpperCase()} for ${pair}.` : `Market control disabled for ${pair}.`;
-        res.json({ success: true, message });
+        const message = direction && direction !== 'auto' 
+            ? `Market control set to ${direction.toUpperCase()} for ${pair}.` 
+            : `Market control disabled for ${pair}.`;
+
+        res.json({ 
+            success: true, 
+            message,
+            pair,
+            direction: direction === 'auto' || direction === null ? 'auto' : direction
+        });
+    });
+
+    // [GET] /api/admin/market-control/status - Get current market control status
+    router.get('/market-control/status', (req, res) => {
+        const status = {};
+        TRADE_PAIRS.forEach(pair => {
+            status[pair] = candleOverride[pair] || 'auto';
+        });
+
+        res.json({
+            success: true,
+            marketStatus: status
+        });
     });
 
     // ----------------------------------------------------------------------
