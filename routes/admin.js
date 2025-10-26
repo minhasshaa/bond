@@ -4,21 +4,12 @@ const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
 
-// Define TRADE_PAIRS locally to avoid circular dependency
 const TRADE_PAIRS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 
-// The entire module is now a function that accepts Azure dependencies AND candleOverride
-module.exports = function({ 
-    blobServiceClient, 
-    KYC_CONTAINER_NAME, 
-    STORAGE_ACCOUNT_NAME, 
-    STORAGE_ACCOUNT_KEY, 
-    azureEnabled = false,
-    candleOverride = {}  // RECEIVE THE candleOverride OBJECT
-}) {
+module.exports = function({ candleOverride = {} }) {
     const router = express.Router();
 
     // Admin security middleware
@@ -33,70 +24,117 @@ module.exports = function({
     router.use(adminAuth);
 
     // ----------------------------------------------------------------------
-    // FIXED KYC REVIEW ENDPOINTS
+    // COMPLETE ADMIN DATA ENDPOINT
     // ----------------------------------------------------------------------
 
-    // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
+    router.get('/data', async (req, res) => {
+        const { search } = req.query;
+        try {
+            let userQuery = {};
+            if (search && search.trim() !== '') {
+                userQuery = { username: { $regex: search.trim(), $options: 'i' } };
+            }
+
+            const users = await User.find(userQuery)
+                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt kycStatus')
+                .populate('referredBy', 'username')
+                .lean();
+
+            // Calculate total volume by pair and direction
+            const tradeVolume = await Trade.aggregate([
+                { $match: { status: { $in: ['pending', 'active', 'scheduled'] } } },
+                { 
+                    $group: { 
+                        _id: { asset: '$asset', direction: '$direction' },
+                        totalAmount: { $sum: '$amount' }
+                    }
+                }
+            ]);
+
+            // Calculate pending deposits and withdrawals with amounts
+            const usersWithPending = await Promise.all(users.map(async (user) => {
+                const pendingDeposits = user.transactions?.filter(tx => 
+                    tx.type === 'deposit' && tx.status === 'pending_review'
+                ) || [];
+
+                const pendingWithdrawals = user.transactions?.filter(tx => 
+                    tx.type === 'withdrawal' && tx.status === 'pending_processing'
+                ) || [];
+
+                return {
+                    ...user,
+                    pendingDeposits: pendingDeposits.length,
+                    pendingWithdrawals: pendingWithdrawals.length,
+                    pendingDepositsTotal: pendingDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0),
+                    pendingWithdrawalsTotal: pendingWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0),
+                    pendingDepositTransactions: pendingDeposits,
+                    pendingWithdrawalTransactions: pendingWithdrawals
+                };
+            }));
+
+            const marketStatus = {};
+            TRADE_PAIRS.forEach(pair => {
+                marketStatus[pair] = candleOverride[pair] || 'auto';
+            });
+
+            res.json({ 
+                success: true, 
+                users: usersWithPending, 
+                tradeVolume, 
+                marketStatus, 
+                tradePairs: TRADE_PAIRS 
+            });
+
+        } catch (error) {
+            console.error('Admin Data Fetch Error:', error);
+            res.status(500).json({ success: false, message: "Server error fetching data." });
+        }
+    });
+
+    // ----------------------------------------------------------------------
+    // COMPLETE KYC MANAGEMENT
+    // ----------------------------------------------------------------------
+
     router.get('/kyc/pending-users', async (req, res) => {
         try {
-            // Find users who have uploaded documents and are awaiting review
             const usersToReview = await User.find({ 
                 $or: [
                     { kycStatus: 'review' },
                     { kycStatus: 'under_review' },
                     { kycStatus: 'pending' }
                 ]
-            }).select('username kycStatus kycDocuments createdAt kycRejectionReason');
+            }).select('username kycStatus kycDocuments kycRejectionReason createdAt');
 
-            if (usersToReview.length === 0) {
-                return res.json({ 
-                    success: true, 
-                    users: [],
-                    message: 'No pending KYC reviews found.' 
-                });
-            }
-
-            const usersWithDocumentInfo = usersToReview.map(user => {
-                const hasFrontDoc = !!user.kycDocuments?.front;
-                const hasBackDoc = !!user.kycDocuments?.back;
-                const hasDocuments = hasFrontDoc && hasBackDoc;
-
-                return {
-                    _id: user._id,
-                    username: user.username,
-                    kycStatus: user.kycStatus,
-                    rejectionReason: user.kycRejectionReason,
-                    joined: user.createdAt,
-                    documents: {
-                        front: hasFrontDoc ? `KYC document exists (ID: ${user.kycDocuments.front})` : null,
-                        back: hasBackDoc ? `KYC document exists (ID: ${user.kycDocuments.back})` : null,
-                        uploadDate: user.kycDocuments?.uploadDate,
-                        hasDocuments: hasDocuments,
-                        documentIds: {
-                            front: user.kycDocuments?.front,
-                            back: user.kycDocuments?.back
-                        }
+            const usersWithInfo = usersToReview.map(user => ({
+                _id: user._id,
+                username: user.username,
+                kycStatus: user.kycStatus,
+                rejectionReason: user.kycRejectionReason,
+                joined: user.createdAt,
+                documents: {
+                    front: user.kycDocuments?.front ? 'Document uploaded - Configure Azure for viewing' : null,
+                    back: user.kycDocuments?.back ? 'Document uploaded - Configure Azure for viewing' : null,
+                    uploadDate: user.kycDocuments?.uploadDate,
+                    hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back),
+                    documentIds: {
+                        front: user.kycDocuments?.front,
+                        back: user.kycDocuments?.back
                     }
-                };
-            });
+                }
+            }));
 
             res.json({ 
                 success: true, 
-                users: usersWithDocumentInfo,
-                count: usersWithDocumentInfo.length,
-                message: 'KYC users found. Document viewing requires Azure Storage configuration.'
+                users: usersWithInfo,
+                count: usersWithInfo.length
             });
 
         } catch (error) {
             console.error('Admin KYC Fetch Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: 'Failed to fetch pending KYC users: ' + error.message 
-            });
+            res.status(500).json({ success: false, message: 'Failed to fetch KYC users.' });
         }
     });
 
-    // [POST] /api/admin/kyc/update - Update a user's KYC status
     router.post('/kyc/update', async (req, res) => {
         const { userId, newStatus, reason } = req.body;
 
@@ -139,126 +177,10 @@ module.exports = function({
         }
     });
 
-    // [GET] /api/admin/debug/azure - Debug Azure connection
-    router.get('/debug/azure', async (req, res) => {
-        try {
-            if (!azureEnabled || !blobServiceClient) {
-                return res.json({
-                    success: true,
-                    azureEnabled: false,
-                    message: 'Azure Storage not configured'
-                });
-            }
-
-            // Test Azure connection
-            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-            
-            try {
-                const containerExists = await containerClient.exists();
-                const properties = await containerClient.getProperties();
-                
-                // List some blobs to verify access
-                let blobs = [];
-                for await (const blob of containerClient.listBlobsFlat()) {
-                    blobs.push(blob.name);
-                }
-
-                res.json({
-                    success: true,
-                    azureEnabled: true,
-                    containerExists: containerExists,
-                    containerName: KYC_CONTAINER_NAME,
-                    blobCount: blobs.length,
-                    sampleBlobs: blobs.slice(0, 5), // First 5 blobs
-                    connectionTest: 'SUCCESS'
-                });
-
-            } catch (azureError) {
-                res.json({
-                    success: false,
-                    azureEnabled: true,
-                    connectionTest: 'FAILED',
-                    error: azureError.message
-                });
-            }
-
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                message: 'Debug failed: ' + error.message
-            });
-        }
-    });
-
     // ----------------------------------------------------------------------
-    // CORRECTED ADMIN DATA ENDPOINT
+    // COMPLETE DEPOSIT & WITHDRAWAL MANAGEMENT
     // ----------------------------------------------------------------------
 
-    // GET all admin data
-    router.get('/data', async (req, res) => {
-        const { search } = req.query;
-        try {
-            let userQuery = {};
-            if (search && search.trim() !== '') {
-                userQuery = { username: { $regex: search.trim(), $options: 'i' } };
-            }
-
-            const users = await User.find(userQuery)
-                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt kycStatus')
-                .populate('referredBy', 'username')
-                .lean();
-
-            // Calculate total volume by pair and direction
-            const tradeVolume = await Trade.aggregate([
-                { $match: { status: { $in: ['pending', 'active', 'scheduled'] } } },
-                { 
-                    $group: { 
-                        _id: { asset: '$asset', direction: '$direction' },
-                        totalAmount: { $sum: '$amount' }
-                    }
-                }
-            ]);
-
-            // Calculate pending deposits and withdrawals
-            const usersWithPending = await Promise.all(users.map(async (user) => {
-                const pendingDeposits = user.transactions?.filter(tx => 
-                    tx.type === 'deposit' && tx.status === 'pending_review'
-                ) || [];
-
-                const pendingWithdrawals = user.transactions?.filter(tx => 
-                    tx.type === 'withdrawal' && tx.status === 'pending_processing'
-                ) || [];
-
-                return {
-                    ...user,
-                    pendingDeposits: pendingDeposits.length,
-                    pendingWithdrawals: pendingWithdrawals.length,
-                    pendingDepositsTotal: pendingDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0),
-                    pendingWithdrawalsTotal: pendingWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0)
-                };
-            });
-
-            // Market status from candleOverride (now passed from index.js)
-            const marketStatus = {};
-            TRADE_PAIRS.forEach(pair => {
-                marketStatus[pair] = candleOverride[pair] || 'auto';
-            });
-
-            res.json({ 
-                success: true, 
-                users: usersWithPending, 
-                tradeVolume, 
-                marketStatus, 
-                tradePairs: TRADE_PAIRS 
-            });
-
-        } catch (error) {
-            console.error('Admin Data Fetch Error:', error);
-            res.status(500).json({ success: false, message: "Server error fetching data." });
-        }
-    });
-
-    // --- CORRECTED DEPOSIT & WITHDRAWAL MANAGEMENT ---
     router.post('/approve-deposit', async (req, res) => {
         const { userId, txid, amount } = req.body;
         if (!userId || !txid || typeof amount !== 'number' || amount <= 0) {
@@ -276,7 +198,6 @@ module.exports = function({
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -325,7 +246,6 @@ module.exports = function({
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_review' && 
@@ -361,7 +281,6 @@ module.exports = function({
             const user = await User.findById(userId);
             if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -405,7 +324,6 @@ module.exports = function({
                 return res.status(404).json({ success: false, message: "User not found." });
             }
 
-            // Use find() to search by txid
             const transaction = user.transactions.find(tx => 
                 tx.txid === txid && 
                 tx.status === 'pending_processing' && 
@@ -442,7 +360,10 @@ module.exports = function({
         }
     });
 
-    // --- FIXED: MANUAL USER CREDIT ---
+    // ----------------------------------------------------------------------
+    // COMPLETE MANUAL USER CREDIT
+    // ----------------------------------------------------------------------
+
     router.post('/credit-user', async (req, res) => {
         const { username, amount } = req.body;
         const creditAmount = parseFloat(amount);
@@ -483,7 +404,10 @@ module.exports = function({
         }
     });
 
-    // --- FIXED: REFERRAL COMMISSION ---
+    // ----------------------------------------------------------------------
+    // COMPLETE REFERRAL COMMISSION
+    // ----------------------------------------------------------------------
+
     router.post('/give-commission', async (req, res) => {
         const { username, amount } = req.body;
         const commissionAmount = parseFloat(amount);
@@ -525,7 +449,10 @@ module.exports = function({
         }
     });
 
-    // --- MARKET CONTROL ---
+    // ----------------------------------------------------------------------
+    // COMPLETE MARKET CONTROL
+    // ----------------------------------------------------------------------
+
     router.post('/market-control', (req, res) => {
         const { pair, direction } = req.body;
 
@@ -543,7 +470,6 @@ module.exports = function({
         res.json({ success: true, message });
     });
 
-    // [GET] /api/admin/market-control/status - Get current market control status
     router.get('/market-control/status', (req, res) => {
         const status = {};
         TRADE_PAIRS.forEach(pair => {
@@ -557,14 +483,12 @@ module.exports = function({
     });
 
     // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES
+    // COMPLETE COPY TRADE MANAGEMENT
     // ----------------------------------------------------------------------
 
-    // [POST] /api/admin/copy-trade/create - Create new copy trade
     router.post('/copy-trade/create', async (req, res) => {
         const { tradingPair, direction, percentage, executionTime } = req.body;
 
-        // Validation
         if (!tradingPair || !direction || !percentage || !executionTime) {
             return res.status(400).json({ 
                 success: false, 
@@ -587,7 +511,6 @@ module.exports = function({
         }
 
         try {
-            // Create the copy trade
             const copyTrade = new AdminCopyTrade({
                 tradingPair: tradingPair.toUpperCase(),
                 direction: direction.toUpperCase(),
@@ -619,7 +542,6 @@ module.exports = function({
         }
     });
 
-    // [GET] /api/admin/copy-trade/active - Get active copy trades
     router.get('/copy-trade/active', async (req, res) => {
         try {
             const activeTrades = await AdminCopyTrade.find({ 
@@ -644,7 +566,6 @@ module.exports = function({
         }
     });
 
-    // [GET] /api/admin/copy-trade/history - Get copy trade history
     router.get('/copy-trade/history', async (req, res) => {
         try {
             const { page = 1, limit = 20 } = req.query;
@@ -674,7 +595,6 @@ module.exports = function({
         }
     });
 
-    // [DELETE] /api/admin/copy-trade/:id - Delete copy trade
     router.delete('/copy-trade/:id', async (req, res) => {
         try {
             const { id } = req.params;
@@ -702,7 +622,6 @@ module.exports = function({
         }
     });
 
-    // [POST] /api/admin/copy-trade/cleanup - Manual cleanup of expired trades
     router.post('/copy-trade/cleanup', async (req, res) => {
         try {
             const now = new Date();
