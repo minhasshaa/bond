@@ -10,7 +10,7 @@ const TRADE_PAIRS = [
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 
-// Create candleOverride object since it doesn't exist in index
+// Create candleOverride object for market control
 const candleOverride = {};
 
 // The entire module is now a function that accepts Azure dependencies
@@ -35,28 +35,19 @@ module.exports = function(azureConfig = {}) {
     router.use(adminAuth);
 
     // ----------------------------------------------------------------------
-    // CORRECTED KYC REVIEW ENDPOINTS
+    // FIXED KYC REVIEW ENDPOINTS - Works with or without Azure
     // ----------------------------------------------------------------------
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
         try {
-            // Check if Azure is configured
-            if (!azureEnabled || !blobServiceClient) {
-                return res.status(503).json({ 
-                    success: false, 
-                    message: 'KYC service connection failed - Azure Storage not configured.' 
-                });
-            }
-
             // Find users who have uploaded documents and are awaiting review
             const usersToReview = await User.find({ 
                 $or: [
                     { kycStatus: 'review' },
                     { kycStatus: 'under_review' },
                     { kycStatus: 'pending' }
-                ],
-                kycDocuments: { $exists: true, $ne: null }
+                ]
             }).select('username kycStatus kycDocuments kycRejectionReason createdAt');
 
             if (usersToReview.length === 0) {
@@ -67,7 +58,34 @@ module.exports = function(azureConfig = {}) {
                 });
             }
 
+            // If Azure is not configured, return users without document URLs
+            if (!azureEnabled || !blobServiceClient) {
+                const usersWithoutUrls = usersToReview.map(user => ({
+                    _id: user._id,
+                    username: user.username,
+                    kycStatus: user.kycStatus,
+                    rejectionReason: user.kycRejectionReason,
+                    joined: user.createdAt,
+                    documents: {
+                        front: user.kycDocuments?.front ? 'Document uploaded (Azure not configured)' : null,
+                        back: user.kycDocuments?.back ? 'Document uploaded (Azure not configured)' : null,
+                        uploadDate: user.kycDocuments?.uploadDate,
+                        hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back)
+                    },
+                    azureConfigured: false
+                }));
+
+                return res.json({ 
+                    success: true, 
+                    users: usersWithoutUrls,
+                    count: usersWithoutUrls.length,
+                    message: 'KYC users found, but Azure Storage not configured for document access'
+                });
+            }
+
+            // Azure is configured - generate signed URLs
             const { BlobSASPermissions, generateBlobSASQueryParameters } = require('@azure/storage-blob');
+            
             const usersWithSignedUrls = await Promise.all(usersToReview.map(async (user) => {
                 const getSignedUrl = async (blobPath) => {
                     if (!blobPath) return null;
@@ -115,7 +133,8 @@ module.exports = function(azureConfig = {}) {
                         front: frontUrl,
                         back: backUrl,
                         uploadDate: user.kycDocuments?.uploadDate
-                    }
+                    },
+                    azureConfigured: true
                 };
             }));
 
@@ -219,7 +238,9 @@ module.exports = function(azureConfig = {}) {
                 return {
                     ...user,
                     pendingDeposits: pendingDeposits.length,
-                    pendingWithdrawals: pendingWithdrawals.length
+                    pendingWithdrawals: pendingWithdrawals.length,
+                    pendingDepositsTotal: pendingDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0),
+                    pendingWithdrawalsTotal: pendingWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0)
                 };
             }));
 
