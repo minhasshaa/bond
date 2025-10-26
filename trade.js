@@ -188,7 +188,7 @@ async function settleTradesWrapper(io, User, Trade, pair, exitPrice) {
 // --- END NEW MONITORING LOGIC ---
 
 
-async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
+async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride) {
     globalMarketData = marketData; // Set global reference
 
     // ⭐ FIX: Ensure marketData is available globally
@@ -246,6 +246,19 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 balance: user.balance, 
                 tradeHistory: userTrades,
                 marketData: globalMarketData  // ✅ ADDED THIS LINE - CRITICAL FIX
+            });
+
+            // ✅ CRITICAL FIX: Add real-time candle forwarding
+            // Forward market_data events from main server to trading clients
+            socket.on('market_data', (data) => {
+                // Simply forward the real-time candle data to the client
+                socket.emit('market_data', data);
+            });
+
+            // ✅ CRITICAL FIX: Add real-time price forwarding  
+            socket.on('price_update', (data) => {
+                // Simply forward the price updates to the client
+                socket.emit('price_update', data);
             });
 
             socket.on("trade", async (data) => {
