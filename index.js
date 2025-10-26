@@ -1,4 +1,4 @@
-// index.js - COMPLETE FIXED VERSION
+// index.js - COMPLETE FIXED VERSION WITH REAL-TIME CANDLES
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -83,10 +83,11 @@ const marketData = {};
 TRADE_PAIRS.forEach(pair => {
   marketData[pair] = { 
     currentPrice: 0, 
-    candles: [], 
-    currentCandle: null,
+    historicalCandles: [],  // ⭐ CHANGED: Only completed candles
+    activeCandle: null,     // ⭐ CHANGED: Renamed from currentCandle to activeCandle
     lastWebSocketUpdate: null,
-    isWebSocketActive: false
+    isWebSocketActive: false,
+    lastEmitTime: 0
   };
 });
 module.exports.marketData = marketData;
@@ -133,9 +134,9 @@ async function getDashboardData(userId) {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
 
-        const lastCandle = (Array.isArray(data.candles) && data.candles[data.candles.length - 1]) || data.currentCandle;
+        const lastCandle = (Array.isArray(data.historicalCandles) && data.historicalCandles[data.historicalCandles.length - 1]) || data.activeCandle;
         if (!lastCandle || typeof lastCandle.open !== 'number' || lastCandle.open === 0) {
-            return { name: pair.replace('USDT', ''), ticker: `${pair.replace('USDT', '')}/USD`, price: data.currentPrice || 0, change: 0, candles: data.candles };
+            return { name: pair.replace('USDT', ''), ticker: `${pair.replace('USDT', '')}/USD`, price: data.currentPrice || 0, change: 0, candles: data.historicalCandles };
         }
 
         const change = ((data.currentPrice - lastCandle.open) / lastCandle.open) * 100;
@@ -145,7 +146,7 @@ async function getDashboardData(userId) {
             ticker: `${pair.replace('USDT', '')}/USD`,
             price: data.currentPrice,
             change: parseFloat(change.toFixed(2)),
-            candles: data.candles
+            candles: data.historicalCandles
         };
     }).filter(Boolean);
 
@@ -207,13 +208,13 @@ async function initializeMarketData() {
             
             if (!Array.isArray(klines) || klines.length < 5) { 
                  console.warn(`⚠️ Historical load failed for ${pair}. Starting clean.`);
-                 marketData[pair].candles = []; 
+                 marketData[pair].historicalCandles = []; 
                  marketData[pair].currentPrice = 0;
-                 marketData[pair].currentCandle = null; 
+                 marketData[pair].activeCandle = null; 
                  continue; 
             }
 
-            marketData[pair].candles = klines.map(k => ({
+            marketData[pair].historicalCandles = klines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
                 open: parseFloat(k[1]),
@@ -221,28 +222,29 @@ async function initializeMarketData() {
                 low: parseFloat(k[3]),
                 close: parseFloat(k[4]),
             }));
-            const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
+            const lastCandle = marketData[pair].historicalCandles[marketData[pair].historicalCandles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
             
-            // Start current candle with current price
+            // Start active candle with current price and current minute
             const currentMinuteStart = new Date();
             currentMinuteStart.setSeconds(0, 0);
             currentMinuteStart.setMilliseconds(0);
             
-            marketData[pair].currentCandle = {
+            marketData[pair].activeCandle = {
                 asset: pair,
                 timestamp: currentMinuteStart,
-                open: lastCandle.close,
+                open: lastCandle.close, // Start with last close price
                 high: lastCandle.close,
                 low: lastCandle.close,
-                close: lastCandle.close
+                close: lastCandle.close,
+                isActive: true // ⭐ NEW: Mark as active
             };
-            console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
+            console.log(`✅ Loaded ${marketData[pair].historicalCandles.length} historical candles for ${pair}.`);
         } catch (err) {
             console.error(`❌ Fatal error in initial load for ${pair}:`, err.message);
-            marketData[pair].candles = []; 
+            marketData[pair].historicalCandles = []; 
             marketData[pair].currentPrice = 0;
-            marketData[pair].currentCandle = null;
+            marketData[pair].activeCandle = null;
         }
     }
 }
@@ -250,42 +252,22 @@ async function initializeMarketData() {
 let isStreaming = false;
 let restPollingInterval = null;
 
-// ⭐ NEW: Price spike detection
-function isPriceSpike(currentPrice, currentCandle) {
-    if (!currentCandle || currentCandle.open === 0) return false;
-    
-    const typicalPrice = (currentCandle.high + currentCandle.low + currentCandle.close) / 3;
-    const priceDeviation = Math.abs(currentPrice - typicalPrice) / typicalPrice;
-    
-    // If price deviates more than 5% from typical price, it might be a spike
-    return priceDeviation > 0.05;
+// ⭐ NEW: Get current minute start timestamp
+function getCurrentMinuteStart() {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    return now;
 }
 
-// ⭐ NEW: Candle validation function to prevent long wicks
-function validateCandle(candle, previousPrice) {
-    if (!candle || candle.open === 0) return candle;
+// ⭐ NEW: Check if we should start a new candle
+function shouldStartNewCandle(activeCandle) {
+    if (!activeCandle) return true;
     
-    const bodySize = Math.abs(candle.open - candle.close);
-    const totalRange = candle.high - candle.low;
-    
-    // If wicks are too long compared to body (more than 5x), normalize them
-    if (totalRange > 0 && bodySize > 0 && (totalRange / bodySize) > 5) {
-        console.log(`⚠️ Normalizing candle with abnormal wicks: ${candle.asset}`);
-        
-        const midPrice = (candle.open + candle.close) / 2;
-        const allowedWick = bodySize * 2; // Allow wicks up to 2x body size
-        
-        return {
-            ...candle,
-            high: Math.min(candle.high, midPrice + allowedWick),
-            low: Math.max(candle.low, midPrice - allowedWick)
-        };
-    }
-    
-    return candle;
+    const currentMinuteStart = getCurrentMinuteStart();
+    return activeCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 }
 
-// ⭐ FIXED: REST API Polling with REAL-TIME candle updates
+// ⭐ FIXED: REST API Polling with PROPER real-time candle updates
 function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
@@ -307,127 +289,104 @@ function startRESTPolling() {
                 if (!price || !marketData[pair]) continue;
                 
                 const md = marketData[pair];
-                const previousPrice = md.currentPrice;
                 md.currentPrice = price;
                 
-                const currentMinuteStart = new Date(now);
-                currentMinuteStart.setSeconds(0, 0);
-                currentMinuteStart.setMilliseconds(0);
-
-                // Detect data gaps and handle gracefully
-                if (md.currentCandle && !md.isWebSocketActive) {
-                    const timeDiff = now.getTime() - (md.lastWebSocketUpdate || now.getTime());
-                    if (timeDiff > 120000) { // 2 minutes gap
-                        console.log(`⚠️ Data gap detected for ${pair}: ${Math.round(timeDiff/1000)}s`);
-                        // Don't update current candle with old data, start fresh
-                        if (md.currentCandle.timestamp.getTime() < currentMinuteStart.getTime() - 60000) {
-                            md.currentCandle = null;
-                        }
-                    }
-                }
-
-                // Initialize currentCandle if needed
-                if (!md.currentCandle) {
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
-                    };
-                    console.log(`🆕 New candle initialized for ${pair}`);
-                }
+                const currentMinuteStart = getCurrentMinuteStart();
                 
-                const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-                if (isNewMinute) {
-                    // Complete the current candle
-                    const completed = { ...md.currentCandle, close: previousPrice || price };
-                    
-                    // Handle candle override if any
-                    const override = candleOverride[pair];
-                    if (override) {
-                        const openP = completed.open;
-                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                        if (override === 'up') {
-                            completed.close = openP + priceChange;
-                            completed.high = Math.max(completed.high, completed.close);
-                        } else {
-                            completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
-                        }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                        candleOverride[pair] = null;
-                    }
-                    
-                    // Validate candle before saving (prevent long wicks)
-                    const validatedCandle = validateCandle(completed, previousPrice);
-                    
-                    // Save completed candle
-                    if (validatedCandle.open > 0 && validatedCandle.close > 0) {
-                        md.candles.push(validatedCandle);
-                        if (md.candles.length > 200) md.candles.shift();
+                // ⭐ CRITICAL FIX: Check if we need to start a new candle
+                if (shouldStartNewCandle(md.activeCandle)) {
+                    // If we have an active candle, complete it first
+                    if (md.activeCandle) {
+                        const completedCandle = { 
+                            ...md.activeCandle, 
+                            close: md.currentPrice,
+                            isActive: false // Mark as completed
+                        };
                         
-                        // Save to database
-                        Candle.updateOne({ asset: pair, timestamp: validatedCandle.timestamp }, { $set: validatedCandle }, { upsert: true }).catch(err => {
-                            console.error(`DB Error saving completed candle for ${pair}:`, err.message);
-                        });
+                        // Handle candle override if any
+                        const override = candleOverride[pair];
+                        if (override) {
+                            const openP = completedCandle.open;
+                            const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                            if (override === 'up') {
+                                completedCandle.close = openP + priceChange;
+                                completedCandle.high = Math.max(completedCandle.high, completedCandle.close);
+                            } else {
+                                completedCandle.close = openP - priceChange;
+                                completedCandle.low = Math.min(completedCandle.low, completedCandle.close);
+                            }
+                            console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completedCandle.close.toFixed(6)}`);
+                            candleOverride[pair] = null;
+                        }
+                        
+                        // Save completed candle to historical data
+                        if (completedCandle.open > 0 && completedCandle.close > 0) {
+                            md.historicalCandles.push(completedCandle);
+                            if (md.historicalCandles.length > 200) md.historicalCandles.shift();
+                            
+                            // Save to database
+                            Candle.updateOne({ asset: pair, timestamp: completedCandle.timestamp }, { $set: completedCandle }, { upsert: true }).catch(err => {
+                                console.error(`DB Error saving completed candle for ${pair}:`, err.message);
+                            });
+                        }
+                        
+                        console.log(`✅ Completed candle for ${pair} at ${completedCandle.timestamp.toISOString()}`);
                     }
                     
-                    // Start new candle with current price
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
+                    // Start NEW active candle
+                    md.activeCandle = {
+                        asset: pair,
+                        timestamp: new Date(currentMinuteStart),
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price,
+                        isActive: true
                     };
                     
-                    console.log(`🕒 New candle started for ${pair} at ${currentMinuteStart.toISOString()}`);
+                    console.log(`🆕 Started new active candle for ${pair}`);
                 } else {
-                    // ⭐ CRITICAL FIX: Update current candle in real-time with price movements
-                    // Only update if price is reasonable (not a spike)
-                    if (!isPriceSpike(price, md.currentCandle)) {
-                        md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                        md.currentCandle.low = Math.min(md.currentCandle.low, price);
-                        md.currentCandle.close = price;
+                    // ⭐ CRITICAL FIX: Update ACTIVE candle in real-time
+                    if (md.activeCandle) {
+                        // Update high if current price is higher
+                        if (price > md.activeCandle.high) {
+                            md.activeCandle.high = price;
+                        }
+                        // Update low if current price is lower
+                        if (price < md.activeCandle.low) {
+                            md.activeCandle.low = price;
+                        }
+                        // Always update close to current price
+                        md.activeCandle.close = price;
                     }
                 }
 
-                // ⭐ CRITICAL FIX: Emit REAL-TIME candle updates
-                const chartData = {
-                    asset: pair, 
-                    candles: [...md.candles], // Historical completed candles only
-                    currentCandle: { ...md.currentCandle }, // Current active candle (real-time)
-                    currentPrice: price,
-                    timestamp: now.getTime(),
-                    dataSource: md.isWebSocketActive ? 'websocket' : 'rest',
-                    isNewCandle: isNewMinute // Flag for frontend to handle new candle
-                };
+                // ⭐ CRITICAL FIX: Emit data with PROPER structure
+                // Only emit if we have data and enough time has passed (throttle emissions)
+                if (Date.now() - md.lastEmitTime > 500) { // Emit max every 500ms
+                    const chartData = {
+                        asset: pair, 
+                        historicalCandles: [...md.historicalCandles], // Only completed candles
+                        activeCandle: md.activeCandle ? { ...md.activeCandle } : null, // Current forming candle
+                        currentPrice: price,
+                        timestamp: now.getTime(),
+                        dataSource: 'rest',
+                        isNewCandle: shouldStartNewCandle(md.activeCandle) // Flag for frontend
+                    };
 
-                // Emit to all connected clients
-                io.emit("market_data", chartData);
+                    // Emit to all connected clients
+                    io.emit("market_data", chartData);
+                    md.lastEmitTime = Date.now();
+                }
             }
             
         } catch (err) {
             console.error('❌ REST polling error:', err.message);
         }
-    }, 2000); // Poll every 2 seconds for better real-time updates
-
-    // Return cleanup function
-    return () => {
-        if (restPollingInterval) {
-            clearInterval(restPollingInterval);
-            restPollingInterval = null;
-        }
-        isStreaming = false;
-        console.log('🔄 REST API polling stopped');
-    };
+    }, 1000); // ⭐ INCREASED: Poll every 1 second for better real-time updates
 }
 
-// ⭐ FIXED: WebSocket with REAL-TIME candle updates
+// ⭐ FIXED: WebSocket with PROPER real-time candle updates
 function startMarketDataStream() {
     if (isStreaming) return;
     
@@ -460,83 +419,84 @@ function startMarketDataStream() {
                 md.currentPrice = price;
                 
                 const now = new Date();
-                const currentMinuteStart = new Date(now);
-                currentMinuteStart.setSeconds(0, 0);
-                currentMinuteStart.setMilliseconds(0);
-
-                if (!md.currentCandle) {
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
-                    };
-                }
+                const currentMinuteStart = getCurrentMinuteStart();
                 
-                const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-                if (isNewMinute) {
-                    const completed = { ...md.currentCandle, close: price };
-                    
-                    const override = candleOverride[pair];
-                    if (override) {
-                        const openP = completed.open;
-                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                        if (override === 'up') {
-                            completed.close = openP + priceChange;
-                            completed.high = Math.max(completed.high, completed.close);
-                        } else {
-                            completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
-                        }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                        candleOverride[pair] = null;
-                    }
-                    
-                    // Validate candle before saving
-                    const validatedCandle = validateCandle(completed, md.currentPrice);
-                    
-                    if (validatedCandle.open > 0 && validatedCandle.close > 0) {
-                        md.candles.push(validatedCandle);
-                        if (md.candles.length > 200) md.candles.shift();
+                // ⭐ CRITICAL FIX: Check if we need to start a new candle
+                if (shouldStartNewCandle(md.activeCandle)) {
+                    // If we have an active candle, complete it first
+                    if (md.activeCandle) {
+                        const completedCandle = { 
+                            ...md.activeCandle, 
+                            close: price,
+                            isActive: false
+                        };
                         
-                        Candle.updateOne({ asset: pair, timestamp: validatedCandle.timestamp }, { $set: validatedCandle }, { upsert: true }).catch(err => {
-                            console.error(`DB Error saving completed candle for ${pair}:`, err.message);
-                        });
+                        const override = candleOverride[pair];
+                        if (override) {
+                            const openP = completedCandle.open;
+                            const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                            if (override === 'up') {
+                                completedCandle.close = openP + priceChange;
+                                completedCandle.high = Math.max(completedCandle.high, completedCandle.close);
+                            } else {
+                                completedCandle.close = openP - priceChange;
+                                completedCandle.low = Math.min(completedCandle.low, completedCandle.close);
+                            }
+                            console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completedCandle.close.toFixed(6)}`);
+                            candleOverride[pair] = null;
+                        }
+                        
+                        if (completedCandle.open > 0 && completedCandle.close > 0) {
+                            md.historicalCandles.push(completedCandle);
+                            if (md.historicalCandles.length > 200) md.historicalCandles.shift();
+                            
+                            Candle.updateOne({ asset: pair, timestamp: completedCandle.timestamp }, { $set: completedCandle }, { upsert: true }).catch(err => {
+                                console.error(`DB Error saving completed candle for ${pair}:`, err.message);
+                            });
+                        }
                     }
                     
-                    // Start new candle with current price
-                    md.currentCandle = { 
-                        asset: pair, 
-                        timestamp: currentMinuteStart, 
-                        open: price, 
-                        high: price, 
-                        low: price, 
-                        close: price 
+                    // Start NEW active candle
+                    md.activeCandle = {
+                        asset: pair,
+                        timestamp: new Date(currentMinuteStart),
+                        open: price,
+                        high: price,
+                        low: price,
+                        close: price,
+                        isActive: true
                     };
-                    
-                    console.log(`🕒 New WebSocket candle started for ${pair}`);
                 } else {
-                    // ⭐ CRITICAL FIX: Update current candle in real-time for WebSocket
-                    if (!isPriceSpike(price, md.currentCandle)) {
-                        md.currentCandle.high = Math.max(md.currentCandle.high, price);
-                        md.currentCandle.low = Math.min(md.currentCandle.low, price);
-                        md.currentCandle.close = price;
+                    // ⭐ CRITICAL FIX: Update ACTIVE candle in real-time
+                    if (md.activeCandle) {
+                        // Update high if current price is higher
+                        if (price > md.activeCandle.high) {
+                            md.activeCandle.high = price;
+                        }
+                        // Update low if current price is lower
+                        if (price < md.activeCandle.low) {
+                            md.activeCandle.low = price;
+                        }
+                        // Always update close to current price
+                        md.activeCandle.close = price;
                     }
                 }
 
-                // ⭐ CRITICAL FIX: Emit REAL-TIME WebSocket updates
-                io.emit("market_data", { 
-                    asset: pair, 
-                    candles: [...md.candles], // Historical candles only
-                    currentCandle: { ...md.currentCandle }, // Current active candle
-                    currentPrice: price,
-                    timestamp: now.getTime(),
-                    dataSource: 'websocket',
-                    isNewCandle: isNewMinute
-                });
+                // ⭐ CRITICAL FIX: Emit WebSocket data with PROPER structure
+                if (Date.now() - md.lastEmitTime > 100) { // Emit max every 100ms for WebSocket
+                    const chartData = {
+                        asset: pair, 
+                        historicalCandles: [...md.historicalCandles],
+                        activeCandle: md.activeCandle ? { ...md.activeCandle } : null,
+                        currentPrice: price,
+                        timestamp: now.getTime(),
+                        dataSource: 'websocket',
+                        isNewCandle: shouldStartNewCandle(md.activeCandle)
+                    };
+
+                    io.emit("market_data", chartData);
+                    md.lastEmitTime = Date.now();
+                }
                 
             } catch (streamErr) {
                 console.error(`❌ Stream processing error for ${trade.s}:`, streamErr.message);
@@ -594,7 +554,7 @@ setInterval(() => {
         const md = marketData[pair];
         if (!md || md.currentPrice === 0) continue; 
         
-        const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
+        const lastCandle = (md.historicalCandles && md.historicalCandles.length > 0) ? md.historicalCandles[md.historicalCandles.length - 1] : md.activeCandle;
         let change = 0;
         if (lastCandle && lastCandle.open !== 0) {
             change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
