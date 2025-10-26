@@ -10,11 +10,15 @@ const TRADE_PAIRS = [
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 
-// Create candleOverride object for market control
-const candleOverride = {};
-
-// The entire module is now a function that accepts Azure dependencies
-module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY, azureEnabled = false }) {
+// The entire module is now a function that accepts Azure dependencies AND candleOverride
+module.exports = function({ 
+    blobServiceClient, 
+    KYC_CONTAINER_NAME, 
+    STORAGE_ACCOUNT_NAME, 
+    STORAGE_ACCOUNT_KEY, 
+    azureEnabled = false,
+    candleOverride = {}  // RECEIVE THE candleOverride OBJECT
+}) {
     const router = express.Router();
 
     // Admin security middleware
@@ -52,77 +56,10 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                 });
             }
 
-            // If Azure is not configured, return basic user info
-            if (!azureEnabled || !blobServiceClient) {
-                const usersWithoutUrls = usersToReview.map(user => ({
-                    _id: user._id,
-                    username: user.username,
-                    kycStatus: user.kycStatus,
-                    rejectionReason: user.kycRejectionReason,
-                    joined: user.createdAt,
-                    documents: {
-                        front: user.kycDocuments?.front ? 'Document uploaded (view unavailable)' : null,
-                        back: user.kycDocuments?.back ? 'Document uploaded (view unavailable)' : null,
-                        uploadDate: user.kycDocuments?.uploadDate,
-                        hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back)
-                    }
-                }));
-
-                return res.json({ 
-                    success: true, 
-                    users: usersWithoutUrls,
-                    count: usersWithoutUrls.length,
-                    message: 'KYC users found, but Azure Storage not configured for document access'
-                });
-            }
-
-            // Azure is configured - generate signed URLs
-            const { BlobSASPermissions } = require('@azure/storage-blob');
-            
-            const usersWithSignedUrls = await Promise.all(usersToReview.map(async (user) => {
-                const getSignedUrl = async (blobPath) => {
-                    if (!blobPath) {
-                        console.log('No blob path provided for user:', user.username);
-                        return null;
-                    }
-
-                    try {
-                        const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-                        const blobClient = containerClient.getBlobClient(blobPath);
-
-                        // Check if blob exists
-                        try {
-                            await blobClient.getProperties();
-                            console.log('Blob found:', blobPath);
-                        } catch (error) {
-                            console.error(`Blob not found: ${blobPath} for user ${user.username}`);
-                            return null;
-                        }
-
-                        // Generate SAS token
-                        const expiresOn = new Date();
-                        expiresOn.setHours(expiresOn.getHours() + 1); // 1 hour expiry
-
-                        const sasUrl = await blobClient.generateSasUrl({
-                            permissions: BlobSASPermissions.parse("r"),
-                            expiresOn: expiresOn
-                        });
-
-                        console.log('Generated SAS URL for:', blobPath);
-                        return sasUrl;
-
-                    } catch (error) {
-                        console.error(`Error generating SAS URL for ${blobPath}:`, error.message);
-                        return null;
-                    }
-                };
-
-                const frontUrl = await getSignedUrl(user.kycDocuments?.front);
-                const backUrl = await getSignedUrl(user.kycDocuments?.back);
-
-                // If URLs are null but documents exist, provide fallback
-                const hasDocuments = !!(user.kycDocuments?.front && user.kycDocuments?.back);
-                const documentsAvailable = !!(frontUrl || backUrl);
+            const usersWithDocumentInfo = usersToReview.map(user => {
+                const hasFrontDoc = !!user.kycDocuments?.front;
+                const hasBackDoc = !!user.kycDocuments?.back;
+                const hasDocuments = hasFrontDoc && hasBackDoc;
 
                 return {
                     _id: user._id,
@@ -131,19 +68,23 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                     rejectionReason: user.kycRejectionReason,
                     joined: user.createdAt,
                     documents: {
-                        front: frontUrl || (hasDocuments ? 'Document exists but URL generation failed' : null),
-                        back: backUrl || (hasDocuments ? 'Document exists but URL generation failed' : null),
+                        front: hasFrontDoc ? `KYC document exists (ID: ${user.kycDocuments.front})` : null,
+                        back: hasBackDoc ? `KYC document exists (ID: ${user.kycDocuments.back})` : null,
                         uploadDate: user.kycDocuments?.uploadDate,
                         hasDocuments: hasDocuments,
-                        documentsAvailable: documentsAvailable
+                        documentIds: {
+                            front: user.kycDocuments?.front,
+                            back: user.kycDocuments?.back
+                        }
                     }
                 };
-            }));
+            });
 
             res.json({ 
                 success: true, 
-                users: usersWithSignedUrls,
-                count: usersWithSignedUrls.length
+                users: usersWithDocumentInfo,
+                count: usersWithDocumentInfo.length,
+                message: 'KYC users found. Document viewing requires Azure Storage configuration.'
             });
 
         } catch (error) {
@@ -295,9 +236,9 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOU
                     pendingDepositsTotal: pendingDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0),
                     pendingWithdrawalsTotal: pendingWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0)
                 };
-            }));
+            });
 
-            // Market status from candleOverride
+            // Market status from candleOverride (now passed from index.js)
             const marketStatus = {};
             TRADE_PAIRS.forEach(pair => {
                 marketStatus[pair] = candleOverride[pair] || 'auto';
