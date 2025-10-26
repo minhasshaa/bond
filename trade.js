@@ -191,7 +191,8 @@ async function settleTradesWrapper(io, User, Trade, pair, exitPrice) {
 async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride) {
     globalMarketData = marketData; // Set global reference
 
-    io.engine.marketData = marketData; 
+    // ⭐ FIX: Ensure marketData is available globally
+    io.engine.marketData = marketData;
 
     // ⭐ FIX: Updated Socket.IO authentication to match HTTP middleware
     io.use((socket, next) => {
@@ -240,10 +241,11 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverri
             // FIX: Removed duplicate market_data emissions that conflict with main server
             const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
             
-            // FIX: Only send trade-related data, not market_data
+            // ⭐ FIX: Added marketData to init event so trading page gets price data
             socket.emit("init", { 
                 balance: user.balance, 
-                tradeHistory: userTrades 
+                tradeHistory: userTrades,
+                marketData: globalMarketData  // ✅ ADDED THIS LINE - CRITICAL FIX
             });
 
             socket.on("trade", async (data) => {
