@@ -64,23 +64,38 @@ app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// Admin routes (if you have them)
+// Admin routes with proper Azure configuration
 try {
     let adminRoutes;
-    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
+                          process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+    
     if (hasAzureConfig) {
         const { BlobServiceClient } = require('@azure/storage-blob');
         const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+        
         adminRoutes = require("./routes/admin")({
             blobServiceClient,
-            KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents'
+            KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents',
+            azureEnabled: true
         });
+        console.log('✅ Admin routes loaded with Azure Storage for KYC');
     } else {
-        adminRoutes = require("./routes/admin")({});
+        console.log('⚠️ Admin routes loaded without Azure Storage');
+        adminRoutes = require("./routes/admin")({
+            azureEnabled: false
+        });
     }
+    
     app.use("/api/admin", adminRoutes);
 } catch (error) {
-    console.log('⚠️ Admin routes disabled');
+    console.error('❌ Admin routes failed to load:', error.message);
+    // Provide basic admin fallback
+    const basicAdminRouter = require('express').Router();
+    basicAdminRouter.get('*', (req, res) => {
+        res.status(503).json({ success: false, message: "Admin service temporarily unavailable" });
+    });
+    app.use("/api/admin", basicAdminRouter);
 }
 
 // KYC routes - ADDED THIS SECTION
