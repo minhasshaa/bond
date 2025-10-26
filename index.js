@@ -37,7 +37,34 @@ const Candle = require("./models/candles");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const depositRoutes = require("./routes/deposit");
-const adminRoutes = require("./routes/admin");
+let adminRoutes;
+
+try {
+    // Check if Azure storage is configured
+    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING || 
+                          (process.env.STORAGE_ACCOUNT_NAME && process.env.STORAGE_ACCOUNT_KEY);
+    
+    if (hasAzureConfig) {
+        const { BlobServiceClient } = require('@azure/storage-blob');
+        const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+        
+        adminRoutes = require("./routes/admin")({
+            blobServiceClient,
+            KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents',
+            STORAGE_ACCOUNT_NAME: process.env.STORAGE_ACCOUNT_NAME,
+            STORAGE_ACCOUNT_KEY: process.env.STORAGE_ACCOUNT_KEY
+        });
+        console.log('✅ Azure Storage configured for admin panel');
+    } else {
+        // Create admin routes without Azure support
+        adminRoutes = require("./routes/admin")({});
+        console.log('⚠️ Admin panel running without Azure Storage (KYC features disabled)');
+    }
+} catch (error) {
+    console.log('⚠️ Azure Storage not available, admin KYC features disabled');
+    // Fallback without Azure
+    adminRoutes = require("./routes/admin")({});
+}
 const withdrawRoutes = require("./routes/withdraw");
 
 // ------------------ APP + SERVER + IO ------------------
