@@ -1,4 +1,4 @@
-// trade.js - COMPLETE VERSION WITH ALL FEATURES
+// trade.js - COMPLETE VERSION WITH AUTOMATIC TRADE ACTIVATION FIXES
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const AdminCopyTrade = require('./models/AdminCopyTrade');
@@ -108,60 +108,6 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
     }
 }
 
-// --- Trade Monitoring Logic ---
-async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
-    const lastProcessedCompletedCandleTs = {};
-    const lastProcessedActivationTs = {};
-    const lastCopyTradeCleanup = {};
-
-    setInterval(async () => {
-        try {
-            for (const pair of TRADE_PAIRS) {
-                const md = globalMarketData[pair];
-                if (!md) continue;
-
-                // 1. SETTLE ACTIVE TRADES (when a candle is complete)
-                if (md.candles?.length > 0) {
-                    const lastCompleted = md.candles[md.candles.length - 1];
-                    const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
-                    
-                    // Only settle once per unique candle
-                    if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
-                        const candleAge = Date.now() - lastCompletedTs;
-                        
-                        // Only process candles that are completed (at least 5 seconds old)
-                        if (candleAge > 5000) { 
-                            await settleActiveTradesForPair(io, User, Trade, pair, lastCompleted.close);
-                            lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
-                        }
-                    }
-                }
-
-                // 2. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW candle starts)
-                if (md.currentCandle) {
-                    const currentCandleStartTime = new Date(md.currentCandle.timestamp);
-                    const activationTs = currentCandleStartTime.getTime();
-
-                    if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
-                        await activateScheduledTradesForPair(io, Trade, pair, md.currentCandle.timestamp, md.currentCandle.open);
-                        await activatePendingTradesForPair(io, User, Trade, pair, md.currentCandle.open);
-                        lastProcessedActivationTs[pair] = activationTs;
-                    }
-                }
-            }
-
-            // --- Copy Trade Cleanup ---
-            const now = Date.now();
-            if (!lastCopyTradeCleanup.global || (now - lastCopyTradeCleanup.global) > 5000) {
-                await cleanupExpiredCopyTrades(io, User, Trade);
-                lastCopyTradeCleanup.global = now;
-            }
-        } catch (err) {
-            console.error("Trade monitor error:", err);
-        }
-    }, POLL_INTERVAL_MS);
-}
-
 // --- Trade Activation Functions ---
 async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
     try {
@@ -174,13 +120,21 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
             scheduledTime: { $lte: candleTime } 
         });
 
+        console.log(`🔄 Found ${scheduledTrades.length} scheduled trades to activate for ${pair}`);
+
         for (const trade of scheduledTrades) {
             try {
+                console.log(`🔄 Activating scheduled trade ${trade._id} for ${pair}`);
+                
                 trade.status = "active";
                 trade.entryPrice = entryPrice;
                 trade.activationTimestamp = new Date();
                 await trade.save();
+                
+                // ✅ CRITICAL FIX: Emit to ALL clients in the user's room
                 io.to(trade.userId.toString()).emit("trade_active", { trade: trade });
+                console.log(`✅ Emitted trade_active for user ${trade.userId}, trade ${trade._id}`);
+                
             } catch (innerErr) {
                 console.error(`Error activating scheduled trade ${trade._id}:`, innerErr);
             }
@@ -193,13 +147,22 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
 async function activatePendingTradesForPair(io, User, Trade, pair, entryPrice) {
     try {
         const pendingTrades = await Trade.find({ status: "pending", asset: pair });
+        
+        console.log(`🔄 Found ${pendingTrades.length} pending trades to activate for ${pair}`);
+
         for (const trade of pendingTrades) {
             try {
+                console.log(`🔄 Activating pending trade ${trade._id} for ${pair}`);
+                
                 trade.status = "active";
                 trade.entryPrice = entryPrice;
                 trade.activationTimestamp = new Date();
                 await trade.save();
+                
+                // ✅ CRITICAL FIX: Emit to ALL clients in the user's room
                 io.to(trade.userId.toString()).emit("trade_active", { trade: trade });
+                console.log(`✅ Emitted trade_active for user ${trade.userId}, trade ${trade._id}`);
+                
             } catch (innerErr) {
                 console.error(`Error activating pending trade ${trade._id}:`, innerErr);
             }
@@ -218,6 +181,8 @@ async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
             activationTimestamp: { $exists: true, $lte: new Date(Date.now() - 60000) } // At least 1 minute old
         });
         
+        console.log(`💰 Found ${activeTrades.length} active trades to settle for ${pair}`);
+
         for (const trade of activeTrades) {
             try {
                 const win = (trade.direction === "UP" && exitPrice > trade.entryPrice) || 
@@ -265,7 +230,7 @@ async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
                         todayPnl: parseFloat(todayPnl.toFixed(2)) 
                     });
 
-                    console.log(`Trade settled for user ${trade.userId}: ${trade.result} P&L $${pnl}`);
+                    console.log(`💰 Trade settled for user ${trade.userId}: ${trade.result} P&L $${pnl}`);
                 }
             } catch (innerErr) {
                 console.error(`Error settling trade ${trade._id}:`, innerErr);
@@ -274,6 +239,66 @@ async function settleActiveTradesForPair(io, User, Trade, pair, exitPrice) {
     } catch (err) {
         console.error("Error finding active trades:", err);
     }
+}
+
+// --- Trade Monitoring Logic ---
+async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
+    const lastProcessedCompletedCandleTs = {};
+    const lastProcessedActivationTs = {};
+    const lastCopyTradeCleanup = {};
+
+    setInterval(async () => {
+        try {
+            for (const pair of TRADE_PAIRS) {
+                const md = globalMarketData[pair];
+                if (!md) continue;
+
+                // 1. ACTIVATE SCHEDULED/PENDING TRADES (when a NEW candle starts)
+                if (md.currentCandle) {
+                    const currentCandleStartTime = new Date(md.currentCandle.timestamp);
+                    const activationTs = currentCandleStartTime.getTime();
+
+                    // ✅ CRITICAL FIX: Check if this is a new minute and we haven't processed it yet
+                    if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
+                        console.log(`🕒 New candle detected for ${pair}, activating trades...`);
+                        
+                        await activateScheduledTradesForPair(io, Trade, pair, md.currentCandle.timestamp, md.currentCandle.open);
+                        await activatePendingTradesForPair(io, User, Trade, pair, md.currentCandle.open);
+                        
+                        lastProcessedActivationTs[pair] = activationTs;
+                        console.log(`✅ Trade activation completed for ${pair}`);
+                    }
+                }
+
+                // 2. SETTLE ACTIVE TRADES (when a candle is complete)
+                if (md.candles?.length > 0) {
+                    const lastCompleted = md.candles[md.candles.length - 1];
+                    const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
+                    
+                    // Only settle once per unique candle
+                    if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
+                        const candleAge = Date.now() - lastCompletedTs;
+                        
+                        // Only process candles that are completed (at least 5 seconds old)
+                        if (candleAge > 5000) { 
+                            console.log(`💰 Settling trades for completed candle on ${pair}`);
+                            await settleActiveTradesForPair(io, User, Trade, pair, lastCompleted.close);
+                            lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
+                        }
+                    }
+                }
+            }
+
+            // --- Copy Trade Cleanup ---
+            const now = Date.now();
+            if (!lastCopyTradeCleanup.global || (now - lastCopyTradeCleanup.global) > 5000) {
+                await cleanupExpiredCopyTrades(io, User, Trade);
+                lastCopyTradeCleanup.global = now;
+            }
+        } catch (err) {
+            console.error("Trade monitor error:", err);
+        }
+    }, POLL_INTERVAL_MS);
 }
 
 // --- Main Initialization Function ---
@@ -321,6 +346,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     });
 
     // Start trade monitoring
+    console.log("🔄 Starting trade monitor with automatic activation...");
     runTradeMonitor(io, User, Trade, TRADE_PAIRS);
 
     // Socket event handlers
@@ -331,6 +357,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             if (!user) return socket.disconnect();
             
             socket.join(user._id.toString());
+            console.log(`🔗 User ${userId} connected to trading`);
 
             // Send initial data
             const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
@@ -353,6 +380,8 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
+                    console.log(`🎯 New trade request from user ${userId}:`, { asset, direction, amount });
+                    
                     if (!TRADE_PAIRS.includes(asset)) {
                         return socket.emit("error", { message: "Invalid asset." });
                     }
@@ -401,6 +430,8 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         timestamp: new Date()
                     });
                     await trade.save();
+
+                    console.log(`✅ Trade created for user ${userId}: ${trade._id}`);
 
                     io.to(user._id.toString()).emit("trade_pending", { 
                         trade: trade, 
@@ -635,11 +666,18 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
+            // --- TRADE ACTIVE EVENT HANDLER ---
+            socket.on("trade_active", (data) => {
+                console.log(`✅ Received trade_active event for user ${userId}`);
+                // This will be handled by the updateTradeStatus function in the frontend
+            });
+
             socket.on("disconnect", () => {
-                console.log(`User ${userId} disconnected from trading`);
+                console.log(`🔌 User ${userId} disconnected from trading`);
             });
 
         } catch (err) {
+            console.error("Socket connection error:", err);
             socket.disconnect();
         }
     });
