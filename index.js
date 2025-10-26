@@ -20,6 +20,13 @@ if (missingEnvVars.length > 0) {
     process.exit(1);
 }
 
+// Log optional env vars status
+optionalEnvVars.forEach(envVar => {
+    if (!process.env[envVar]) {
+        console.warn(`⚠️ Optional environment variable not set: ${envVar}`);
+    }
+});
+
 const TRADE_PAIRS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
@@ -27,6 +34,7 @@ const TRADE_PAIRS = [
 module.exports.TRADE_PAIRS = TRADE_PAIRS;
 
 // ------------------ MODELS & ROUTES ------------------
+// Ensure models are registered
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
@@ -45,6 +53,7 @@ const depositRoutes = require("./routes/deposit");
 let adminRoutes;
 
 try {
+    // Check if Azure storage is configured
     const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING || 
                           (process.env.STORAGE_ACCOUNT_NAME && process.env.STORAGE_ACCOUNT_KEY);
     
@@ -60,11 +69,13 @@ try {
         });
         console.log('✅ Azure Storage configured for admin panel');
     } else {
+        // Create admin routes without Azure support
         adminRoutes = require("./routes/admin")({});
         console.log('⚠️ Admin panel running without Azure Storage (KYC features disabled)');
     }
 } catch (error) {
     console.log('⚠️ Azure Storage not available, admin KYC features disabled');
+    // Fallback without Azure
     adminRoutes = require("./routes/admin")({});
 }
 const withdrawRoutes = require("./routes/withdraw");
@@ -78,23 +89,12 @@ const io = socketIo(server, {
         origin: process.env.CLIENT_URL || "*",
         methods: ["GET", "POST"],
         credentials: true
-    },
-    // ⭐ OPTIMIZATION: Reduce ping interval and timeout for better performance
-    pingInterval: 10000,
-    pingTimeout: 5000
+    }
 }); 
 
-// ⭐ OPTIMIZED: Simplified market data structure
 const marketData = {};
-const MAX_CANDLES = 100; // Reduced from 200 for better performance
 TRADE_PAIRS.forEach(pair => {
-  marketData[pair] = { 
-    currentPrice: 0, 
-    candles: [], 
-    currentCandle: null,
-    lastEmitTime: 0,
-    lastPrice: 0
-  };
+  marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
 });
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
@@ -117,34 +117,41 @@ app.use("/api/deposit", depositRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// ------------------ OPTIMIZED CANDLE VALIDATION ------------------
+// ------------------ CANDLE VALIDATION FUNCTION ------------------
 function validateCandle(candle) {
+    const MAX_PERCENT_CHANGE = 0.05; // Max 5% change per minute
+    
     if (!candle || !candle.open || !candle.close || candle.open <= 0) {
         return candle;
     }
     
-    const MAX_PERCENT_CHANGE = 0.02;
     const percentChange = Math.abs((candle.close - candle.open) / candle.open);
     
     if (percentChange > MAX_PERCENT_CHANGE) {
-        const direction = candle.close > candle.open ? 1 : -1;
-        const cappedClose = candle.open * (1 + direction * MAX_PERCENT_CHANGE);
+        console.warn(`⚠️ Abnormal candle detected for ${candle.asset}: ${(percentChange * 100).toFixed(2)}% change (capped at ${(MAX_PERCENT_CHANGE * 100).toFixed(2)}%)`);
         
-        candle.close = cappedClose;
-        candle.high = Math.max(candle.open, cappedClose, candle.high || candle.open);
-        candle.low = Math.min(candle.open, cappedClose, candle.low || candle.open);
+        // Cap the change to maximum allowed
+        const direction = candle.close > candle.open ? 1 : -1;
+        candle.close = candle.open * (1 + direction * MAX_PERCENT_CHANGE);
+        
+        // Adjust high/low accordingly
+        candle.high = Math.max(candle.open, candle.close);
+        candle.low = Math.min(candle.open, candle.close);
     }
     
-    candle.high = Math.max(candle.open, candle.close, candle.high || candle.open);
-    candle.low = Math.min(candle.open, candle.close, candle.low || candle.open);
+    // Ensure high/low are consistent
+    candle.high = Math.max(candle.open, candle.close, candle.high);
+    candle.low = Math.min(candle.open, candle.close, candle.low);
     
     return candle;
 }
 
-// ----- DASHBOARD DATA FUNCTIONS -----
+// ----- DASHBOARD DATA FUNCTIONS START -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
-    if (!user) throw new Error('User not found.');
+    if (!user) {
+        throw new Error('User not found.');
+    }
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -157,19 +164,14 @@ async function getDashboardData(userId) {
 
     const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
 
-    const marketInfo = TRADE_PAIRS.map(pair => {
+    const assets = TRADE_PAIRS;
+    const marketInfo = assets.map(pair => {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
 
-        const lastCandle = data.candles.length > 0 ? data.candles[data.candles.length - 1] : data.currentCandle;
+        const lastCandle = (Array.isArray(data.candles) && data.candles[data.candles.length - 1]) || data.currentCandle;
         if (!lastCandle || typeof lastCandle.open !== 'number' || lastCandle.open === 0) {
-            return { 
-                name: pair.replace('USDT', ''), 
-                ticker: `${pair.replace('USDT', '')}/USD`, 
-                price: data.currentPrice || 0, 
-                change: 0, 
-                candles: data.candles 
-            };
+            return { name: pair.replace('USDT', ''), ticker: `${pair.replace('USDT', '')}/USD`, price: data.currentPrice || 0, change: 0, candles: data.candles };
         }
 
         const change = ((data.currentPrice - lastCandle.open) / lastCandle.open) * 100;
@@ -194,12 +196,16 @@ async function getDashboardData(userId) {
 
 io.use((socket, next) => {
     const token = socket.handshake.auth.token;
-    if (!token) return next(new Error("Authentication Error: Token not provided."));
+    if (!token) {
+        console.log('Authentication Error: Token not provided');
+        return next(new Error("Authentication Error: Token not provided."));
+    }
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         socket.decoded = decoded; 
         next();
     } catch (ex) {
+        console.log('Authentication Error: Invalid token', ex.message);
         return next(new Error("Authentication Error: Invalid token."));
     }
 });
@@ -209,6 +215,7 @@ io.on('connection', (socket) => {
 
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
+        console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
     }
 
     socket.on('request_dashboard_data', async () => {
@@ -226,14 +233,20 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
+// ----- DASHBOARD DATA FUNCTIONS END -----
 
-// ------------------ OPTIMIZED MARKET DATA LOGIC ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC ------------------
 
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     for (const pair of TRADE_PAIRS) {
         try {
-            const klines = await binance.futuresCandles(pair, '1m', { limit: MAX_CANDLES });
+            // Ensure marketData structure exists
+            if (!marketData[pair]) {
+                marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
+            }
+            
+            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
             
             if (!Array.isArray(klines) || klines.length < 5) { 
                  console.warn(`⚠️ Historical load failed for ${pair}. Starting clean.`);
@@ -251,7 +264,6 @@ async function initializeMarketData() {
                 low: parseFloat(k[3]),
                 close: parseFloat(k[4]),
             }));
-            
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
             
@@ -263,25 +275,26 @@ async function initializeMarketData() {
                 low: lastCandle.close,
                 close: lastCandle.close
             };
-            
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
             console.error(`❌ Fatal error in initial load for ${pair}:`, err.message);
-            marketData[pair].candles = []; 
-            marketData[pair].currentPrice = 0;
-            marketData[pair].currentCandle = null;
+            // Ensure basic structure exists even on error
+            marketData[pair] = { 
+                currentPrice: 0, 
+                candles: [], 
+                currentCandle: null 
+            };
         }
     }
 }
 
 let isStreaming = false;
-const EMIT_THROTTLE_MS = 500; // Emit updates max every 500ms per pair
 
-// ⭐ OPTIMIZED: Throttled market data updates
+// REAL-TIME CANDLE UPDATES WITH WEBSOCKET
 function startMarketDataStream() {
     if (isStreaming) return;
     
-    console.log("⚡ Starting optimized Binance WebSocket...");
+    console.log("⚡ Attempting Binance WebSocket for real-time candle updates...");
     
     const connectionTimeout = setTimeout(() => {
         if (!isStreaming) {
@@ -301,13 +314,15 @@ function startMarketDataStream() {
                 
                 if (!md) return;
                 
-                const now = Date.now();
+                // Update current price
                 md.currentPrice = price;
                 
-                const currentMinuteStart = new Date();
+                const now = new Date();
+                const currentMinuteStart = new Date(now);
                 currentMinuteStart.setSeconds(0, 0);
                 currentMinuteStart.setMilliseconds(0);
 
+                // Initialize currentCandle if needed
                 if (!md.currentCandle) {
                     md.currentCandle = { 
                         asset: pair, 
@@ -324,15 +339,19 @@ function startMarketDataStream() {
                 if (isNewMinute) {
                     // Complete the current candle
                     let completed = { ...md.currentCandle, close: price };
+                    
+                    // Validate the completed candle
                     completed = validateCandle(completed);
                     
+                    // Save completed candle
                     if (completed.open > 0 && completed.close > 0) {
                         md.candles.push(completed);
-                        if (md.candles.length > MAX_CANDLES) md.candles.shift();
+                        if (md.candles.length > 200) md.candles.shift();
                         
-                        // Save to database (non-blocking)
-                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true })
-                            .catch(err => console.error(`DB Error saving candle for ${pair}:`, err.message));
+                        // Save to database
+                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
+                            console.error(`DB Error saving completed candle for ${pair}:`, err.message);
+                        });
                     }
                     
                     // Start new candle
@@ -345,27 +364,23 @@ function startMarketDataStream() {
                         close: price 
                     };
                 } else {
-                    // Update current candle in real-time
+                    // UPDATE CURRENT CANDLE IN REAL-TIME - THIS IS CRITICAL
                     md.currentCandle.high = Math.max(md.currentCandle.high, price);
                     md.currentCandle.low = Math.min(md.currentCandle.low, price);
                     md.currentCandle.close = price;
                 }
 
-                // ⭐ OPTIMIZATION: Throttle emissions to prevent flooding
-                if (now - md.lastEmitTime > EMIT_THROTTLE_MS || Math.abs(price - md.lastPrice) / md.lastPrice > 0.001) {
-                    const chartData = {
-                        asset: pair, 
-                        candles: md.candles,
-                        currentCandle: md.currentCandle,
-                        currentPrice: price,
-                        timestamp: now,
-                        isNewCandle: isNewMinute
-                    };
+                // EMIT REAL-TIME CANDLE DATA
+                const chartData = {
+                    asset: pair, 
+                    candles: [...md.candles], // Completed candles
+                    currentCandle: md.currentCandle, // Current forming candle with real-time updates
+                    currentPrice: price,
+                    timestamp: now.getTime()
+                };
 
-                    io.emit("market_data", chartData);
-                    md.lastEmitTime = now;
-                    md.lastPrice = price;
-                }
+                // Emit to all clients for real-time chart updates
+                io.emit("market_data", chartData);
                 
             } catch (streamErr) {
                 console.error(`❌ Stream processing error for ${trade.s}:`, streamErr.message);
@@ -374,7 +389,7 @@ function startMarketDataStream() {
             open: () => {
                 clearTimeout(connectionTimeout);
                 isStreaming = true;
-                console.log('✅ Binance WebSocket connected - Optimized streaming');
+                console.log('✅ Binance WebSocket connected - Real-time candle updates active');
             },
             close: (reason) => {
                 isStreaming = false;
@@ -385,6 +400,7 @@ function startMarketDataStream() {
                 clearTimeout(connectionTimeout);
                 isStreaming = false;
                 console.error('❌ WebSocket Error:', err.message);
+                console.log('🔄 Switching to REST polling...');
                 startRESTPolling();
             }
         });
@@ -394,35 +410,31 @@ function startMarketDataStream() {
     }
 }
 
-// ⭐ OPTIMIZED: REST polling with throttling
+// REST POLLING FALLBACK WITH REAL-TIME UPDATES
 function startRESTPolling() {
     if (isStreaming) return;
     isStreaming = true;
     
-    console.log("🔄 Starting optimized REST API polling...");
+    console.log("🔄 Starting REST API polling with real-time candle updates...");
     
     const pollInterval = setInterval(async () => {
         try {
             const prices = await binance.futuresPrices();
-            const now = Date.now();
+            const now = new Date();
             
             for (const pair of TRADE_PAIRS) {
                 const price = parseFloat(prices[pair]);
                 if (!price || !marketData[pair]) continue;
                 
                 const md = marketData[pair];
-                
-                // Skip if no significant price change and recently emitted
-                if (now - md.lastEmitTime < EMIT_THROTTLE_MS && Math.abs(price - md.lastPrice) / (md.lastPrice || 1) < 0.001) {
-                    continue;
-                }
-                
+                const previousPrice = md.currentPrice;
                 md.currentPrice = price;
                 
-                const currentMinuteStart = new Date();
+                const currentMinuteStart = new Date(now);
                 currentMinuteStart.setSeconds(0, 0);
                 currentMinuteStart.setMilliseconds(0);
 
+                // Initialize currentCandle if needed
                 if (!md.currentCandle) {
                     md.currentCandle = { 
                         asset: pair, 
@@ -437,17 +449,24 @@ function startRESTPolling() {
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
+                    // Complete the current candle
                     let completed = { ...md.currentCandle, close: price };
+                    
+                    // Validate candle to prevent abnormalities
                     completed = validateCandle(completed);
                     
+                    // Save completed candle
                     if (completed.open > 0 && completed.close > 0) {
                         md.candles.push(completed);
-                        if (md.candles.length > MAX_CANDLES) md.candles.shift();
+                        if (md.candles.length > 200) md.candles.shift();
                         
-                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true })
-                            .catch(err => console.error(`DB Error saving candle for ${pair}:`, err.message));
+                        // Save to database
+                        Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true }).catch(err => {
+                            console.error(`DB Error saving completed candle for ${pair}:`, err.message);
+                        });
                     }
                     
+                    // Start new candle
                     md.currentCandle = { 
                         asset: pair, 
                         timestamp: currentMinuteStart, 
@@ -457,30 +476,30 @@ function startRESTPolling() {
                         close: price 
                     };
                 } else {
+                    // UPDATE CURRENT CANDLE IN REAL-TIME - THIS IS CRITICAL
                     md.currentCandle.high = Math.max(md.currentCandle.high, price);
                     md.currentCandle.low = Math.min(md.currentCandle.low, price);
                     md.currentCandle.close = price;
                 }
 
+                // Emit real-time market data
                 const chartData = {
                     asset: pair, 
-                    candles: md.candles,
+                    candles: [...md.candles],
                     currentCandle: md.currentCandle,
                     currentPrice: price,
-                    timestamp: now,
-                    isNewCandle: isNewMinute
+                    timestamp: now.getTime()
                 };
 
                 io.emit("market_data", chartData);
-                md.lastEmitTime = now;
-                md.lastPrice = price;
             }
             
         } catch (err) {
             console.error('❌ REST polling error:', err.message);
         }
-    }, 2000);
+    }, 1000); // Poll every 1 second for better real-time updates
 
+    // Return cleanup function
     return () => {
         clearInterval(pollInterval);
         isStreaming = false;
@@ -488,16 +507,30 @@ function startRESTPolling() {
     };
 }
 
-// ------------------ OPTIMIZED PRICE EMITTER ------------------
+// ------------------ DASHBOARD PRICE EMITTER ------------------
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
+    const payloadDashboard = {};
     const payloadTrading = {};
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
         if (!md || md.currentPrice === 0) continue; 
         
+        const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
+        let change = 0;
+        if (lastCandle && lastCandle.open !== 0) {
+            change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
+        }
+
+        const tickerForClient = `${pair.replace('USDT', '')}/USD`;
+        payloadDashboard[tickerForClient] = {
+            price: md.currentPrice,
+            change: parseFloat(change.toFixed(2)),
+            countdown: secondsUntilNextMinute
+        };
+
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
@@ -506,7 +539,8 @@ setInterval(() => {
     }
     
     if (Object.keys(payloadTrading).length > 0) {
-        io.emit("price_update", payloadTrading);
+        io.emit("price_update", payloadTrading);           
+        io.emit("dashboard_price_update", payloadDashboard);
     }
 }, 1000);
 
@@ -554,12 +588,18 @@ db.once("open", async () => {
     );
     console.log(`🧹 Safely closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
 
+    const userUpdateResult = await UserModel.updateMany(
+      { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
+      { $set: { createdAt: new Date() } }
+    );
+    console.log(`🧹 Safely fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
+
   } catch (error) {
     console.error("Warning: Pre-boot database cleanup failed:", error.message);
   }
 
   await initializeMarketData();
-  startMarketDataStream();
+  startMarketDataStream(); // This will automatically fall back to REST polling if WebSocket fails
 
   // Initialize trade module
   try {
@@ -569,9 +609,16 @@ db.once("open", async () => {
     
     if (typeof tradeModule.initialize === "function") {
         tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS);
+        console.log("✅ Trade module initialized successfully");
+    } else if (typeof tradeModule === "function") {
+        tradeModule(io, User, Trade, marketData, TRADE_PAIRS);
+        console.log("✅ Trade module initialized successfully");
+    } else {
+        console.warn("⚠️ Trade module export not recognized - trading features may not work");
     }
   } catch (error) {
     console.error("❌ Error loading trade module:", error.message);
+    console.log("⚠️ Continuing without trade module");
   }
 });
 
@@ -589,11 +636,20 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`✅ Server is running and listening on port ${PORT}`));
 
-// Global error handling
+// ------------------ GLOBAL ERROR HANDLING ------------------
 process.on('unhandledRejection', (err) => {
     console.error('❌ Unhandled Promise Rejection:', err);
 });
 
 process.on('uncaughtException', (err) => {
     console.error('❌ Uncaught Exception:', err);
+    process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    server.close(() => {
+        console.log('Process terminated');
+    });
 });
