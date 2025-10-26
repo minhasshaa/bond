@@ -186,11 +186,24 @@
             <div class="p-4 space-y-4">
                 <h2 class="text-xl font-semibold mb-4">KYC Verification</h2>
 
+                <!-- KYC Service Unavailable Message -->
+                <div id="kyc-unavailable-message" class="bg-yellow-900/20 border border-yellow-600 rounded-lg p-4 mb-4 hidden">
+                    <div class="flex items-center">
+                        <svg class="w-6 h-6 text-yellow-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                        </svg>
+                        <div>
+                            <h3 class="font-semibold text-yellow-400">KYC Service Temporarily Unavailable</h3>
+                            <p class="text-yellow-300 text-sm mt-1">We're upgrading our verification system. KYC uploads will be available soon.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <p class="mb-3">
                     Current Status: <strong id="kyc-status" class="text-gray-400">Loading...</strong>
                 </p>
 
-                <div id="kyc-upload-form-container" class="mt-4" style="display: none;">
+                <div id="kyc-upload-form-container" class="mt-4 hidden">
                     <form id="kyc-upload-form" class="space-y-4 max-w-lg" enctype="multipart/form-data">
                         <p class="text-sm text-gray-400">Upload the front and back of your Government-issued ID (Max 5MB per file).</p>
 
@@ -211,10 +224,10 @@
                     <div id="kyc-message" class="mt-4 text-center text-sm"></div>
                 </div>
 
-                <div id="kyc-review-message" class="mt-4 text-center text-sm text-warning" style="display:none;">
+                <div id="kyc-review-message" class="mt-4 text-center text-sm text-warning hidden">
                     Documents uploaded successfully. Your KYC status is now under review.
                 </div>
-                <div id="kyc-rejected-message" class="mt-4 text-center text-sm text-danger" style="display:none;">
+                <div id="kyc-rejected-message" class="mt-4 text-center text-sm text-danger hidden">
                     <p class="font-semibold">KYC Rejected</p>
                     <p id="rejection-reason-text" class="text-xs italic">Reason: Documents did not meet requirements.</p>
                     <p class="mt-2 text-xs">Please re-upload corrected documents below.</p>
@@ -302,25 +315,35 @@
             const kycMessageElement = document.getElementById('kyc-message');
             const kycReviewMessage = document.getElementById('kyc-review-message');
             const kycRejectedMessage = document.getElementById('kyc-rejected-message');
+            const kycUnavailableMessage = document.getElementById('kyc-unavailable-message');
             const rejectionReasonText = document.getElementById('rejection-reason-text');
 
-            const generateColor = (str) => {
-                let hash = 0;
-                if (!str) return '#6b7280';
-                for (let i = 0; i < str.length; i++) {
-                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-                }
-                let color = '#';
-                for (let i = 0; i < 3; i++) {
-                    let value = (hash >> (i * 8)) & 0xFF;
-                    color += ('00' + value.toString(16)).substr(-2);
-                }
-                return color;
-            };
+            // ==========================================
+            // KYC FUNCTIONS - UPDATED WITH SERVICE CHECK
+            // ==========================================
 
-            // ==========================================
-            // KYC FUNCTIONS
-            // ==========================================
+            let kycServiceAvailable = false;
+
+            async function checkKycService() {
+                try {
+                    const response = await fetch(`${KYC_API_BASE_URL}/config`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        kycServiceAvailable = data.serviceAvailable || false;
+                        return kycServiceAvailable;
+                    }
+                    return false;
+                } catch (error) {
+                    console.error("Error checking KYC service:", error);
+                    return false;
+                }
+            }
 
             async function fetchKycStatus() {
                 if (!token) {
@@ -330,6 +353,14 @@
 
                 try {
                     kycStatusSpan.textContent = "Loading...";
+
+                    // First check if KYC service is available
+                    const serviceAvailable = await checkKycService();
+                    
+                    if (!serviceAvailable) {
+                        showKycUnavailableMessage();
+                        return;
+                    }
 
                     const response = await fetch(`${KYC_API_BASE_URL}/status`, {
                         method: 'GET',
@@ -350,28 +381,29 @@
 
                         // Reset all UI states
                         kycStatusSpan.classList.remove('text-success', 'text-warning', 'text-danger', 'text-gray-400');
-                        kycFormContainer.style.display = 'none';
-                        kycReviewMessage.style.display = 'none';
-                        kycRejectedMessage.style.display = 'none';
+                        kycFormContainer.classList.add('hidden');
+                        kycReviewMessage.classList.add('hidden');
+                        kycRejectedMessage.classList.add('hidden');
+                        kycUnavailableMessage.classList.add('hidden');
                         kycMessageElement.textContent = '';
 
                         // Use lowercase comparisons to match backend exactly
                         if (status === 'pending') {
                             kycStatusSpan.classList.add('text-warning');
-                            kycFormContainer.style.display = 'block';
+                            kycFormContainer.classList.remove('hidden');
                         } else if (status === 'rejected') {
                             kycStatusSpan.classList.add('text-danger');
-                            kycFormContainer.style.display = 'block';
-                            kycRejectedMessage.style.display = 'block';
+                            kycFormContainer.classList.remove('hidden');
+                            kycRejectedMessage.classList.remove('hidden');
                             rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
                         } else if (status === 'review') {
                             kycStatusSpan.classList.add('text-warning');
-                            kycReviewMessage.style.display = 'block';
+                            kycReviewMessage.classList.remove('hidden');
                         } else if (status === 'verified') {
                             kycStatusSpan.classList.add('text-success');
                         } else {
                             kycStatusSpan.classList.add('text-gray-400');
-                            kycFormContainer.style.display = 'block';
+                            kycFormContainer.classList.remove('hidden');
                         }
                     } else {
                         throw new Error(data.message || 'Failed to fetch KYC status');
@@ -379,9 +411,22 @@
 
                 } catch (error) {
                     console.error("Error fetching KYC status:", error);
-                    kycStatusSpan.textContent = "Service connection failed.";
-                    kycStatusSpan.classList.add('text-danger');
+                    if (error.message.includes('service') || error.message.includes('unavailable')) {
+                        showKycUnavailableMessage();
+                    } else {
+                        kycStatusSpan.textContent = "Service connection failed.";
+                        kycStatusSpan.classList.add('text-danger');
+                    }
                 }
+            }
+
+            function showKycUnavailableMessage() {
+                kycStatusSpan.textContent = "SERVICE UNAVAILABLE";
+                kycStatusSpan.classList.add('text-danger');
+                kycFormContainer.classList.add('hidden');
+                kycReviewMessage.classList.add('hidden');
+                kycRejectedMessage.classList.add('hidden');
+                kycUnavailableMessage.classList.remove('hidden');
             }
 
             function validateFiles(frontFile, backFile) {
@@ -400,6 +445,13 @@
 
             async function handleKycUpload(event) {
                 event.preventDefault();
+
+                // Check if service is available before uploading
+                if (!kycServiceAvailable) {
+                    kycMessageElement.textContent = "KYC service is currently unavailable. Please try again later.";
+                    kycMessageElement.style.color = 'rgb(239, 68, 68)';
+                    return;
+                }
 
                 const form = event.target;
                 const formData = new FormData(form);
@@ -450,10 +502,30 @@
                     kycMessageElement.textContent = error.message;
                     kycMessageElement.style.color = 'rgb(239, 68, 68)';
                     kycUploadButton.textContent = 'Upload Documents';
+                    
+                    // If it's a service error, update service status
+                    if (error.message.includes('service') || error.message.includes('unavailable')) {
+                        kycServiceAvailable = false;
+                        showKycUnavailableMessage();
+                    }
                 } finally {
                     kycUploadButton.disabled = false;
                 }
             }
+
+            const generateColor = (str) => {
+                let hash = 0;
+                if (!str) return '#6b7280';
+                for (let i = 0; i < str.length; i++) {
+                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                let color = '#';
+                for (let i = 0; i < 3; i++) {
+                    let value = (hash >> (i * 8)) & 0xFF;
+                    color += ('00' + value.toString(16)).substr(-2);
+                }
+                return color;
+            };
 
             // ==========================================
             // INITIALIZATION
