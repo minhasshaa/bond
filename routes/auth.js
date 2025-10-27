@@ -6,20 +6,17 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { Types } = require('mongoose');
 
-// --- Nodemailer Setup ---
-// FIX: Credentials are now read securely from environment variables
+// --- Nodemailer Setup (Reads ALL configuration from process.env) ---
 const transporter = nodemailer.createTransport({
-    // 1. SMTP Server Host
-    host: 'pro.eu.turbo-smtp.com', 
+    // 1. Host and Port read from new ENV variables
+    host: process.env.SMTP_HOST || 'pro.eu.turbo-smtp.com', 
+    port: process.env.SMTP_PORT || 465, 
+    secure: true, // true for port 465 (SSL/TLS)
     
-    // 2. SMTP Port (Using secure SSL port 465)
-    port: 465, 
-    secure: true, // MUST be true for port 465 (SSL/TLS)
-    
-    // 3. Authentication Credentials (Read from process.env)
+    // 2. Authentication Credentials
     auth: {
-        user: process.env.SMTP_USER_KEY, 
-        pass: process.env.SMTP_PASS_SECRET 
+        user: process.env.SMTP_USER_KEY, // Consumer Key
+        pass: process.env.SMTP_PASS_SECRET // Consumer Secret
     }
 });
 
@@ -47,7 +44,7 @@ router.post('/signup', async (req, res) => {
         }
 
         const verificationCode = generateOTP();
-        const codeExpires = new Date(Date.now() + 10 * 60 * 1000); 
+        const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
         
         let referredBy = null;
         if (refCode) {
@@ -83,8 +80,7 @@ router.post('/signup', async (req, res) => {
 
         // --- 2. SEND EMAIL ---
         const mailOptions = {
-            // Reading sender identity from environment variable
-            from: process.env.EMAIL_SENDER_ADDRESS || 'noreply@app.com', 
+            from: process.env.EMAIL_SENDER_ADDRESS || 'noreply@app.com', // Sender identity from ENV
             to: email,
             subject: 'Your Trading App Verification Code',
             html: `
@@ -97,7 +93,6 @@ router.post('/signup', async (req, res) => {
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
                 console.error('Email send error (turboSMTP):', error);
-                // Log the error but continue to verification step
             }
         });
 
