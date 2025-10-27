@@ -6,19 +6,27 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { Types } = require('mongoose');
 
-// --- Nodemailer Setup ---
+// --- Nodemailer Setup (Final Attempt: Port 587 with STARTTLS) ---
 const transporter = nodemailer.createTransport({
-    // FIX: Using the complete regional host name from ENV
+    // Using the secure regional host
     host: process.env.SMTP_HOST || 'pro.eu.turbo-smtp.com', 
-    port: process.env.SMTP_PORT || 465, // Secure SSL port
-    secure: true, // MUST be true for port 465
+    
+    // FIX: Using Port 587 and secure: false to enable STARTTLS
+    port: 587, 
+    secure: false, // MUST be false for port 587
     
     // Credentials read securely from ENV
     auth: {
         user: process.env.SMTP_USER_KEY, 
         pass: process.env.SMTP_PASS_SECRET
+    },
+    // Adding ciphers bypass is a common fix for persistent Node.js/SSL timeouts
+    tls: {
+        ciphers:'SSLv3'
     }
 });
+// ... rest of the file ...
+
 
 // Helper to generate a 6-digit OTP
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
