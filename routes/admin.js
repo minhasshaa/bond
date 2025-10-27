@@ -2,7 +2,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { 
     generateBlobSas, 
-    BlobSASPermissions
+    BlobSASPermissions,
+    StorageSharedKeyCredential, 
+    ContainerClient
 } = require('@azure/storage-blob');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
@@ -11,13 +13,12 @@ const AdminCopyTrade = require('../models/AdminCopyTrade');
 const { candleOverride, TRADE_PAIRS } = require('../index'); 
 
 // The entire module is now a function that accepts Azure dependencies
-module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false }) {
+module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }) {
     const router = express.Router();
 
     // Admin security middleware (remains the same)
     const adminAuth = (req, res, next) => {
         const adminKey = req.headers['x-admin-key'];
-        // WARNING: This relies on ADMIN_KEY being in the server environment variables.
         if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
             return res.status(403).json({ success: false, message: "Forbidden: Invalid Admin Key" });
         }
@@ -54,7 +55,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             
             const marketStatus = {};
             TRADE_PAIRS.forEach(pair => {
-                // Reads status from the globally available object
                 marketStatus[pair] = candleOverride[pair] || 'auto'; 
             });
             
@@ -69,7 +69,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 ) || [];
 
                 return {
-                    ...user.toObject(), // Convert to plain object for modifications
+                    ...user.toObject(), 
                     pendingDeposits: pendingDeposits.length,
                     pendingWithdrawals: pendingWithdrawals.length,
                     pendingDepositsTotal: pendingDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0),
@@ -94,37 +94,46 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
+        // CRITICAL CHECK: Ensure Azure is initialized
         if (!blobServiceClient || !KYC_CONTAINER_NAME || !azureEnabled) {
-            // FIX: Return a clean failure message if Azure is not connected
             return res.status(200).json({ success: false, message: 'Azure Storage not configured for KYC review. Cannot fetch documents.' });
         }
 
         try {
-            // Find users who have uploaded documents and are awaiting review
-            const usersToReview = await User.find({ 
-                $or: [
-                    { kycStatus: 'review' },
-                    { kycStatus: 'under_review' }
-                ]
-            }).select('username kycStatus kycDocuments createdAt');
+            const usersToReview = await User.find({ kycStatus: 'review' }).select('username kycStatus kycDocuments createdAt');
 
             const usersWithUrls = await Promise.all(usersToReview.map(async (user) => {
 
                 // Helper to generate secure SAS URLs
                 const getSignedUrl = async (blobPath) => {
-                    if (!blobPath) return null;
+                    if (!blobPath || !STORAGE_ACCOUNT_NAME || !STORAGE_ACCOUNT_KEY) return null;
 
                     try {
-                        const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+                        // 1. Create credential using the raw key passed from index.js
+                        const sharedKeyCredential = new StorageSharedKeyCredential(
+                            STORAGE_ACCOUNT_NAME,
+                            STORAGE_ACCOUNT_KEY
+                        );
+                        
+                        const containerClient = new ContainerClient(
+                            `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net/${KYC_CONTAINER_NAME}`,
+                            sharedKeyCredential
+                        );
                         const blobClient = containerClient.getBlobClient(blobPath);
 
-                        // Generate SAS token valid for 10 minutes for reading the blob
+                        // 2. Define Start/Expiry Times with Clock Skew Buffer
+                        const startTime = new Date();
+                        startTime.setMinutes(startTime.getMinutes() - 5); // CRITICAL: 5 minutes buffer into the past
+                        
                         const expiresOn = new Date();
-                        expiresOn.setMinutes(expiresOn.getMinutes() + 10); 
+                        expiresOn.setMinutes(expiresOn.getMinutes() + 30); // Valid for 30 minutes
 
-                        const sasToken = await blobClient.generateSasUrl({
-                            permissions: BlobSASPermissions.parse("r"),
+                        // 3. Generate SAS token using the robust method
+                        const sasToken = generateBlobSas(blobPath, containerClient.containerName, {
+                            containerClient,
+                            startsOn: startTime, 
                             expiresOn: expiresOn,
+                            permissions: BlobSASPermissions.parse("r"), // Read permission
                         });
                         
                         return `${blobClient.url}?${sasToken}`;
@@ -144,8 +153,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                     kycStatus: user.kycStatus,
                     joined: user.createdAt,
                     documents: {
-                        front: frontUrl, // Will be the secure URL or null
-                        back: backUrl,   // Will be the secure URL or null
+                        front: frontUrl, 
+                        back: backUrl,   
                     }
                 };
             }));
@@ -638,7 +647,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
     router.post('/copy-trade/cleanup', async (req, res) => {
         try {
-            // FIX: Assumes cleanupExpiredTrades method exists on the model
             const result = await AdminCopyTrade.cleanupExpiredTrades();
 
             res.json({ 
