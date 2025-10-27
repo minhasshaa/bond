@@ -30,6 +30,16 @@ const userAuth = async (req, res, next) => {
 module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false }) {
     const router = express.Router();
 
+    // Use the correct container name - id-document-uploads
+    const CONTAINER_NAME = 'id-document-uploads';
+
+    // Helper function to check Azure connection
+    const checkAzureConnection = () => {
+        if (!azureEnabled || !blobServiceClient) {
+            throw new Error('KYC service connection failed. Azure Storage not configured.');
+        }
+    };
+
     // ----------------------------------------------------------------------
     // [GET] /api/kyc/status - Fetch current KYC status (used on Profile load)
     // ----------------------------------------------------------------------
@@ -104,10 +114,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             // 2. Check Azure Connection
             uploadStage = 'azure_connection_check';
             console.log('🔧 Checking Azure connection...');
-            
-            if (!azureEnabled || !blobServiceClient || !KYC_CONTAINER_NAME) {
-                throw new Error('KYC service connection failed. Azure Storage not configured.');
-            }
+            checkAzureConnection();
 
             const userId = req.userId;
             const frontFile = req.files.front[0];
@@ -118,12 +125,12 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             console.log("👤 User ID:", userId);
             console.log("📁 Front file:", frontFile.originalname, frontFile.size, "bytes", frontFile.mimetype);
             console.log("📁 Back file:", backFile.originalname, backFile.size, "bytes", backFile.mimetype);
-            console.log("📦 Container name:", KYC_CONTAINER_NAME);
+            console.log("📦 Container name:", CONTAINER_NAME);
 
             // 3. Create container if it doesn't exist
             uploadStage = 'azure_container_setup';
             console.log('📦 Setting up Azure container...');
-            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
             
             try {
                 await containerClient.createIfNotExists({ access: 'blob' });
@@ -171,7 +178,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
 
-            // Use 'review' to match your User model enum
+            // ✅ FIXED: Use 'review' instead of 'under_review' to match User model enum
             user.kycStatus = 'review';
             user.kycDocuments = {
                 front: frontBlobPath,
@@ -189,7 +196,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
-                kycStatus: 'review',
+                kycStatus: 'review', // ✅ FIXED: Use 'review' instead of 'under_review'
                 serviceStatus: 'active'
             });
 
@@ -265,7 +272,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             }
 
             // Test Azure connection
-            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
             await containerClient.getProperties();
             
             res.json({
@@ -294,7 +301,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             const config = {
                 azureEnabled: azureEnabled,
                 hasBlobService: !!blobServiceClient,
-                containerName: KYC_CONTAINER_NAME,
+                containerName: CONTAINER_NAME,
                 environment: process.env.NODE_ENV,
                 hasAccountName: !!process.env.AZURE_STORAGE_ACCOUNT_NAME,
                 hasAccountKey: !!process.env.AZURE_STORAGE_ACCOUNT_KEY
@@ -302,7 +309,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             
             if (azureEnabled && blobServiceClient) {
                 try {
-                    const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+                    const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
                     const properties = await containerClient.getProperties();
                     config.containerExists = true;
                     config.containerAccess = properties.blobPublicAccess;
