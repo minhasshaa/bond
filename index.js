@@ -1,4 +1,4 @@
-// index.js - COMPLETE FIXED VERSION
+// index.js - COMPLETE FIXED VERSION with Azure Fallback Guarantee
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
@@ -137,13 +137,14 @@ try {
     console.log('Admin fallback routes loaded');
 }
 
-// KYC routes - FIXED VERSION
+// KYC routes - CRITICALLY FIXED VERSION
 async function initializeKYCRoutes() {
-    try {
-        let kycRoutes;
-        const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
-        
-        if (hasAzureConfig) {
+    let kycRoutes;
+    let azureIsAvailable = false; 
+    const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
+
+    if (hasAzureConfig) {
+        try {
             const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
             
             const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
@@ -156,26 +157,31 @@ async function initializeKYCRoutes() {
                 sharedKeyCredential
             );
             
+            // CRITICAL TEST: Check connection and container access.
             const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-            await containerClient.getProperties();
+            await containerClient.getProperties(); 
             
+            // NOTE: Assuming your kyc route file is named 'kyc.js' in the 'routes' folder
             kycRoutes = require("./routes/kyc")({
                 blobServiceClient,
                 KYC_CONTAINER_NAME: KYC_CONTAINER_NAME,
                 azureEnabled: true
             });
             console.log('KYC routes loaded with Azure Storage');
-        } else {
-            console.log('KYC routes loaded without Azure Storage');
-            kycRoutes = require("./routes/kyc")({
-                azureEnabled: false
-            });
+            azureIsAvailable = true; 
+
+        } catch (error) {
+            // This runs if Azure keys are wrong or Render cannot connect to Azure.
+            console.error('❌ KYC routes failed to load Azure Storage:', error.message);
+            console.log('Falling back to basic (non-functional) KYC routes.');
+            azureIsAvailable = false;
         }
-        
-        app.use("/api/kyc", kycRoutes);
-        console.log('KYC routes mounted');
-    } catch (error) {
-        console.error('KYC routes failed to load:', error.message);
+    } else {
+        console.log('KYC routes loaded without Azure Storage (No config found).');
+    }
+    
+    // Fallback/Basic Route Logic
+    if (!azureIsAvailable) {
         const basicKycRouter = require('express').Router();
         
         const userAuth = async (req, res, next) => {
@@ -194,12 +200,12 @@ async function initializeKYCRoutes() {
             }
         };
         
-        // --- FIXED BLOCK: Ensures 200 OK and success: true on service failure ---
+        // FIXED: Guarantees a 200 OK and success: true on service failure 
         basicKycRouter.get('/status', userAuth, async (req, res) => {
             try {
                 const user = await User.findById(req.userId).select('kycStatus kycRejectionReason');
                 res.json({ 
-                    success: true, // IMPORTANT: Prevents client-side catch block from firing
+                    success: true, // Guarantees a friendly response to the client
                     kycStatus: user?.kycStatus || 'pending',
                     rejectionReason: user?.kycRejectionReason,
                     serviceStatus: 'disabled',
@@ -207,35 +213,28 @@ async function initializeKYCRoutes() {
                 });
             } catch (error) {
                 res.json({ 
-                    success: true, // IMPORTANT: Fallback to a safe status
+                    success: true, 
                     kycStatus: 'pending',
                     serviceStatus: 'disabled',
                     message: 'KYC service unavailable due to user data fetch error'
                 });
             }
         });
-        // --- END FIXED BLOCK ---
         
         basicKycRouter.post('/upload', userAuth, (req, res) => {
-            // This is correctly 503 since the upload is impossible
             res.status(503).json({ 
                 success: false, 
-                message: 'KYC upload service temporarily unavailable. Please try again later.',
-                serviceStatus: 'disabled'
+                message: 'KYC upload service temporarily unavailable. Please try again later. (Azure/Storage not running)'
             });
         });
-        
-        basicKycRouter.get('/service-status', userAuth, (req, res) => {
-            res.json({
-                success: true,
-                serviceAvailable: false,
-                status: 'KYC service connection failed',
-                currentStatus: 'Service connection failed'
-            });
-        });
-        
+
+        // Use the basic router if Azure failed
         app.use("/api/kyc", basicKycRouter);
-        console.log('KYC fallback routes loaded');
+        console.log('KYC fallback routes mounted');
+    } else {
+        // Use the functional router if Azure succeeded
+        app.use("/api/kyc", kycRoutes);
+        console.log('KYC functional routes mounted');
     }
 }
 
