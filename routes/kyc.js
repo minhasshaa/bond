@@ -52,7 +52,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             
             // 1. Check if Azure is properly configured for KYC functionality
             if (!azureEnabled) {
-                // Return a non-500 status code with success: true (to avoid client catch block)
+                // Return success: true and the current DB status if the service is disabled
                 return res.json({ 
                     success: true, 
                     kycStatus: user.kycStatus || 'pending',
@@ -62,6 +62,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
             
+            // If Azure is enabled, proceed with normal success response
             res.json({ 
                 success: true, 
                 kycStatus: user.kycStatus || 'pending',
@@ -71,6 +72,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
         } catch (error) {
             console.error('KYC Status Fetch Error:', error);
+            // Return a 500 error if DB query fails
             res.status(500).json({ 
                 success: false, 
                 message: 'Failed to fetch KYC status (Internal Server Error).',
