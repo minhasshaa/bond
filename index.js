@@ -1,4 +1,4 @@
-// index.js - COMPLETE VERSION WITH ALL FEATURES
+// index.js - COMPLETE FIXED VERSION
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
@@ -69,13 +69,13 @@ app.use("/api/withdraw", withdrawRoutes);
 
 // Debug endpoint for Azure status
 app.get('/api/debug/azure-status', (req, res) => {
-    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
-                          process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+    const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
     
     res.json({
         hasAzureConfig: hasAzureConfig,
         hasKycContainer: !!process.env.KYC_CONTAINER_NAME,
-        connectionStringLength: process.env.AZURE_STORAGE_CONNECTION_STRING ? process.env.AZURE_STORAGE_CONNECTION_STRING.length : 0,
+        accountName: process.env.AZURE_STORAGE_ACCOUNT_NAME ? 'set' : 'not set',
+        accountKey: process.env.AZURE_STORAGE_ACCOUNT_KEY ? 'set' : 'not set',
         kycContainer: process.env.KYC_CONTAINER_NAME || 'not set'
     });
 });
@@ -83,17 +83,18 @@ app.get('/api/debug/azure-status', (req, res) => {
 // Admin routes with proper configuration
 try {
     let adminRoutes;
-    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
-                          process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+    const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
     
     if (hasAzureConfig) {
-        const { BlobServiceClient } = require('@azure/storage-blob');
-        const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+        const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
         
-        // Extract account name and key from connection string
-        const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-        const accountName = connectionString.match(/AccountName=([^;]+)/)?.[1];
-        const accountKey = connectionString.match(/AccountKey=([^;]+)/)?.[1];
+        const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+        const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+        const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+        const blobServiceClient = new BlobServiceClient(
+            `https://${accountName}.blob.core.windows.net`,
+            sharedKeyCredential
+        );
         
         adminRoutes = require("./routes/admin")({
             blobServiceClient,
@@ -101,14 +102,14 @@ try {
             STORAGE_ACCOUNT_NAME: accountName,
             STORAGE_ACCOUNT_KEY: accountKey,
             azureEnabled: true,
-            candleOverride: candleOverride // PASS THE candleOverride OBJECT
+            candleOverride: candleOverride
         });
         console.log('✅ Admin routes loaded with Azure Storage for KYC');
     } else {
         console.log('⚠️ Admin routes loaded without Azure Storage');
         adminRoutes = require("./routes/admin")({
             azureEnabled: false,
-            candleOverride: candleOverride // PASS THE candleOverride OBJECT
+            candleOverride: candleOverride
         });
     }
     
@@ -150,26 +151,37 @@ try {
     console.log('✅ Admin fallback routes loaded');
 }
 
-// KYC routes - FIXED VERSION
+// KYC routes - FIXED VERSION FOR ACCOUNT NAME & KEY
 async function initializeKYCRoutes() {
     try {
         let kycRoutes;
-        const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
-                              process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+        const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
         
         console.log('🔧 Initializing KYC routes...');
         console.log('Azure config available:', hasAzureConfig);
         
         if (hasAzureConfig) {
-            const { BlobServiceClient } = require('@azure/storage-blob');
+            const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
             
             try {
-                const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+                const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+                const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
                 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'kyc-documents';
                 
+                console.log('🔧 Creating Azure Blob Service Client...');
+                
+                // Create credentials and blob service client
+                const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+                const blobServiceClient = new BlobServiceClient(
+                    `https://${accountName}.blob.core.windows.net`,
+                    sharedKeyCredential
+                );
+                
                 // Test Azure connection
+                console.log('🔧 Testing Azure connection...');
                 const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
                 await containerClient.createIfNotExists({ access: 'blob' });
+                console.log('✅ Azure connection successful');
                 
                 kycRoutes = require("./routes/kyc")({
                     blobServiceClient,
@@ -196,10 +208,9 @@ async function initializeKYCRoutes() {
         console.log('✅ KYC routes mounted at /api/kyc');
     } catch (error) {
         console.error('❌ KYC routes failed to load:', error.message);
-        // Provide basic KYC fallback
+        // Provide basic KYC fallback with authentication
         const basicKycRouter = require('express').Router();
         
-        // Add authentication middleware to fallback routes
         const userAuth = async (req, res, next) => {
             try {
                 const authHeader = req.headers.authorization;
@@ -216,13 +227,24 @@ async function initializeKYCRoutes() {
             }
         };
         
-        basicKycRouter.get('/status', userAuth, (req, res) => {
-            res.json({ 
-                success: true, 
-                kycStatus: 'pending',
-                serviceStatus: 'disabled',
-                message: 'KYC service temporarily unavailable'
-            });
+        basicKycRouter.get('/status', userAuth, async (req, res) => {
+            try {
+                const user = await User.findById(req.userId).select('kycStatus kycRejectionReason');
+                res.json({ 
+                    success: true, 
+                    kycStatus: user?.kycStatus || 'pending',
+                    rejectionReason: user?.kycRejectionReason,
+                    serviceStatus: 'disabled',
+                    message: 'KYC service temporarily unavailable'
+                });
+            } catch (error) {
+                res.json({ 
+                    success: true, 
+                    kycStatus: 'pending',
+                    serviceStatus: 'disabled',
+                    message: 'KYC service temporarily unavailable'
+                });
+            }
         });
         
         basicKycRouter.post('/upload', userAuth, (req, res) => {
@@ -237,7 +259,7 @@ async function initializeKYCRoutes() {
             res.json({
                 success: true,
                 serviceAvailable: false,
-                status: 'KYC service connection failed - Azure not configured',
+                status: 'KYC service connection failed',
                 currentStatus: 'Service connection failed'
             });
         });
@@ -250,24 +272,30 @@ async function initializeKYCRoutes() {
 // KYC Test endpoint
 app.get('/api/kyc/test', async (req, res) => {
     try {
-        const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
-                              process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+        const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
         
         if (hasAzureConfig) {
-            const { BlobServiceClient } = require('@azure/storage-blob');
-            const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
-            const containerClient = blobServiceClient.getContainerClient(process.env.KYC_CONTAINER_NAME || 'kyc-documents');
+            const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
+            const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+            const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+            const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+            const blobServiceClient = new BlobServiceClient(
+                `https://${accountName}.blob.core.windows.net`,
+                sharedKeyCredential
+            );
             
+            const containerClient = blobServiceClient.getContainerClient(process.env.KYC_CONTAINER_NAME || 'kyc-documents');
             await containerClient.getProperties();
+            
             res.json({ 
                 success: true, 
-                message: 'KYC service is working properly',
+                message: 'KYC service is working properly with Azure Storage',
                 azureStatus: 'connected'
             });
         } else {
             res.json({ 
                 success: true, 
-                message: 'KYC service is in fallback mode',
+                message: 'KYC service is in fallback mode - Azure not configured',
                 azureStatus: 'not_configured' 
             });
         }
