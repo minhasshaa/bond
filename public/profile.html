@@ -13,11 +13,9 @@
         body { 
             font-family: 'Inter', sans-serif; 
             padding-bottom: 80px; 
-            /* MATCH DASHBOARD BACKGROUND */
             background-color: #0c1021; 
         }
 
-        /* 5-ITEM Bottom Nav Style (Fixed) - MATCHED FROM DASHBOARD */
         .bottom-nav { 
             position: fixed; 
             bottom: 0; 
@@ -39,7 +37,7 @@
             text-decoration: none; 
             color: #9ca3af; 
             font-weight: 500; 
-            font-size: 0.75rem; /* 12px */
+            font-size: 0.75rem;
             transition: all 0.2s ease-in-out; 
             gap: 4px; 
             width: 20%; 
@@ -49,19 +47,16 @@
             height: 24px; 
         }
         .nav-link.active { 
-            /* MATCH DASHBOARD ACTIVE COLOR */
             color: #4ade80; 
             font-weight: 600; 
         }
 
-        /* Utility classes for KYC status (Kept, but color updated) */
         .text-success { color: rgb(34, 197, 94); }
         .text-warning { color: rgb(245, 158, 11); }
         .text-danger { color: rgb(239, 68, 68); }
 
-        /* Custom style for the avatar fallback color */
         #avatar { 
-            background-color: #4b5563; /* Dark gray fallback for avatar */
+            background-color: #4b5563;
         }
     </style>
 </head>
@@ -248,27 +243,22 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Script to set active navbar link
-            const currentPage = 'profile'; // Hardcoded for this file
+            const currentPage = 'profile';
             document.querySelectorAll('.nav-link').forEach(link => {
                 link.classList.remove('active');
             });
             const activeLink = document.getElementById(`nav-${currentPage}`);
             if (activeLink) activeLink.classList.add('active');
 
-
             const token = localStorage.getItem('authToken');
-            // Consistent headers using Authorization Bearer format
             const headers = { 'Authorization': `Bearer ${token}` };
             const postHeaders = { 
                 'Content-Type': 'application/json', 
                 'Authorization': `Bearer ${token}` 
             };
 
-            // KYC API base URL
             const KYC_API_BASE_URL = "/api/kyc"; 
 
-            // Page Elements
             const usernameDisplay = document.getElementById('username-display');
             const joinedDateDisplay = document.getElementById('joined-date-display');
             const avatarDiv = document.getElementById('avatar');
@@ -294,7 +284,6 @@
             const volumeRequiredText = document.getElementById('volume-required-text');
             const volumeProgressBar = document.getElementById('volume-progress-bar');
 
-            // KYC Elements
             const kycStatusSpan = document.getElementById('kyc-status');
             const kycFormContainer = document.getElementById('kyc-upload-form-container');
             const kycUploadForm = document.getElementById('kyc-upload-form');
@@ -330,7 +319,6 @@
 
                 try {
                     kycStatusSpan.textContent = "Loading...";
-                    console.log('🔧 Debug: Fetching KYC status from:', `${KYC_API_BASE_URL}/status`);
 
                     const response = await fetch(`${KYC_API_BASE_URL}/status`, {
                         method: 'GET',
@@ -339,27 +327,22 @@
                         }
                     });
 
-                    console.log('🔧 Debug: KYC Status HTTP Status:', response.status);
-                    
                     if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        throw new Error(`HTTP ${response.status}`);
                     }
 
                     const data = await response.json();
-                    console.log('🔧 Debug: KYC Status Data:', data);
 
                     if (data.success) {
                         const status = (data.kycStatus || 'pending').toLowerCase();
                         kycStatusSpan.textContent = status.toUpperCase();
 
-                        // Reset all UI states
                         kycStatusSpan.classList.remove('text-success', 'text-warning', 'text-danger', 'text-gray-400');
                         kycFormContainer.style.display = 'none';
                         kycReviewMessage.style.display = 'none';
                         kycRejectedMessage.style.display = 'none';
                         kycMessageElement.textContent = '';
 
-                        // Use lowercase comparisons to match backend exactly
                         if (status === 'pending') {
                             kycStatusSpan.classList.add('text-warning');
                             kycFormContainer.style.display = 'block';
@@ -385,24 +368,8 @@
                     console.error("Error fetching KYC status:", error);
                     kycStatusSpan.textContent = "Service connection failed";
                     kycStatusSpan.classList.add('text-danger');
-                    
-                    // Show upload form even on error to allow retry
                     kycFormContainer.style.display = 'block';
                 }
-            }
-
-            function validateFiles(frontFile, backFile) {
-                const maxSize = 5 * 1024 * 1024; // 5MB
-
-                if (!frontFile || !frontFile.name || !backFile || !backFile.name) {
-                    throw new Error("Please select both front and back files.");
-                }
-
-                if (frontFile.size > maxSize || backFile.size > maxSize) {
-                    throw new Error("Each file must be less than 5MB.");
-                }
-
-                return true;
             }
 
             async function handleKycUpload(event) {
@@ -411,25 +378,31 @@
                 const form = event.target;
                 const formData = new FormData(form);
 
-                // Uploading state
                 kycMessageElement.textContent = "Uploading documents...";
                 kycMessageElement.style.color = 'rgb(59, 130, 246)';
                 kycUploadButton.disabled = true;
                 kycUploadButton.textContent = 'Uploading...';
 
                 try {
-                    const frontFile = formData.get('front');
-                    const backFile = formData.get('back');
+                    const frontFileInput = document.getElementById('id-front');
+                    const backFileInput = document.getElementById('id-back');
+                    
+                    const frontFile = frontFileInput.files[0];
+                    const backFile = backFileInput.files[0];
 
-                    // Validate files before upload
-                    validateFiles(frontFile, backFile);
+                    if (!frontFile || !backFile) {
+                        throw new Error("Please select both front and back files.");
+                    }
 
-                    // FIXED: Only include Authorization header, let browser set Content-Type automatically
+                    const maxSize = 5 * 1024 * 1024;
+                    if (frontFile.size > maxSize || backFile.size > maxSize) {
+                        throw new Error("Each file must be less than 5MB.");
+                    }
+
                     const response = await fetch(`${KYC_API_BASE_URL}/upload`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${token}`
-                            // NO Content-Type header - browser will set multipart/form-data with boundary automatically
                         },
                         body: formData
                     });
@@ -437,18 +410,12 @@
                     const data = await response.json();
 
                     if (data.success) {
-                        kycMessageElement.textContent = 'Upload successful! Updating status...';
+                        kycMessageElement.textContent = data.message || 'Upload successful!';
                         kycMessageElement.style.color = 'rgb(34, 197, 94)';
 
-                        // Clear the form
                         form.reset();
-
-                        // Wait a moment for backend to process, then refresh status WITHOUT page reload
-                        setTimeout(async () => {
-                            await fetchKycStatus();
-                            kycMessageElement.textContent = 'Documents uploaded successfully! Status updated.';
-                            kycUploadButton.textContent = 'Upload Documents';
-                        }, 2000);
+                        await fetchKycStatus();
+                        kycUploadButton.textContent = 'Upload Documents';
 
                     } else {
                         throw new Error(data.message || 'Upload failed');
@@ -468,13 +435,11 @@
             // INITIALIZATION
             // ==========================================
 
-            // Initialize KYC functionality
             fetchKycStatus();
             if (kycUploadForm) {
                 kycUploadForm.addEventListener('submit', handleKycUpload);
             }
 
-            // Fetch user info with consistent headers
             fetch('/api/user/info', { headers })
                 .then(res => res.json())
                 .then(data => {
@@ -488,7 +453,6 @@
                     }
                 });
 
-            // Fetch trading stats
             fetch('/api/user/stats', { headers })
                 .then(res => res.json())
                 .then(data => {
@@ -524,7 +488,6 @@
                     });
                 });
 
-            // Fetch volume data
             fetch('/api/user/volume-data', { headers })
                 .then(res => res.json())
                 .then(data => {
@@ -549,7 +512,6 @@
                     volumeLoading.textContent = 'Could not load data.';
                 });
 
-            // Fetch referral info
             fetch('/api/user/referral-info', { headers })
                 .then(res => res.json())
                 .then(data => {
@@ -563,7 +525,6 @@
                     }
                 });
 
-            // Copy referral link
             copyBtn.addEventListener('click', () => {
                 refLinkInput.select();
                 document.execCommand('copy');
@@ -571,7 +532,6 @@
                 setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
             });
 
-            // Change password form
             passwordForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 passwordSubmitBtn.disabled = true;
@@ -607,26 +567,21 @@
                 });
             });
 
-            // Toggle sections
             showPasswordBtn.addEventListener('click', () => {
-                // Ensure the password section is not hidden, and the referral section is
                 securitySection.classList.toggle('hidden');
                 referralSection.classList.add('hidden');
             });
 
             showReferralBtn.addEventListener('click', () => {
-                // Ensure the referral section is not hidden, and the password section is
                 referralSection.classList.toggle('hidden');
                 securitySection.classList.add('hidden');
             });
 
-            // Logout
             logoutButton.addEventListener('click', () => {
                 localStorage.removeItem('authToken');
                 window.location.href = '/login.html';
             });
 
-            // Resize chart on window resize
             window.addEventListener('resize', () => {
                 winLossChart.resize();
             });
