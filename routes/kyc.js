@@ -47,17 +47,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
             
-            // Check if Azure is properly configured for KYC functionality
-            if (!azureEnabled) {
-                return res.json({ 
-                    success: true, 
-                    kycStatus: user.kycStatus || 'pending',
-                    rejectionReason: user.kycRejectionReason,
-                    serviceStatus: 'disabled',
-                    message: 'KYC service is currently unavailable'
-                });
-            }
-            
             res.json({ 
                 success: true, 
                 kycStatus: user.kycStatus || 'pending',
@@ -83,6 +72,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         { name: 'back', maxCount: 1 }
     ]), async (req, res) => {
         try {
+            console.log('🔧 KYC Upload Started - Azure Storage Only');
+            
             // 1. Validation Checks
             if (!req.files || !req.files.front || !req.files.back) {
                 console.error("KYC Upload Error: Missing files or field name mismatch.");
@@ -99,8 +90,11 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             const frontFile = req.files.front[0];
             const backFile = req.files.back[0]; // ✅ FIXED: Changed from [1] to [0]
             
+            console.log('🔧 Files received - Front:', frontFile.originalname, 'Back:', backFile.originalname);
+
             // 3. Validate file buffers
             if (!frontFile.buffer || !backFile.buffer) {
+                console.error("KYC Upload Error: File buffers are empty");
                 return res.status(400).json({ 
                     success: false, 
                     message: 'Invalid file data. Please try uploading again.' 
@@ -115,6 +109,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             const frontBlobPath = `kyc-${userId}/front_${Date.now()}_${frontFile.originalname}`;
             const backBlobPath = `kyc-${userId}/back_${Date.now()}_${backFile.originalname}`;
 
+            console.log('🔧 Uploading to Azure Blob Storage...');
+
             // 6. Upload Files to Azure Blob Storage
             const frontBlobClient = containerClient.getBlockBlobClient(frontBlobPath);
             await frontBlobClient.uploadData(frontFile.buffer, {
@@ -125,6 +121,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             await backBlobClient.uploadData(backFile.buffer, {
                 blobHTTPHeaders: { blobContentType: backFile.mimetype }
             });
+
+            console.log('✅ Azure upload successful');
 
             // 7. Update User KYC Status in Database
             const user = await User.findById(userId);
@@ -139,29 +137,50 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             user.kycDocuments = {
                 front: frontBlobPath,
                 back: backBlobPath,
-                uploadDate: new Date()
+                uploadDate: new Date(),
+                storageType: 'azure'
             };
             user.kycRejectionReason = undefined; 
 
             await user.save();
+
+            console.log('✅ User KYC status updated to under_review');
 
             // 8. Send successful response
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
                 kycStatus: 'under_review',
-                serviceStatus: 'active'
+                serviceStatus: 'active',
+                storage: 'azure'
             });
 
         } catch (error) {
-            console.error('KYC Upload/Save Error:', error);
+            console.error('❌ KYC Upload/Save Error:', error);
             
             if (error.message.includes('Azure Storage not configured')) {
                 return res.status(503).json({ 
                     success: false, 
-                    message: 'KYC service is currently unavailable. Please try again later.',
+                    message: 'KYC service is currently unavailable. Azure Storage not configured.',
                     serviceStatus: 'disabled',
                     currentStatus: 'Service connection failed'
+                });
+            }
+            
+            if (error.message.includes('Public access is not permitted')) {
+                return res.status(503).json({ 
+                    success: false, 
+                    message: 'KYC service configuration error. Azure Storage public access is disabled.',
+                    serviceStatus: 'disabled',
+                    solution: 'Enable "Allow blob public access" in Azure Portal → Storage Account → Configuration'
+                });
+            }
+            
+            if (error.message.includes('File too large')) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'File size too large. Please upload files smaller than 5MB.',
+                    serviceStatus: 'active'
                 });
             }
             
@@ -194,17 +213,69 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.json({
                 success: true,
                 serviceAvailable: true,
-                status: 'KYC service is active and connected',
+                status: 'KYC service is active and connected to Azure Storage',
                 currentStatus: 'Service connected'
             });
 
         } catch (error) {
             console.error('KYC Service Status Check Error:', error);
+            
+            if (error.statusCode === 403) {
+                return res.json({
+                    success: true,
+                    serviceAvailable: false,
+                    status: 'KYC service connection failed - Azure Storage public access disabled',
+                    currentStatus: 'Service configuration error',
+                    solution: 'Enable "Allow blob public access" in Azure Portal'
+                });
+            }
+            
             res.json({
                 success: true,
                 serviceAvailable: false,
                 status: 'KYC service connection failed - ' + error.message,
                 currentStatus: 'Service connection failed'
+            });
+        }
+    });
+
+    // ----------------------------------------------------------------------
+    // [GET] /api/kyc/debug - Debug endpoint to check current configuration
+    // ----------------------------------------------------------------------
+    router.get('/debug', userAuth, async (req, res) => {
+        try {
+            const user = await User.findById(req.userId).select('kycStatus kycDocuments');
+            
+            let azureStatus = 'unknown';
+            try {
+                const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+                await containerClient.getProperties();
+                azureStatus = 'connected';
+            } catch (error) {
+                azureStatus = 'error: ' + error.message;
+            }
+            
+            res.json({
+                success: true,
+                user: {
+                    kycStatus: user?.kycStatus || 'pending',
+                    hasDocuments: !!user?.kycDocuments
+                },
+                service: {
+                    azureEnabled: azureEnabled,
+                    hasBlobClient: !!blobServiceClient,
+                    containerName: KYC_CONTAINER_NAME,
+                    azureStatus: azureStatus
+                },
+                upload: {
+                    maxFileSize: '5MB',
+                    allowedFields: ['front', 'back']
+                }
+            });
+        } catch (error) {
+            res.json({
+                success: false,
+                error: error.message
             });
         }
     });
