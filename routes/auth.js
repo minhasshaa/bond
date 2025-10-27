@@ -6,17 +6,17 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { Types } = require('mongoose');
 
-// --- Nodemailer Setup (Reads ALL configuration from process.env) ---
+// --- Nodemailer Setup ---
 const transporter = nodemailer.createTransport({
-    // 1. Host and Port read from new ENV variables
+    // FIX: Using the complete regional host name from ENV
     host: process.env.SMTP_HOST || 'pro.eu.turbo-smtp.com', 
-    port: process.env.SMTP_PORT || 465, 
-    secure: true, // true for port 465 (SSL/TLS)
+    port: process.env.SMTP_PORT || 465, // Secure SSL port
+    secure: true, // MUST be true for port 465
     
-    // 2. Authentication Credentials
+    // Credentials read securely from ENV
     auth: {
-        user: process.env.SMTP_USER_KEY, // Consumer Key
-        pass: process.env.SMTP_PASS_SECRET // Consumer Secret
+        user: process.env.SMTP_USER_KEY, 
+        pass: process.env.SMTP_PASS_SECRET
     }
 });
 
@@ -93,6 +93,7 @@ router.post('/signup', async (req, res) => {
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
                 console.error('Email send error (turboSMTP):', error);
+                // Log the error but continue to verification step
             }
         });
 
