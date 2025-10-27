@@ -1,4 +1,4 @@
-// index.js - COMPLETE FIXED VERSION FOR RENDER
+// index.js - AZURE STORAGE ONLY VERSION
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
@@ -8,7 +8,6 @@ const cors = require("cors");
 const path = require("path");
 const Binance = require("node-binance-api");
 const jwt = require('jsonwebtoken');
-const fs = require('fs').promises;
 
 // Import models and routes
 const User = require("./models/User");
@@ -153,217 +152,70 @@ try {
     console.log('✅ Admin fallback routes loaded');
 }
 
-// KYC routes - RENDER-COMPATIBLE VERSION
+// KYC routes - AZURE STORAGE ONLY VERSION
 async function initializeKYCRoutes() {
     try {
-        console.log('🔧 Initializing KYC routes for Render...');
+        console.log('🔧 Initializing KYC routes with Azure Storage...');
         const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
         
-        if (hasAzureConfig) {
-            console.log('🔄 Attempting Azure Storage connection...');
-            try {
-                const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
-                
-                const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
-                const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
-                const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'kyc-documents';
-                
-                // Create credentials and blob service client
-                const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
-                const blobServiceClient = new BlobServiceClient(
-                    `https://${accountName}.blob.core.windows.net`,
-                    sharedKeyCredential
-                );
-                
-                // Test Azure connection with Render-specific settings
-                console.log('🔧 Testing Azure connection from Render...');
-                const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-                
-                try {
-                    // Try to get properties first (container exists)
-                    await containerClient.getProperties();
-                    console.log('✅ Azure container exists and accessible');
-                } catch (error) {
-                    if (error.statusCode === 404) {
-                        // Container doesn't exist, create it with private access
-                        console.log('🔄 Creating Azure container...');
-                        await containerClient.create();
-                        console.log('✅ Azure container created');
-                    } else {
-                        throw error;
-                    }
-                }
-                
-                console.log('✅ Azure connection successful on Render');
-                
-                const kycRoutes = require("./routes/kyc")({
-                    blobServiceClient,
-                    KYC_CONTAINER_NAME: KYC_CONTAINER_NAME,
-                    azureEnabled: true
-                });
-                
-                app.use("/api/kyc", kycRoutes);
-                console.log('✅ KYC routes mounted with Azure Storage');
-                return;
-                
-            } catch (azureError) {
-                console.error('❌ Azure connection failed on Render:', azureError.message);
-                // Continue to local storage fallback
+        if (!hasAzureConfig) {
+            throw new Error('Azure Storage configuration missing');
+        }
+
+        const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
+        
+        const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+        const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+        const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'kyc-documents';
+        
+        console.log('🔧 Creating Azure Blob Service Client...');
+        
+        // Create credentials and blob service client
+        const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+        const blobServiceClient = new BlobServiceClient(
+            `https://${accountName}.blob.core.windows.net`,
+            sharedKeyCredential
+        );
+        
+        // Test Azure connection with proper configuration for Render
+        console.log('🔧 Testing Azure connection from Render...');
+        const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+        
+        try {
+            // Try to get properties first (container exists)
+            await containerClient.getProperties();
+            console.log('✅ Azure container exists and accessible');
+        } catch (error) {
+            if (error.statusCode === 404) {
+                // Container doesn't exist, create it with BLOB public access
+                console.log('🔄 Creating Azure container with public blob access...');
+                await containerClient.create({ access: 'blob' });
+                console.log('✅ Azure container created with public blob access');
+            } else if (error.statusCode === 403) {
+                console.error('❌ Azure Storage: Public access is not permitted on this storage account');
+                console.log('💡 Solution: Enable "Allow blob public access" in Azure Portal → Storage Account → Configuration');
+                throw new Error('Azure Storage public access disabled. Enable it in Azure Portal.');
+            } else {
+                throw error;
             }
         }
         
-        // FALLBACK: Local file storage for KYC
-        console.log('🔄 Setting up local file storage for KYC...');
-        const multer = require('multer');
+        console.log('✅ Azure connection successful on Render');
         
-        // Configure multer for local file storage
-        const storage = multer.diskStorage({
-            destination: function (req, file, cb) {
-                const uploadPath = '/tmp/uploads/kyc'; // Use /tmp on Render for writable storage
-                // Create directory if it doesn't exist
-                fs.mkdir(uploadPath, { recursive: true }).then(() => {
-                    cb(null, uploadPath);
-                }).catch(err => {
-                    cb(err);
-                });
-            },
-            filename: function (req, file, cb) {
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-                cb(null, req.userId + '-' + file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-            }
+        const kycRoutes = require("./routes/kyc")({
+            blobServiceClient,
+            KYC_CONTAINER_NAME: KYC_CONTAINER_NAME,
+            azureEnabled: true
         });
-
-        const upload = multer({ 
-            storage: storage,
-            limits: { fileSize: 5 * 1024 * 1024 } // 5MB
-        });
-
-        const kycRouter = require('express').Router();
-
-        // Add authentication middleware
-        const userAuth = async (req, res, next) => {
-            try {
-                const authHeader = req.headers.authorization;
-                if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                    return res.status(401).json({ success: false, message: 'Authentication required' });
-                }
-                
-                const token = authHeader.split(' ')[1];
-                const decoded = jwt.verify(token, process.env.JWT_SECRET);
-                req.userId = decoded.id; 
-                next();
-            } catch (error) {
-                return res.status(401).json({ success: false, message: 'Authentication failed' });
-            }
-        };
-
-        // KYC Status
-        kycRouter.get('/status', userAuth, async (req, res) => {
-            try {
-                const user = await User.findById(req.userId).select('kycStatus kycRejectionReason kycDocuments');
-                if (!user) {
-                    return res.status(404).json({ success: false, message: 'User not found.' });
-                }
-                
-                res.json({ 
-                    success: true, 
-                    kycStatus: user.kycStatus || 'pending',
-                    rejectionReason: user.kycRejectionReason,
-                    serviceStatus: 'active'
-                });
-            } catch (error) {
-                console.error('KYC Status Error:', error);
-                res.status(500).json({ 
-                    success: false, 
-                    message: 'Failed to fetch KYC status.',
-                    serviceStatus: 'error'
-                });
-            }
-        });
-
-        // KYC Upload - Local file storage
-        kycRouter.post('/upload', userAuth, upload.fields([
-            { name: 'front', maxCount: 1 },
-            { name: 'back', maxCount: 1 }
-        ]), async (req, res) => {
-            try {
-                if (!req.files || !req.files.front || !req.files.back) {
-                    return res.status(400).json({ 
-                        success: false, 
-                        message: 'Please select both front and back ID files.' 
-                    });
-                }
-
-                const frontFile = req.files.front[0];
-                const backFile = req.files.back[0];
-                const userId = req.userId;
-
-                const user = await User.findById(userId);
-                if (!user) {
-                    // Clean up uploaded files if user not found
-                    await fs.unlink(frontFile.path).catch(() => {});
-                    await fs.unlink(backFile.path).catch(() => {});
-                    return res.status(404).json({ 
-                        success: false, 
-                        message: 'User not found.' 
-                    });
-                }
-
-                // Update user KYC status
-                user.kycStatus = 'under_review';
-                user.kycDocuments = {
-                    front: frontFile.filename,
-                    back: backFile.filename,
-                    frontPath: frontFile.path,
-                    backPath: backFile.path,
-                    uploadDate: new Date()
-                };
-                user.kycRejectionReason = undefined;
-
-                await user.save();
-
-                res.json({ 
-                    success: true, 
-                    message: 'Documents uploaded successfully. Your KYC status is now under review.',
-                    kycStatus: 'under_review',
-                    serviceStatus: 'active'
-                });
-
-            } catch (error) {
-                console.error('KYC Upload Error:', error);
-                
-                // Clean up files on error
-                if (req.files) {
-                    Object.values(req.files).flat().forEach(async (file) => {
-                        await fs.unlink(file.path).catch(() => {});
-                    });
-                }
-                
-                res.status(500).json({ 
-                    success: false, 
-                    message: 'Failed to upload documents. Please try again.',
-                    serviceStatus: 'error'
-                });
-            }
-        });
-
-        // Service status
-        kycRouter.get('/service-status', userAuth, (req, res) => {
-            res.json({
-                success: true,
-                serviceAvailable: true,
-                status: 'KYC service is active',
-                currentStatus: 'Service connected'
-            });
-        });
-
-        app.use("/api/kyc", kycRouter);
-        console.log('✅ KYC routes mounted (local file storage)');
+        
+        app.use("/api/kyc", kycRoutes);
+        console.log('✅ KYC routes mounted with Azure Storage');
         
     } catch (error) {
         console.error('❌ KYC routes failed to load:', error.message);
-        // Ultimate fallback - basic KYC routes
-        const basicKycRouter = require('express').Router();
+        
+        // Provide error-specific KYC routes
+        const errorKycRouter = require('express').Router();
         
         const userAuth = async (req, res, next) => {
             try {
@@ -381,45 +233,45 @@ async function initializeKYCRoutes() {
             }
         };
         
-        basicKycRouter.get('/status', userAuth, async (req, res) => {
+        errorKycRouter.get('/status', userAuth, async (req, res) => {
             try {
                 const user = await User.findById(req.userId).select('kycStatus kycRejectionReason');
                 res.json({ 
                     success: true, 
                     kycStatus: user?.kycStatus || 'pending',
                     rejectionReason: user?.kycRejectionReason,
-                    serviceStatus: 'active',
-                    message: 'KYC service active'
+                    serviceStatus: 'error',
+                    message: 'KYC service error: ' + error.message
                 });
-            } catch (error) {
+            } catch (err) {
                 res.json({ 
                     success: true, 
                     kycStatus: 'pending',
-                    serviceStatus: 'active',
-                    message: 'KYC service active'
+                    serviceStatus: 'error',
+                    message: 'KYC service error: ' + error.message
                 });
             }
         });
         
-        basicKycRouter.post('/upload', userAuth, (req, res) => {
+        errorKycRouter.post('/upload', userAuth, (req, res) => {
             res.status(503).json({ 
                 success: false, 
-                message: 'KYC upload service temporarily unavailable. Please try again later.',
-                serviceStatus: 'disabled'
+                message: 'KYC upload service unavailable: ' + error.message + '. Please check Azure Storage configuration.',
+                serviceStatus: 'error'
             });
         });
         
-        basicKycRouter.get('/service-status', userAuth, (req, res) => {
+        errorKycRouter.get('/service-status', userAuth, (req, res) => {
             res.json({
                 success: true,
                 serviceAvailable: false,
-                status: 'KYC service connection failed',
-                currentStatus: 'Service connection failed'
+                status: 'KYC service error: ' + error.message,
+                currentStatus: 'Service configuration error'
             });
         });
         
-        app.use("/api/kyc", basicKycRouter);
-        console.log('✅ KYC ultimate fallback routes loaded');
+        app.use("/api/kyc", errorKycRouter);
+        console.log('✅ KYC error routes loaded');
     }
 }
 
@@ -428,48 +280,49 @@ app.get('/api/kyc/test', async (req, res) => {
     try {
         const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
         
-        if (hasAzureConfig) {
-            try {
-                const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
-                const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
-                const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
-                const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
-                const blobServiceClient = new BlobServiceClient(
-                    `https://${accountName}.blob.core.windows.net`,
-                    sharedKeyCredential
-                );
-                
-                const containerClient = blobServiceClient.getContainerClient(process.env.KYC_CONTAINER_NAME || 'kyc-documents');
-                await containerClient.getProperties();
-                
-                res.json({ 
-                    success: true, 
-                    message: 'KYC service is working properly with Azure Storage',
-                    azureStatus: 'connected',
-                    storage: 'azure'
-                });
-                return;
-            } catch (azureError) {
-                // Azure failed, but local storage might work
-            }
+        if (!hasAzureConfig) {
+            throw new Error('Azure Storage configuration missing');
         }
+
+        const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
+        const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+        const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+        const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+        const blobServiceClient = new BlobServiceClient(
+            `https://${accountName}.blob.core.windows.net`,
+            sharedKeyCredential
+        );
+        
+        const containerClient = blobServiceClient.getContainerClient(process.env.KYC_CONTAINER_NAME || 'kyc-documents');
+        await containerClient.getProperties();
+        
+        // Test upload capability
+        const testBlobClient = containerClient.getBlockBlobClient('test-connection.txt');
+        await testBlobClient.uploadData(Buffer.from('test'), {
+            blobHTTPHeaders: { blobContentType: 'text/plain' }
+        });
         
         res.json({ 
             success: true, 
-            message: 'KYC service is working with local file storage',
-            azureStatus: 'fallback',
-            storage: 'local'
+            message: 'KYC Azure Storage is working properly',
+            azureStatus: 'connected',
+            storage: 'azure',
+            testUpload: 'successful'
         });
         
     } catch (error) {
         res.json({ 
             success: false, 
-            message: 'KYC service error: ' + error.message,
+            message: 'KYC Azure Storage error: ' + error.message,
             azureStatus: 'error',
-            storage: 'none'
+            storage: 'azure',
+            solution: 'Enable "Allow blob public access" in Azure Portal → Storage Account → Configuration'
         });
     }
 });
+
+// [Rest of your existing code remains the same - Utility Functions, Socket.IO, Market Data, etc.]
+// ... (keep all your existing code below this point)
 
 // Utility Functions
 function getCurrentMinuteStart() {
