@@ -328,6 +328,7 @@
                     });
 
                     if (!response.ok) {
+                        // Throwing an error here triggers the catch block below
                         throw new Error(`HTTP ${response.status}`);
                     }
 
@@ -351,7 +352,7 @@
                             kycFormContainer.style.display = 'block';
                             kycRejectedMessage.style.display = 'block';
                             rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
-                        } else if (status === 'review' || status === 'under_review') { // <--- THIS LINE IS THE FIX
+                        } else if (status === 'review' || status === 'under_review') { // <--- FIXED LINE: Handles both 'review' (server) and 'under_review' (client legacy)
                             kycStatusSpan.classList.add('text-warning');
                             kycReviewMessage.style.display = 'block';
                         } else if (status === 'verified') {
@@ -361,10 +362,14 @@
                             kycFormContainer.style.display = 'block';
                         }
                     } else {
-                        throw new Error(data.message || 'Failed to fetch KYC status');
+                        // This block runs if status is 200 OK but data.success is false
+                        kycStatusSpan.textContent = data.message || 'Service connection failed';
+                        kycStatusSpan.classList.add('text-danger');
+                        kycFormContainer.style.display = 'block';
                     }
 
                 } catch (error) {
+                    // This block runs if the network request fails (e.g., HTTP 500 or network error)
                     console.error("Error fetching KYC status:", error);
                     kycStatusSpan.textContent = "Service connection failed";
                     kycStatusSpan.classList.add('text-danger');
@@ -414,7 +419,8 @@
                         kycMessageElement.style.color = 'rgb(34, 197, 94)';
 
                         form.reset();
-                        await fetchKycStatus();
+                        // Call fetchKycStatus again to show the updated 'review' status
+                        await fetchKycStatus(); 
                         kycUploadButton.textContent = 'Upload Documents';
 
                     } else {
