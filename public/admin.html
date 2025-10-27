@@ -80,10 +80,8 @@
                 </div>
             </div>
 
-            <!-- NEW: Copy Trading Tab -->
             <div id="copy-trade-tab" class="tab-content">
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <!-- Create Copy Trade Form -->
                     <div class="bg-gray-800 rounded-lg p-6">
                         <h2 class="text-xl font-bold mb-4 text-white">Create Copy Trade</h2>
                         <form id="copy-trade-form" class="space-y-4">
@@ -136,7 +134,6 @@
                         <div id="copy-trade-status" class="mt-4 text-center min-h-[24px]"></div>
                     </div>
 
-                    <!-- Active Copy Trades List -->
                     <div class="bg-gray-800 rounded-lg p-6">
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-xl font-bold text-white">Active Copy Trades</h2>
@@ -232,10 +229,8 @@
             const getAdminKey = () => sessionStorage.getItem('adminKey');
             const setAdminKey = (key) => sessionStorage.setItem('adminKey', key);
 
-            // --- NEW KYC ELEMENT & CONSTANT ---
             const ADMIN_API_BASE_URL = "/api/admin"; 
             const kycReviewList = document.getElementById('kyc-review-list');
-            // ------------------------------------
 
             const loginModal = document.getElementById('login-modal');
             const dashboardContent = document.getElementById('dashboard-content');
@@ -306,6 +301,10 @@
                     if (tab.dataset.tab === 'copy-trade') {
                         fetchActiveCopyTrades();
                         populateCopyTradeTimeSelector();
+                    }
+                     // ⭐ MARKET CONTROL: Load status when market control tab is opened
+                    if (tab.dataset.tab === 'market') {
+                        fetchMarketStatus();
                     }
                 });
             });
@@ -638,8 +637,38 @@
                     showLogin();
                 }
             };
+            
+            // ⭐ NEW: Fetch Market Status Function
+            async function fetchMarketStatus() {
+                const adminKey = getAdminKey();
+                const selectedPair = pairSelect.value;
+                if (!adminKey || !selectedPair) {
+                    marketStatusEl.textContent = 'N/A';
+                    return;
+                }
 
-            // ⭐ NEW: KYC FETCH FUNCTION
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/market-control/status`, {
+                        headers: { 'x-admin-key': adminKey }
+                    });
+                    const data = await response.json();
+
+                    if (data.success && data.marketStatus) {
+                        const status = data.marketStatus[selectedPair] || 'auto';
+                        updateMarketStatus({ [selectedPair]: status });
+                    } else {
+                        marketStatusEl.textContent = 'Error';
+                        marketStatusEl.className = 'text-red-400';
+                    }
+                } catch (error) {
+                    marketStatusEl.textContent = 'Server Error';
+                    marketStatusEl.className = 'text-red-400';
+                    console.error("Error fetching market status:", error);
+                }
+            }
+
+
+            // ⭐ NEW: KYC FETCH FUNCTION - REDIRECT FIX IS APPLIED HERE
             async function fetchPendingKycUsers() {
                 const adminKey = getAdminKey();
                 kycReviewList.innerHTML = '<p class="text-gray-400">Loading pending users...</p>';
@@ -663,6 +692,13 @@
                     data.users.forEach(user => {
                         const userElement = document.createElement('div');
                         userElement.className = 'p-4 border border-gray-700 rounded-lg bg-gray-700';
+                        
+                        // ⭐ KYC REDIRECT FIX: The href should point to a dedicated viewing endpoint (will be fixed in admin.js)
+                        // It currently uses the blob path directly in admin.js which is incorrect without Azure config.
+                        const frontLink = `${ADMIN_API_BASE_URL}/kyc/document/${user._id}/front`;
+                        const backLink = `${ADMIN_API_BASE_URL}/kyc/document/${user._id}/back`;
+
+
                         userElement.innerHTML = `
                             <div class="flex justify-between items-center mb-3">
                                 <h3 class="text-lg font-bold text-white">${user.username} (ID: ${user._id})</h3>
@@ -671,8 +707,8 @@
                             <p class="text-sm text-gray-400 mb-2">Joined: ${new Date(user.joined).toLocaleDateString()}</p>
 
                             <div class="flex space-x-4 mb-4">
-                                <a href="${user.documents.front}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">View ID Front</a>
-                                <a href="${user.documents.back}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">View ID Back</a>
+                                <a href="${frontLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">View ID Front</a>
+                                <a href="${backLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">View ID Back</a>
                             </div>
 
                             <div class="flex space-x-2">
@@ -732,7 +768,7 @@
 
             const updateMarketStatus = (marketStatus) => {
                 const selectedPair = pairSelect.value;
-                const status = (marketStatus && marketStatus[selectedPair]) || 'Auto';
+                const status = (marketStatus && marketStatus[selectedPair]) || 'auto';
                 marketStatusEl.textContent = status.toUpperCase();
                 marketStatusEl.className = status === 'up' ? 'text-green-400' : status === 'down' ? 'text-red-400' : 'text-yellow-400';
             };
@@ -748,6 +784,12 @@
                     const result = await response.json();
                     if (!result.success) throw new Error(result.message);
                     alert(result.message);
+                    
+                    // Always update status after market control action
+                    if (url.includes('/market-control')) {
+                        fetchMarketStatus(); // NEW: Fetch status after force action
+                    }
+
                     fetchData();
                 } catch (error) {
                     alert(`Error: ${error.message}`);
@@ -810,12 +852,16 @@
                 button.addEventListener('click', () => {
                     const pair = pairSelect.value;
                     if (!pair) return alert('Please select a trading pair first.');
-                    const direction = button.dataset.direction === 'null' ? null : button.dataset.direction;
+                    // Use null when button.dataset.direction is not 'up' or 'down'
+                    const direction = button.dataset.direction === 'up' ? 'up' : 'down'; 
                     handleApiAction(`${ADMIN_API_BASE_URL}/market-control`, { pair, direction });
                 });
             });
 
-            pairSelect.addEventListener('change', fetchData);
+            pairSelect.addEventListener('change', () => {
+                fetchData(); // Reloads data and updates status from data.marketStatus
+                // If not loading all data, use fetchMarketStatus() here.
+            });
 
             // Initialize time scroller
             populateCopyTradeTimeSelector();
