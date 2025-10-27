@@ -78,15 +78,16 @@ router.post('/signup', async (req, res) => {
 
         // --- 2. SEND EMAIL ---
         const mailOptions = {
-            from: process.env.EMAIL_SERVICE_USER || 'noreply@app.com',
-            to: email,
-            subject: 'Your Trading App Verification Code',
-            html: `
-                <p>Welcome to the Trading Platform!</p>
-                <p>Your verification code is: <strong>${verificationCode}</strong></p>
-                <p>This code is valid for 10 minutes. Do not share it with anyone.</p>
-            `,
-        };
+    from: process.env.EMAIL_SERVICE_USER, 
+    to: email,
+    subject: 'Your Trading App Verification Code',
+    html: `
+        <p>Welcome to the Trading Platform!</p>
+        <p>Your verification code is: <strong>${verificationCode}</strong></p>
+        <p>This code is valid for 10 minutes. Do not share it with anyone.</p>
+    `,
+};
+
 
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
