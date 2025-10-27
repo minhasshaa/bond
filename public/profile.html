@@ -327,9 +327,9 @@
                         }
                     });
 
+                    // Check for network/HTTP errors before parsing JSON
                     if (!response.ok) {
-                        // Throwing an error here triggers the catch block below
-                        throw new Error(`HTTP ${response.status}`);
+                        throw new Error(`HTTP Error: ${response.status}`);
                     }
 
                     const data = await response.json();
@@ -338,11 +338,21 @@
                         const status = (data.kycStatus || 'pending').toLowerCase();
                         kycStatusSpan.textContent = status.toUpperCase();
 
+                        // Reset all status displays
                         kycStatusSpan.classList.remove('text-success', 'text-warning', 'text-danger', 'text-gray-400');
                         kycFormContainer.style.display = 'none';
                         kycReviewMessage.style.display = 'none';
                         kycRejectedMessage.style.display = 'none';
                         kycMessageElement.textContent = '';
+                        
+                        // If service is disabled (from index.js fallback), show the error, but use the DB status
+                        if (data.serviceStatus === 'disabled' || data.serviceStatus === 'error') {
+                            kycStatusSpan.textContent = "Service connection failed";
+                            kycStatusSpan.classList.add('text-danger');
+                            kycFormContainer.style.display = 'block'; // Show form for re-upload attempt
+                            return; // Stop processing further status logic
+                        }
+
 
                         if (status === 'pending') {
                             kycStatusSpan.classList.add('text-warning');
@@ -352,7 +362,7 @@
                             kycFormContainer.style.display = 'block';
                             kycRejectedMessage.style.display = 'block';
                             rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
-                        } else if (status === 'review' || status === 'under_review') { // <--- FIXED LINE: Handles both 'review' (server) and 'under_review' (client legacy)
+                        } else if (status === 'review' || status === 'under_review') { // FIXED: Check for 'review'
                             kycStatusSpan.classList.add('text-warning');
                             kycReviewMessage.style.display = 'block';
                         } else if (status === 'verified') {
@@ -362,7 +372,7 @@
                             kycFormContainer.style.display = 'block';
                         }
                     } else {
-                        // This block runs if status is 200 OK but data.success is false
+                        // This block runs if status is 200 OK but data.success is false (e.g., from kyc.js upload failure)
                         kycStatusSpan.textContent = data.message || 'Service connection failed';
                         kycStatusSpan.classList.add('text-danger');
                         kycFormContainer.style.display = 'block';
@@ -374,6 +384,7 @@
                     kycStatusSpan.textContent = "Service connection failed";
                     kycStatusSpan.classList.add('text-danger');
                     kycFormContainer.style.display = 'block';
+                    kycReviewMessage.style.display = 'none'; // Ensure the successful upload message is hidden on load if critical error occurred
                 }
             }
 
