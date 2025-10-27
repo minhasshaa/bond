@@ -29,6 +29,28 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // START NEW VERIFICATION FIELDS
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true,
+    match: [/.+\@.+\..+/, 'Please fill a valid email address']
+  },
+  isVerified: {
+    type: Boolean,
+    default: false,
+  },
+  verificationCode: {
+    type: String,
+    default: null,
+  },
+  verificationCodeExpires: {
+    type: Date,
+    default: null,
+  },
+  // END NEW VERIFICATION FIELDS
   balance: {
     type: Number,
     default: 0.00,
