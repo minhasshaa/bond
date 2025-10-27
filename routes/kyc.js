@@ -50,14 +50,15 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 return res.status(404).json({ success: false, message: 'User not found.' });
             }
             
-            // Check if Azure is properly configured for KYC functionality
+            // 1. Check if Azure is properly configured for KYC functionality
             if (!azureEnabled) {
+                // Return a non-500 status code with success: true (to avoid client catch block)
                 return res.json({ 
                     success: true, 
                     kycStatus: user.kycStatus || 'pending',
                     rejectionReason: user.kycRejectionReason,
                     serviceStatus: 'disabled',
-                    message: 'KYC service is currently unavailable'
+                    message: 'KYC service is currently unavailable. Contact support.'
                 });
             }
             
@@ -72,7 +73,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             console.error('KYC Status Fetch Error:', error);
             res.status(500).json({ 
                 success: false, 
-                message: 'Failed to fetch KYC status.',
+                message: 'Failed to fetch KYC status (Internal Server Error).',
                 serviceStatus: 'error'
             });
         }
@@ -178,7 +179,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
 
-            // ✅ FIXED: Use 'review' instead of 'under_review' to match User model enum
             user.kycStatus = 'review';
             user.kycDocuments = {
                 front: frontBlobPath,
@@ -196,7 +196,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
-                kycStatus: 'review', // ✅ FIXED: Use 'review' instead of 'under_review'
+                kycStatus: 'review', 
                 serviceStatus: 'active'
             });
 
