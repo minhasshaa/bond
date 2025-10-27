@@ -335,25 +335,34 @@
 
                     if (data.success) {
                         const status = (data.kycStatus || 'pending').toLowerCase();
-                        kycStatusSpan.textContent = status.toUpperCase();
+                        
+                        // Map status to display text
+                        let displayStatus = status.toUpperCase();
+                        if (status === 'review') {
+                            displayStatus = 'UNDER REVIEW';
+                        }
+                        
+                        kycStatusSpan.textContent = displayStatus;
 
+                        // Reset all classes and displays
                         kycStatusSpan.classList.remove('text-success', 'text-warning', 'text-danger', 'text-gray-400');
                         kycFormContainer.style.display = 'none';
                         kycReviewMessage.style.display = 'none';
                         kycRejectedMessage.style.display = 'none';
                         kycMessageElement.textContent = '';
 
+                        // Handle different statuses
                         if (status === 'pending') {
                             kycStatusSpan.classList.add('text-warning');
                             kycFormContainer.style.display = 'block';
+                        } else if (status === 'review') {
+                            kycStatusSpan.classList.add('text-warning');
+                            kycReviewMessage.style.display = 'block';
                         } else if (status === 'rejected') {
                             kycStatusSpan.classList.add('text-danger');
                             kycFormContainer.style.display = 'block';
                             kycRejectedMessage.style.display = 'block';
                             rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
-                        } else if (status === 'under_review') {
-                            kycStatusSpan.classList.add('text-warning');
-                            kycReviewMessage.style.display = 'block';
                         } else if (status === 'verified') {
                             kycStatusSpan.classList.add('text-success');
                         } else {
@@ -366,7 +375,7 @@
 
                 } catch (error) {
                     console.error("Error fetching KYC status:", error);
-                    kycStatusSpan.textContent = "Service connection failed";
+                    kycStatusSpan.textContent = "Error loading status";
                     kycStatusSpan.classList.add('text-danger');
                     kycFormContainer.style.display = 'block';
                 }
