@@ -2,23 +2,19 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const { Types } = require('mongoose'); // Used for ObjectId validation
+const crypto = require('crypto');
+const { Types } = require('mongoose');
 
 // --- Nodemailer Setup ---
-// Using Gmail/Standard TLS settings, relying on environment variables
 const transporter = nodemailer.createTransport({
+    // FIX: Using Port 465 and secure: true to bypass ETIMEDOUT error
     host: process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com', 
-    port: process.env.EMAIL_SMTP_PORT || 587,
-    secure: false, // Use false for port 587 (enables STARTTLS)
+    port: 465, 
+    secure: true, 
     auth: {
         user: process.env.EMAIL_SERVICE_USER, 
         pass: process.env.EMAIL_SERVICE_PASS
-    },
-    // Required for some hosting environments
-    tls: {
-        ciphers: 'SSLv3'
     }
 });
 
@@ -33,16 +29,11 @@ async function getReferrerId(code) {
 
 // [POST] /api/auth/signup (formerly /register) - MODIFIED TO SEND VERIFICATION CODE
 router.post('/signup', async (req, res) => {
-    // Note: We use 'email' in the signup flow, so the client HTML must send it.
     const { username, password, email, refCode } = req.body; 
 
-    // Basic Input Validation
     if (!username || !password || !email) {
          return res.status(400).json({ success: false, message: 'Username, password, and email are required.' });
     }
-    
-    // Check if the client is still sending the old 'confirmPassword' and 'region' fields
-    // For now, we will ignore them, but the client must send username, password, and email.
 
     try {
         const existingUser = await User.findOne({ $or: [{ username }, { email }] });
@@ -51,7 +42,7 @@ router.post('/signup', async (req, res) => {
         }
 
         const verificationCode = generateOTP();
-        const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+        const codeExpires = new Date(Date.now() + 10 * 60 * 1000); 
         
         let referredBy = null;
         if (refCode) {
@@ -67,7 +58,6 @@ router.post('/signup', async (req, res) => {
             verificationCode,
             verificationCodeExpires: codeExpires,
             referredBy: referredBy,
-            // Set required defaults for MongoDB schema compliance
             totalDeposits: 0,
             totalTradeVolume: 0,
         });
@@ -101,7 +91,6 @@ router.post('/signup', async (req, res) => {
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
                 console.error('Email send error:', error);
-                // Log the error but continue to verification step
             }
         });
 
@@ -183,7 +172,8 @@ router.post('/login', async (req, res) => {
                 success: false, 
                 message: 'Account not verified. Please check your email for the verification code.', 
                 requiresVerification: true,
-                userId: user._id // Return ID to prompt for code re-entry
+                userId: user._id, 
+                email: user.email // ADDED: Return email for frontend redirect
             });
         }
         // --- END CHECK ---
