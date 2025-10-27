@@ -345,8 +345,9 @@
                         kycRejectedMessage.style.display = 'none';
                         kycMessageElement.textContent = '';
                         
-                        // Handle server-side failure flag (from index.js fallback)
-                        if (data.serviceStatus === 'disabled' || data.serviceStatus === 'error') {
+                        // Handle server-side failure flag (from kyc.js status route)
+                        // The index.js fix prevents a crash, but kyc.js may return a temporary error status in the message
+                        if (data.message && data.message.includes('unavailable')) {
                             kycStatusSpan.textContent = "Service connection failed";
                             kycStatusSpan.classList.add('text-danger');
                             kycFormContainer.style.display = 'block'; 
