@@ -7,16 +7,19 @@ const crypto = require('crypto');
 const { Types } = require('mongoose');
 
 // --- Nodemailer Setup ---
+// FIX: Credentials are now read securely from environment variables
 const transporter = nodemailer.createTransport({
-    // FIX 1: Use the 'service' property for Gmail (most reliable setup)
-    service: 'gmail', 
-    // Port 465 and secure: true is the dedicated SSL configuration required to avoid ETIMEDOUT on many cloud servers
-    host: process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com', 
+    // 1. SMTP Server Host
+    host: 'pro.eu.turbo-smtp.com', 
+    
+    // 2. SMTP Port (Using secure SSL port 465)
     port: 465, 
-    secure: true, 
+    secure: true, // MUST be true for port 465 (SSL/TLS)
+    
+    // 3. Authentication Credentials (Read from process.env)
     auth: {
-        user: process.env.EMAIL_SERVICE_USER, 
-        pass: process.env.EMAIL_SERVICE_PASS
+        user: process.env.SMTP_USER_KEY, 
+        pass: process.env.SMTP_PASS_SECRET 
     }
 });
 
@@ -29,7 +32,7 @@ async function getReferrerId(code) {
     return referrer ? referrer._id : null;
 }
 
-// [POST] /api/auth/signup (formerly /register) - MODIFIED TO SEND VERIFICATION CODE
+// [POST] /api/auth/signup - MODIFIED TO SEND VERIFICATION CODE
 router.post('/signup', async (req, res) => {
     const { username, password, email, refCode } = req.body; 
 
@@ -80,7 +83,8 @@ router.post('/signup', async (req, res) => {
 
         // --- 2. SEND EMAIL ---
         const mailOptions = {
-            from: process.env.EMAIL_SERVICE_USER, // Using the authenticated address
+            // Reading sender identity from environment variable
+            from: process.env.EMAIL_SENDER_ADDRESS || 'noreply@app.com', 
             to: email,
             subject: 'Your Trading App Verification Code',
             html: `
@@ -92,8 +96,8 @@ router.post('/signup', async (req, res) => {
 
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
-                console.error('Email send error:', error);
-                // The actual error is now visible in the logs if ETIMEDOUT fails
+                console.error('Email send error (turboSMTP):', error);
+                // Log the error but continue to verification step
             }
         });
 
