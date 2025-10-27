@@ -67,6 +67,19 @@ app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
+// Debug endpoint for Azure status
+app.get('/api/debug/azure-status', (req, res) => {
+    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
+                          process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+    
+    res.json({
+        hasAzureConfig: hasAzureConfig,
+        hasKycContainer: !!process.env.KYC_CONTAINER_NAME,
+        connectionStringLength: process.env.AZURE_STORAGE_CONNECTION_STRING ? process.env.AZURE_STORAGE_CONNECTION_STRING.length : 0,
+        kycContainer: process.env.KYC_CONTAINER_NAME || 'not set'
+    });
+});
+
 // Admin routes with proper configuration
 try {
     let adminRoutes;
@@ -137,54 +150,135 @@ try {
     console.log('✅ Admin fallback routes loaded');
 }
 
-// KYC routes
-try {
-    let kycRoutes;
-    const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING;
-    
-    if (hasAzureConfig && process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=')) {
-        const { BlobServiceClient } = require('@azure/storage-blob');
-        const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+// KYC routes - FIXED VERSION
+async function initializeKYCRoutes() {
+    try {
+        let kycRoutes;
+        const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
+                              process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
         
-        kycRoutes = require("./routes/kyc")({
-            blobServiceClient,
-            KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'kyc-documents',
-            azureEnabled: true
+        console.log('🔧 Initializing KYC routes...');
+        console.log('Azure config available:', hasAzureConfig);
+        
+        if (hasAzureConfig) {
+            const { BlobServiceClient } = require('@azure/storage-blob');
+            
+            try {
+                const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+                const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'kyc-documents';
+                
+                // Test Azure connection
+                const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+                await containerClient.createIfNotExists({ access: 'blob' });
+                
+                kycRoutes = require("./routes/kyc")({
+                    blobServiceClient,
+                    KYC_CONTAINER_NAME: KYC_CONTAINER_NAME,
+                    azureEnabled: true
+                });
+                console.log('✅ KYC routes loaded with Azure Storage');
+            } catch (azureError) {
+                console.error('❌ Azure connection failed:', azureError.message);
+                // Fallback to disabled mode
+                kycRoutes = require("./routes/kyc")({
+                    azureEnabled: false
+                });
+                console.log('⚠️ KYC routes loaded in fallback mode (Azure connection failed)');
+            }
+        } else {
+            console.log('⚠️ KYC routes loaded without Azure Storage (no config)');
+            kycRoutes = require("./routes/kyc")({
+                azureEnabled: false
+            });
+        }
+        
+        app.use("/api/kyc", kycRoutes);
+        console.log('✅ KYC routes mounted at /api/kyc');
+    } catch (error) {
+        console.error('❌ KYC routes failed to load:', error.message);
+        // Provide basic KYC fallback
+        const basicKycRouter = require('express').Router();
+        
+        // Add authentication middleware to fallback routes
+        const userAuth = async (req, res, next) => {
+            try {
+                const authHeader = req.headers.authorization;
+                if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                    return res.status(401).json({ success: false, message: 'Authentication required' });
+                }
+                
+                const token = authHeader.split(' ')[1];
+                const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                req.userId = decoded.id; 
+                next();
+            } catch (error) {
+                return res.status(401).json({ success: false, message: 'Authentication failed' });
+            }
+        };
+        
+        basicKycRouter.get('/status', userAuth, (req, res) => {
+            res.json({ 
+                success: true, 
+                kycStatus: 'pending',
+                serviceStatus: 'disabled',
+                message: 'KYC service temporarily unavailable'
+            });
         });
-        console.log('✅ KYC routes loaded with Azure Storage');
-    } else {
-        console.log('⚠️ KYC routes loaded without Azure Storage');
-        kycRoutes = require("./routes/kyc")({
-            azureEnabled: false
+        
+        basicKycRouter.post('/upload', userAuth, (req, res) => {
+            res.status(503).json({ 
+                success: false, 
+                message: 'KYC upload service temporarily unavailable. Please try again later.',
+                serviceStatus: 'disabled'
+            });
+        });
+        
+        basicKycRouter.get('/service-status', userAuth, (req, res) => {
+            res.json({
+                success: true,
+                serviceAvailable: false,
+                status: 'KYC service connection failed - Azure not configured',
+                currentStatus: 'Service connection failed'
+            });
+        });
+        
+        app.use("/api/kyc", basicKycRouter);
+        console.log('✅ KYC fallback routes loaded');
+    }
+}
+
+// KYC Test endpoint
+app.get('/api/kyc/test', async (req, res) => {
+    try {
+        const hasAzureConfig = process.env.AZURE_STORAGE_CONNECTION_STRING && 
+                              process.env.AZURE_STORAGE_CONNECTION_STRING.includes('AccountName=');
+        
+        if (hasAzureConfig) {
+            const { BlobServiceClient } = require('@azure/storage-blob');
+            const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
+            const containerClient = blobServiceClient.getContainerClient(process.env.KYC_CONTAINER_NAME || 'kyc-documents');
+            
+            await containerClient.getProperties();
+            res.json({ 
+                success: true, 
+                message: 'KYC service is working properly',
+                azureStatus: 'connected'
+            });
+        } else {
+            res.json({ 
+                success: true, 
+                message: 'KYC service is in fallback mode',
+                azureStatus: 'not_configured' 
+            });
+        }
+    } catch (error) {
+        res.json({ 
+            success: false, 
+            message: 'KYC service error: ' + error.message,
+            azureStatus: 'error'
         });
     }
-    
-    app.use("/api/kyc", kycRoutes);
-    console.log('✅ KYC routes mounted at /api/kyc');
-} catch (error) {
-    console.error('❌ KYC routes failed to load:', error.message);
-    // Provide basic KYC fallback
-    const basicKycRouter = require('express').Router();
-    
-    basicKycRouter.get('/status', (req, res) => {
-        res.json({ 
-            success: true, 
-            kycStatus: 'pending',
-            serviceStatus: 'active',
-            message: 'KYC service in fallback mode'
-        });
-    });
-    
-    basicKycRouter.post('/upload', (req, res) => {
-        res.status(503).json({ 
-            success: false, 
-            message: 'KYC upload service temporarily unavailable'
-        });
-    });
-    
-    app.use("/api/kyc", basicKycRouter);
-    console.log('✅ KYC fallback routes loaded');
-}
+});
 
 // Utility Functions
 function getCurrentMinuteStart() {
@@ -544,6 +638,9 @@ mongoose.connection.once("open", async () => {
     } catch (error) {
         console.error("Cleanup warning:", error.message);
     }
+
+    // Initialize KYC routes first
+    await initializeKYCRoutes();
 
     // Initialize market data and trading
     await initializeMarketData();
