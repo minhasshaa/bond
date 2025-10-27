@@ -330,6 +330,7 @@
 
                 try {
                     kycStatusSpan.textContent = "Loading...";
+                    console.log('🔧 Debug: Fetching KYC status from:', `${KYC_API_BASE_URL}/status`);
 
                     const response = await fetch(`${KYC_API_BASE_URL}/status`, {
                         method: 'GET',
@@ -338,11 +339,14 @@
                         }
                     });
 
+                    console.log('🔧 Debug: KYC Status HTTP Status:', response.status);
+                    
                     if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
 
                     const data = await response.json();
+                    console.log('🔧 Debug: KYC Status Data:', data);
 
                     if (data.success) {
                         const status = (data.kycStatus || 'pending').toLowerCase();
@@ -379,8 +383,11 @@
 
                 } catch (error) {
                     console.error("Error fetching KYC status:", error);
-                    kycStatusSpan.textContent = "Service connection failed.";
+                    kycStatusSpan.textContent = "Service connection failed";
                     kycStatusSpan.classList.add('text-danger');
+                    
+                    // Show upload form even on error to allow retry
+                    kycFormContainer.style.display = 'block';
                 }
             }
 
