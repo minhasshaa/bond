@@ -3,13 +3,14 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
+const { generateBlobSas, BlobSASPermissions } = require('@azure/storage-blob');
 
 const TRADE_PAIRS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 
-module.exports = function({ candleOverride = {} }) {
+module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false, candleOverride = {} }) {
     const router = express.Router();
 
     // Admin security middleware
@@ -100,8 +101,7 @@ module.exports = function({ candleOverride = {} }) {
             const usersToReview = await User.find({ 
                 $or: [
                     { kycStatus: 'review' },
-                    { kycStatus: 'under_review' },
-                    { kycStatus: 'pending' }
+                    { kycStatus: 'under_review' }
                 ]
             }).select('username kycStatus kycDocuments kycRejectionReason createdAt');
 
@@ -112,14 +112,11 @@ module.exports = function({ candleOverride = {} }) {
                 rejectionReason: user.kycRejectionReason,
                 joined: user.createdAt,
                 documents: {
-                    front: user.kycDocuments?.front ? 'Document uploaded - Configure Azure for viewing' : null,
-                    back: user.kycDocuments?.back ? 'Document uploaded - Configure Azure for viewing' : null,
+                    // ⭐ FIXED: Only indicate if documents exist, the client will call the new route
+                    front: !!user.kycDocuments?.front,
+                    back: !!user.kycDocuments?.back,
                     uploadDate: user.kycDocuments?.uploadDate,
                     hasDocuments: !!(user.kycDocuments?.front && user.kycDocuments?.back),
-                    documentIds: {
-                        front: user.kycDocuments?.front,
-                        back: user.kycDocuments?.back
-                    }
                 }
             }));
 
@@ -134,6 +131,54 @@ module.exports = function({ candleOverride = {} }) {
             res.status(500).json({ success: false, message: 'Failed to fetch KYC users.' });
         }
     });
+    
+    // ⭐ NEW ROUTE: SECURELY SERVE KYC DOCUMENTS
+    router.get('/kyc/document/:userId/:side', async (req, res) => {
+        const { userId, side } = req.params;
+
+        if (!['front', 'back'].includes(side)) {
+            return res.status(400).send('Invalid document side.');
+        }
+        
+        if (!blobServiceClient || !KYC_CONTAINER_NAME || !azureEnabled) {
+            return res.status(503).send('Azure Storage is not configured or available.');
+        }
+
+        try {
+            const user = await User.findById(userId).select('kycDocuments');
+            if (!user) {
+                return res.status(404).send('User not found.');
+            }
+
+            const blobName = user.kycDocuments?.[side];
+
+            if (!blobName) {
+                return res.status(404).send(`No ${side} document found for this user.`);
+            }
+
+            // Generate a temporary Shared Access Signature (SAS) URL
+            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            const blobClient = containerClient.getBlobClient(blobName);
+
+            // Generate SAS URL valid for 30 minutes for reading the blob
+            const sasToken = generateBlobSas(blobName, containerClient.containerName, {
+                containerClient,
+                startsOn: new Date(),
+                expiresOn: new Date(new Date().valueOf() + (30 * 60 * 1000)), // 30 mins
+                permissions: BlobSASPermissions.parse("r"), // Read permission
+            });
+            
+            const sasUrl = `${blobClient.url}?${sasToken}`;
+            
+            // Redirect the admin to the secure, temporary blob URL
+            return res.redirect(sasUrl);
+
+        } catch (error) {
+            console.error(`Admin KYC Document View Error (${side}):`, error);
+            return res.status(500).send('Server failed to retrieve the document.');
+        }
+    });
+    // ⭐ END NEW ROUTE
 
     router.post('/kyc/update', async (req, res) => {
         const { userId, newStatus, reason } = req.body;
@@ -178,7 +223,7 @@ module.exports = function({ candleOverride = {} }) {
     });
 
     // ----------------------------------------------------------------------
-    // COMPLETE DEPOSIT & WITHDRAWAL MANAGEMENT
+    // COMPLETE DEPOSIT & WITHDRAWAL MANAGEMENT (No changes needed)
     // ----------------------------------------------------------------------
 
     router.post('/approve-deposit', async (req, res) => {
@@ -361,7 +406,7 @@ module.exports = function({ candleOverride = {} }) {
     });
 
     // ----------------------------------------------------------------------
-    // COMPLETE MANUAL USER CREDIT
+    // COMPLETE MANUAL USER CREDIT (No changes needed)
     // ----------------------------------------------------------------------
 
     router.post('/credit-user', async (req, res) => {
@@ -405,7 +450,7 @@ module.exports = function({ candleOverride = {} }) {
     });
 
     // ----------------------------------------------------------------------
-    // COMPLETE REFERRAL COMMISSION
+    // COMPLETE REFERRAL COMMISSION (No changes needed)
     // ----------------------------------------------------------------------
 
     router.post('/give-commission', async (req, res) => {
@@ -450,11 +495,15 @@ module.exports = function({ candleOverride = {} }) {
     });
 
     // ----------------------------------------------------------------------
-    // COMPLETE MARKET CONTROL
+    // COMPLETE MARKET CONTROL (No changes needed)
     // ----------------------------------------------------------------------
 
     router.post('/market-control', (req, res) => {
         const { pair, direction } = req.body;
+
+        // NOTE: The client passes 'up' or 'down'. If it passes 'auto' or 'null', it should be null.
+        const effectiveDirection = direction === 'up' || direction === 'down' ? direction : null;
+
 
         if (!pair || (direction !== 'up' && direction !== 'down' && direction !== null)) {
             return res.status(400).json({ success: false, message: "Invalid pair or direction. Direction must be 'up', 'down', or null to disable." });
@@ -464,16 +513,17 @@ module.exports = function({ candleOverride = {} }) {
             return res.status(400).json({ success: false, message: "Invalid trading pair." });
         }
 
-        candleOverride[pair] = direction;
+        candleOverride[pair] = effectiveDirection; // Update the global state
 
-        const message = direction ? `Market control set to ${direction.toUpperCase()} for ${pair}.` : `Market control disabled for ${pair}.`;
+        const message = effectiveDirection ? `Market control set to ${effectiveDirection.toUpperCase()} for ${pair}.` : `Market control disabled for ${pair}.`;
         res.json({ success: true, message });
     });
 
     router.get('/market-control/status', (req, res) => {
         const status = {};
         TRADE_PAIRS.forEach(pair => {
-            status[pair] = candleOverride[pair] || 'auto';
+            // Read from the global state object
+            status[pair] = candleOverride[pair] || 'auto'; 
         });
 
         res.json({
@@ -483,9 +533,9 @@ module.exports = function({ candleOverride = {} }) {
     });
 
     // ----------------------------------------------------------------------
-    // COMPLETE COPY TRADE MANAGEMENT
+    // COMPLETE COPY TRADE MANAGEMENT (No changes needed)
     // ----------------------------------------------------------------------
-
+    
     router.post('/copy-trade/create', async (req, res) => {
         const { tradingPair, direction, percentage, executionTime } = req.body;
 
