@@ -94,13 +94,18 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
-        // CRITICAL CHECK: Ensure Azure is initialized
         if (!blobServiceClient || !KYC_CONTAINER_NAME || !azureEnabled) {
             return res.status(200).json({ success: false, message: 'Azure Storage not configured for KYC review. Cannot fetch documents.' });
         }
 
         try {
-            const usersToReview = await User.find({ kycStatus: 'review' }).select('username kycStatus kycDocuments createdAt');
+            // FIX: Ensure the query includes both 'review' (set by kyc.js) and 'under_review'
+            const usersToReview = await User.find({ 
+                $or: [
+                    { kycStatus: 'review' },
+                    { kycStatus: 'under_review' }
+                ]
+            }).select('username kycStatus kycDocuments createdAt');
 
             const usersWithUrls = await Promise.all(usersToReview.map(async (user) => {
 
@@ -159,6 +164,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 };
             }));
 
+            // Filter out users who somehow lost their documents during processing, only show those with at least one URL
             res.json({ success: true, users: usersWithUrls.filter(u => u.documents.front || u.documents.back) });
 
         } catch (error) {
