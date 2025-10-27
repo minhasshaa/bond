@@ -194,12 +194,12 @@ async function initializeKYCRoutes() {
             }
         };
         
-        // --- FIXED BLOCK: Returns success: true even on service failure to avoid client-side catch block ---
+        // --- FIXED BLOCK: Ensures 200 OK and success: true on service failure ---
         basicKycRouter.get('/status', userAuth, async (req, res) => {
             try {
                 const user = await User.findById(req.userId).select('kycStatus kycRejectionReason');
                 res.json({ 
-                    success: true, // IMPORTANT: Set to true to prevent client from showing "Service connection failed"
+                    success: true, // IMPORTANT: Prevents client-side catch block from firing
                     kycStatus: user?.kycStatus || 'pending',
                     rejectionReason: user?.kycRejectionReason,
                     serviceStatus: 'disabled',
@@ -207,7 +207,7 @@ async function initializeKYCRoutes() {
                 });
             } catch (error) {
                 res.json({ 
-                    success: true, // IMPORTANT: Set to true to prevent client from showing "Service connection failed"
+                    success: true, // IMPORTANT: Fallback to a safe status
                     kycStatus: 'pending',
                     serviceStatus: 'disabled',
                     message: 'KYC service unavailable due to user data fetch error'
@@ -217,6 +217,7 @@ async function initializeKYCRoutes() {
         // --- END FIXED BLOCK ---
         
         basicKycRouter.post('/upload', userAuth, (req, res) => {
+            // This is correctly 503 since the upload is impossible
             res.status(503).json({ 
                 success: false, 
                 message: 'KYC upload service temporarily unavailable. Please try again later.',
