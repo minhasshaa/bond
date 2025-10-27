@@ -1,13 +1,13 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const { 
-    // KEEP THESE TOP-LEVEL IMPORTS
+    // FIX: Keep these necessary imports for objects and clients
     BlobSASPermissions,
     StorageSharedKeyCredential, 
-    ContainerClient
+    ContainerClient,
+    BlobClient // Import BlobClient for the stable generateSasUrl method
 } = require('@azure/storage-blob');
-// FIX: Import the utility function separately for stability across Node environments
-const { generateBlobSas } = require('@azure/storage-blob'); 
+// Removed: const { generateBlobSas } = require('@azure/storage-blob'); to avoid TypeError
 
 const User = require('../models/User');
 const Trade = require('../models/Trade');
@@ -122,28 +122,28 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                             STORAGE_ACCOUNT_KEY
                         );
                         
-                        const containerClient = new ContainerClient(
-                            `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net/${KYC_CONTAINER_NAME}`,
+                        // 2. Create BlobClient using the raw key
+                        const blobClient = new BlobClient(
+                             `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net/${KYC_CONTAINER_NAME}/${blobPath}`,
                             sharedKeyCredential
                         );
-                        const blobClient = containerClient.getBlobClient(blobPath);
 
-                        // 2. Define Start/Expiry Times with Clock Skew Buffer
+                        // 3. Define Start/Expiry Times with Clock Skew Buffer
                         const startTime = new Date();
                         startTime.setMinutes(startTime.getMinutes() - 5); // CRITICAL: 5 minutes buffer into the past
                         
                         const expiresOn = new Date();
                         expiresOn.setMinutes(expiresOn.getMinutes() + 30); // Valid for 30 minutes
 
-                        // 3. Generate SAS token using the robust method
-                        const sasToken = generateBlobSas(blobPath, containerClient.containerName, {
-                            containerClient,
+                        // 4. Generate SAS token using the BlobClient method (stable and reliable)
+                        const sasToken = await blobClient.generateSasUrl({
+                            permissions: BlobSASPermissions.parse("r"), // Read permission
                             startsOn: startTime, 
                             expiresOn: expiresOn,
-                            permissions: BlobSASPermissions.parse("r"), // Read permission
                         });
                         
-                        return `${blobClient.url}?${sasToken}`;
+                        // FIX: generateSasUrl returns the full URL with the SAS token appended
+                        return sasToken; 
 
                     } catch (error) {
                         console.error(`Error generating SAS URL for ${blobPath}:`, error.message);
