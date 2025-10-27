@@ -345,12 +345,12 @@
                         kycRejectedMessage.style.display = 'none';
                         kycMessageElement.textContent = '';
                         
-                        // If service is disabled (from index.js fallback), show the error, but use the DB status
+                        // Handle server-side failure flag (from index.js fallback)
                         if (data.serviceStatus === 'disabled' || data.serviceStatus === 'error') {
                             kycStatusSpan.textContent = "Service connection failed";
                             kycStatusSpan.classList.add('text-danger');
-                            kycFormContainer.style.display = 'block'; // Show form for re-upload attempt
-                            return; // Stop processing further status logic
+                            kycFormContainer.style.display = 'block'; 
+                            return; 
                         }
 
 
@@ -372,7 +372,7 @@
                             kycFormContainer.style.display = 'block';
                         }
                     } else {
-                        // This block runs if status is 200 OK but data.success is false (e.g., from kyc.js upload failure)
+                        // This block runs if status is 200 OK but data.success is false
                         kycStatusSpan.textContent = data.message || 'Service connection failed';
                         kycStatusSpan.classList.add('text-danger');
                         kycFormContainer.style.display = 'block';
@@ -384,7 +384,7 @@
                     kycStatusSpan.textContent = "Service connection failed";
                     kycStatusSpan.classList.add('text-danger');
                     kycFormContainer.style.display = 'block';
-                    kycReviewMessage.style.display = 'none'; // Ensure the successful upload message is hidden on load if critical error occurred
+                    kycReviewMessage.style.display = 'none'; 
                 }
             }
 
