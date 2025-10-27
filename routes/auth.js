@@ -1,21 +1,24 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { Types } = require('mongoose');
 
-// --- Nodemailer Setup (Final Clean Configuration) ---
+// --- Nodemailer Setup ---
 const transporter = nodemailer.createTransport({
-    // FIX: Use the 'service' property and rely on standard Nodemailer defaults for stability.
+    // FIX 1: Use the 'service' property for Gmail (most reliable setup)
     service: 'gmail', 
+    // Port 465 and secure: true is the dedicated SSL configuration required to avoid ETIMEDOUT on many cloud servers
+    host: process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com', 
+    port: 465, 
+    secure: true, 
     auth: {
         user: process.env.EMAIL_SERVICE_USER, 
         pass: process.env.EMAIL_SERVICE_PASS
     }
 });
-
 
 // Helper to generate a 6-digit OTP
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -77,20 +80,20 @@ router.post('/signup', async (req, res) => {
 
         // --- 2. SEND EMAIL ---
         const mailOptions = {
-    from: process.env.EMAIL_SERVICE_USER, 
-    to: email,
-    subject: 'Your Trading App Verification Code',
-    html: `
-        <p>Welcome to the Trading Platform!</p>
-        <p>Your verification code is: <strong>${verificationCode}</strong></p>
-        <p>This code is valid for 10 minutes. Do not share it with anyone.</p>
-    `,
-};
-
+            from: process.env.EMAIL_SERVICE_USER, // Using the authenticated address
+            to: email,
+            subject: 'Your Trading App Verification Code',
+            html: `
+                <p>Welcome to the Trading Platform!</p>
+                <p>Your verification code is: <strong>${verificationCode}</strong></p>
+                <p>This code is valid for 10 minutes. Do not share it with anyone.</p>
+            `,
+        };
 
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
                 console.error('Email send error:', error);
+                // The actual error is now visible in the logs if ETIMEDOUT fails
             }
         });
 
@@ -173,7 +176,7 @@ router.post('/login', async (req, res) => {
                 message: 'Account not verified. Please check your email for the verification code.', 
                 requiresVerification: true,
                 userId: user._id, 
-                email: user.email // ADDED: Return email for frontend redirect
+                email: user.email 
             });
         }
         // --- END CHECK ---
