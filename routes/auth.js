@@ -6,17 +6,16 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { Types } = require('mongoose');
 
-// --- Nodemailer Setup ---
+// --- Nodemailer Setup (Final Clean Configuration) ---
 const transporter = nodemailer.createTransport({
-    // FIX: Using Port 465 and secure: true to bypass ETIMEDOUT error
-    host: process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com', 
-    port: 465, 
-    secure: true, 
+    // FIX: Use the 'service' property and rely on standard Nodemailer defaults for stability.
+    service: 'gmail', 
     auth: {
         user: process.env.EMAIL_SERVICE_USER, 
         pass: process.env.EMAIL_SERVICE_PASS
     }
 });
+
 
 // Helper to generate a 6-digit OTP
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
