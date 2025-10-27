@@ -2,86 +2,195 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const crypto = require('crypto'); // Needed to generate random codes
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+const { Types } = require('mongoose'); // Used for ObjectId validation
 
-// --- REGISTER A NEW USER ---
-router.post('/register', async (req, res) => {
+// --- Nodemailer Setup ---
+// Using Gmail/Standard TLS settings, relying on environment variables
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com', 
+    port: process.env.EMAIL_SMTP_PORT || 587,
+    secure: false, // Use false for port 587 (enables STARTTLS)
+    auth: {
+        user: process.env.EMAIL_SERVICE_USER, 
+        pass: process.env.EMAIL_SERVICE_PASS
+    },
+    // Required for some hosting environments
+    tls: {
+        ciphers: 'SSLv3'
+    }
+});
+
+// Helper to generate a 6-digit OTP
+const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+// Helper function to find referrer ID
+async function getReferrerId(code) {
+    const referrer = await User.findOne({ referralCode: code }).select('_id');
+    return referrer ? referrer._id : null;
+}
+
+// [POST] /api/auth/signup (formerly /register) - MODIFIED TO SEND VERIFICATION CODE
+router.post('/signup', async (req, res) => {
+    // Note: We use 'email' in the signup flow, so the client HTML must send it.
+    const { username, password, email, refCode } = req.body; 
+
+    // Basic Input Validation
+    if (!username || !password || !email) {
+         return res.status(400).json({ success: false, message: 'Username, password, and email are required.' });
+    }
+    
+    // Check if the client is still sending the old 'confirmPassword' and 'region' fields
+    // For now, we will ignore them, but the client must send username, password, and email.
+
     try {
-        // ✅ CHANGED: Added 'refCode' to the request body
-        const { username, email, password, confirmPassword, region, refCode } = req.body;
-
-        if (!username || !email || !password || !confirmPassword || !region) {  
-            return res.status(400).json({ message: "All fields are required." });  
-        }  
-        if (password !== confirmPassword) {  
-            return res.status(400).json({ message: "Passwords do not match." });  
-        }  
-
-        let referredBy = null;
-        // If a referral code was provided, find the user who owns it
-        if (refCode) {
-            const referrer = await User.findOne({ referralCode: refCode });
-            if (referrer) {
-                referredBy = referrer._id;
-            }
+        const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: 'Username or email is already in use.' });
         }
 
-        // Create a new user, including the referrer's ID if found
-        const user = new User({ username, email, password, region, referredBy });  
+        const verificationCode = generateOTP();
+        const codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+        
+        let referredBy = null;
+        if (refCode) {
+            referredBy = await getReferrerId(refCode);
+        }
 
-        // ✅ NEW: Generate a unique referral code for the new user
-        // This loop ensures the generated code is truly unique
+        // --- 1. CREATE USER WITH VERIFICATION DATA ---
+        const newUser = new User({
+            username,
+            password,
+            email,
+            isVerified: false,
+            verificationCode,
+            verificationCodeExpires: codeExpires,
+            referredBy: referredBy,
+            // Set required defaults for MongoDB schema compliance
+            totalDeposits: 0,
+            totalTradeVolume: 0,
+        });
+
+        // Generate a unique referral code
         let isUnique = false;
         let referralCode = '';
         while (!isUnique) {
             referralCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-            const existingUser = await User.findOne({ referralCode: referralCode });
-            if (!existingUser) {
+            const existingCode = await User.findOne({ referralCode: referralCode });
+            if (!existingCode) {
                 isUnique = true;
             }
         }
-        user.referralCode = referralCode;
+        newUser.referralCode = referralCode;
 
-        await user.save();  
+        await newUser.save();
 
-        res.status(201).json({ message: "User registered successfully. Please log in." });
+        // --- 2. SEND EMAIL ---
+        const mailOptions = {
+            from: process.env.EMAIL_SERVICE_USER || 'noreply@app.com',
+            to: email,
+            subject: 'Your Trading App Verification Code',
+            html: `
+                <p>Welcome to the Trading Platform!</p>
+                <p>Your verification code is: <strong>${verificationCode}</strong></p>
+                <p>This code is valid for 10 minutes. Do not share it with anyone.</p>
+            `,
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                console.error('Email send error:', error);
+                // Log the error but continue to verification step
+            }
+        });
+
+        // --- 3. RESPOND ---
+        res.json({ 
+            success: true, 
+            message: 'User created. Verification code sent to your email.', 
+            userId: newUser._id
+        });
 
     } catch (error) {
         if (error.code === 11000) {
             if (error.keyPattern.username) {
-                return res.status(409).json({ message: "Username already exists." });
+                return res.status(409).json({ success: false, message: "Username already exists." });
             }
             if (error.keyPattern.email) {
-                return res.status(409).json({ message: "Email is already registered." });
+                return res.status(409).json({ success: false, message: "Email is already registered." });
             }
         }
-        console.error("Registration Error:", error);  
-        res.status(500).json({ message: "Server error during registration." });
+        console.error('Signup error:', error);
+        res.status(500).json({ success: false, message: 'Server error during signup.' });
     }
 });
 
-// --- LOGIN A USER ---
-router.post('/login', async (req, res) => {
+// [POST] /api/auth/verify - NEW ENDPOINT TO VERIFY CODE
+router.post('/verify', async (req, res) => {
+    const { userId, code } = req.body;
+
     try {
-        const { username, password } = req.body;
-        if (!username || !password) {
-            return res.status(400).json({ message: "Username and password are required." });
+        if (!Types.ObjectId.isValid(userId)) {
+             return res.status(400).json({ success: false, message: 'Invalid user ID.' });
+        }
+        
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        
+        if (user.isVerified) {
+            const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' });
+            return res.json({ success: true, message: 'Account already verified. Logging in.', token });
         }
 
-        const user = await User.findOne({ username });  
-        if (!user || !(await user.comparePassword(password))) {  
-            return res.status(401).json({ message: "Invalid credentials." });  
-        }  
+        // Check code and expiry
+        if (user.verificationCode !== code || user.verificationCodeExpires < new Date()) {
+            return res.status(400).json({ success: false, message: 'Invalid or expired verification code.' });
+        }
 
-        const payload = { 
-            id: user._id,
-            username: user.username 
-        };
+        // Verification successful
+        user.isVerified = true;
+        user.verificationCode = undefined;
+        user.verificationCodeExpires = undefined;
+        await user.save();
 
-        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '24h' });
+        const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
+        res.json({ success: true, message: 'Account successfully verified and logged in.', token });
+
+    } catch (error) {
+        console.error('Verification error:', error);
+        res.status(500).json({ success: false, message: 'Server error during verification.' });
+    }
+});
+
+// [POST] /api/auth/login - MODIFIED TO CHECK VERIFICATION STATUS
+router.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    try {
+        const user = await User.findOne({ username });
+        if (!user || !(await user.comparePassword(password))) {
+            return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+        }
+
+        // --- CRITICAL VERIFICATION CHECK ---
+        if (!user.isVerified) {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Account not verified. Please check your email for the verification code.', 
+                requiresVerification: true,
+                userId: user._id // Return ID to prompt for code re-entry
+            });
+        }
+        // --- END CHECK ---
+
+        const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ 
-            message: "Logged in successfully.", 
+            success: true, 
             token,
             user: {
                 id: user._id,
@@ -91,8 +200,7 @@ router.post('/login', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Login Error:", error);
-        res.status(500).json({ message: "Server error during login." });
+        res.status(500).json({ success: false, message: 'Server error during login.' });
     }
 });
 
