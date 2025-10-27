@@ -1,5 +1,4 @@
-// index.js
-// ------------------ DEPENDENCIES ------------------
+// index.js - COMPLETE FIXED VERSION
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
@@ -8,83 +7,35 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
 const Binance = require("node-binance-api");
-const jwt = require('jsonwebtoken'); 
-// >>> START KYC ADDITIONS <<<
-const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
-// >>> END KYC ADDITIONS <<<
+const jwt = require('jsonwebtoken');
 
-// ------------------ CONFIG & CONSTANTS ------------------
+// Import models and routes
+const User = require("./models/User");
+const Trade = require("./models/Trade");
+const Candle = require("./models/candles");
+const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/user");
+const depositRoutes = require("./routes/deposit");
+const withdrawRoutes = require("./routes/withdraw");
+
+// Config
 const TRADE_PAIRS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
   'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
-module.exports.TRADE_PAIRS = TRADE_PAIRS;
 
-// admin override flags (kept in main server since candle generator uses them)
-const candleOverride = {};
-TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
-module.exports.candleOverride = candleOverride;
-
-// >>> START AZURE CONFIGURATION <<<
-const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
-const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
-const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
-
-let blobServiceClient = null;
-let azureEnabled = false;
-
-if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
-    try {
-        const sharedKeyCredential = new StorageSharedKeyCredential(
-            STORAGE_ACCOUNT_NAME,
-            STORAGE_ACCOUNT_KEY
-        );
-        blobServiceClient = new BlobServiceClient(
-            `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net`,
-            sharedKeyCredential
-        );
-        azureEnabled = true;
-        console.log("✅ Azure Blob Storage Client Initialized.");
-        
-        // Test the connection
-        const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-        await containerClient.createIfNotExists({ access: 'blob' });
-        console.log("✅ Azure Container verified/created successfully.");
-    } catch (azureError) {
-        console.error("❌ Azure Storage initialization failed:", azureError.message);
-        azureEnabled = false;
-    }
-} else {
-    console.warn("⚠️ WARNING: Azure Storage credentials not found. KYC upload will be disabled.");
-    azureEnabled = false;
-}
-// >>> END AZURE CONFIGURATION <<<
-
-// ------------------ MODELS & ROUTES ------------------
-const User = require("./models/User");
-const Trade = require("./models/Trade");
-const Candle = require("./models/candles");
-
-const authRoutes = require("./routes/auth");
-const userRoutes = require("./routes/user");
-const depositRoutes = require("./routes/deposit");
-const adminRoutes = require("./routes/admin");
-const withdrawRoutes = require("./routes/withdraw");
-// >>> START KYC ADDITION <<<
-const kycRoutes = require("./routes/kyc");
-// >>> END KYC ADDITION <<<
-
-// ------------------ APP + SERVER + IO ------------------
 const app = express();
 const server = http.createServer(app);
+
 const io = socketIo(server, {
-  cors: {
-    origin: process.env.CLIENT_URL || "*",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
+    cors: {
+        origin: process.env.CLIENT_URL || "*",
+        methods: ["GET", "POST"],
+        credentials: true
+    }
 });
 
+// Market Data Storage - 100 candles for good history
 const marketData = {};
 TRADE_PAIRS.forEach(pair => {
   marketData[pair] = { 
@@ -95,16 +46,13 @@ TRADE_PAIRS.forEach(pair => {
     lastPriceEmitTime: 0
   };
 });
-module.exports.marketData = marketData;
-app.set('marketData', marketData);
 
-// ------------------ BINANCE CLIENT ------------------
-const binance = new Binance().options({
-  APIKEY: process.env.BINANCE_API_KEY,
-  APISECRET: process.env.BINANCE_API_SECRET
-});
+// Market control override - IMPORTANT FOR ADMIN PANEL
+const candleOverride = {};
 
-// ------------------ MIDDLEWARE ------------------
+const binance = new Binance().options({});
+
+// Middleware
 app.use(cors({
     origin: process.env.CLIENT_URL || "*",
     credentials: true
@@ -113,32 +61,198 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// ------------------ ROUTES ------------------
+// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 
-// >>> START KYC ROUTE REGISTRATION <<<
-// KYC Routes for user profile functionality
-app.use("/api/kyc", kycRoutes({ 
-    blobServiceClient, 
-    KYC_CONTAINER_NAME, 
-    azureEnabled: azureEnabled
-}));
-// >>> END KYC ROUTE REGISTRATION <<<
+// Admin routes with proper configuration
+try {
+    let adminRoutes;
+    const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
+    
+    if (hasAzureConfig) {
+        const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
+        
+        const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+        const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+        const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+        const blobServiceClient = new BlobServiceClient(
+            `https://${accountName}.blob.core.windows.net`,
+            sharedKeyCredential
+        );
+        
+        adminRoutes = require("./routes/admin")({
+            blobServiceClient,
+            KYC_CONTAINER_NAME: process.env.KYC_CONTAINER_NAME || 'id-document-uploads',
+            STORAGE_ACCOUNT_NAME: accountName,
+            STORAGE_ACCOUNT_KEY: accountKey,
+            azureEnabled: true,
+            candleOverride: candleOverride
+        });
+        console.log('Admin routes loaded with Azure Storage');
+    } else {
+        console.log('Admin routes loaded without Azure Storage');
+        adminRoutes = require("./routes/admin")({
+            azureEnabled: false,
+            candleOverride: candleOverride
+        });
+    }
+    
+    app.use("/api/admin", adminRoutes);
+    console.log('Admin routes mounted');
+} catch (error) {
+    console.error('Admin routes failed to load:', error.message);
+    const basicAdminRouter = require('express').Router();
+    
+    basicAdminRouter.get('/data', (req, res) => {
+        res.status(200).json({ 
+            success: true, 
+            users: [], 
+            tradeVolume: [], 
+            marketStatus: {}, 
+            tradePairs: TRADE_PAIRS,
+            message: "Admin service in fallback mode" 
+        });
+    });
+    
+    basicAdminRouter.get('/kyc/pending-users', (req, res) => {
+        res.json({ 
+            success: true, 
+            users: [],
+            message: "KYC service temporarily unavailable" 
+        });
+    });
+    
+    basicAdminRouter.get('/market-control/status', (req, res) => {
+        const status = {};
+        TRADE_PAIRS.forEach(pair => {
+            status[pair] = 'auto';
+        });
+        res.json({ success: true, marketStatus: status });
+    });
+    
+    app.use("/api/admin", basicAdminRouter);
+    console.log('Admin fallback routes loaded');
+}
 
-// Admin routes
-app.use("/api/admin", adminRoutes({ 
-    blobServiceClient, 
-    KYC_CONTAINER_NAME, 
-    STORAGE_ACCOUNT_NAME, 
-    STORAGE_ACCOUNT_KEY,
-    azureEnabled: azureEnabled,
-    candleOverride: candleOverride 
-}));
+// KYC routes - FIXED VERSION
+async function initializeKYCRoutes() {
+    try {
+        let kycRoutes;
+        const hasAzureConfig = process.env.AZURE_STORAGE_ACCOUNT_NAME && process.env.AZURE_STORAGE_ACCOUNT_KEY;
+        
+        if (hasAzureConfig) {
+            const { BlobServiceClient, StorageSharedKeyCredential } = require('@azure/storage-blob');
+            
+            const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+            const accountKey = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+            const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
+            
+            const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+            const blobServiceClient = new BlobServiceClient(
+                `https://${accountName}.blob.core.windows.net`,
+                sharedKeyCredential
+            );
+            
+            const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
+            await containerClient.getProperties();
+            
+            kycRoutes = require("./routes/kyc")({
+                blobServiceClient,
+                KYC_CONTAINER_NAME: KYC_CONTAINER_NAME,
+                azureEnabled: true
+            });
+            console.log('KYC routes loaded with Azure Storage');
+        } else {
+            console.log('KYC routes loaded without Azure Storage');
+            kycRoutes = require("./routes/kyc")({
+                azureEnabled: false
+            });
+        }
+        
+        app.use("/api/kyc", kycRoutes);
+        console.log('KYC routes mounted');
+    } catch (error) {
+        console.error('KYC routes failed to load:', error.message);
+        const basicKycRouter = require('express').Router();
+        
+        const userAuth = async (req, res, next) => {
+            try {
+                const authHeader = req.headers.authorization;
+                if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                    return res.status(401).json({ success: false, message: 'Authentication required' });
+                }
+                
+                const token = authHeader.split(' ')[1];
+                const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                req.userId = decoded.id; 
+                next();
+            } catch (error) {
+                return res.status(401).json({ success: false, message: 'Authentication failed' });
+            }
+        };
+        
+        basicKycRouter.get('/status', userAuth, async (req, res) => {
+            try {
+                const user = await User.findById(req.userId).select('kycStatus kycRejectionReason');
+                res.json({ 
+                    success: true, 
+                    kycStatus: user?.kycStatus || 'pending',
+                    rejectionReason: user?.kycRejectionReason,
+                    serviceStatus: 'disabled',
+                    message: 'KYC service temporarily unavailable'
+                });
+            } catch (error) {
+                res.json({ 
+                    success: true, 
+                    kycStatus: 'pending',
+                    serviceStatus: 'disabled',
+                    message: 'KYC service temporarily unavailable'
+                });
+            }
+        });
+        
+        basicKycRouter.post('/upload', userAuth, (req, res) => {
+            res.status(503).json({ 
+                success: false, 
+                message: 'KYC upload service temporarily unavailable. Please try again later.',
+                serviceStatus: 'disabled'
+            });
+        });
+        
+        basicKycRouter.get('/service-status', userAuth, (req, res) => {
+            res.json({
+                success: true,
+                serviceAvailable: false,
+                status: 'KYC service connection failed',
+                currentStatus: 'Service connection failed'
+            });
+        });
+        
+        app.use("/api/kyc", basicKycRouter);
+        console.log('KYC fallback routes loaded');
+    }
+}
 
-// ------------------ DASHBOARD DATA FUNCTIONS ------------------
+// Utility Functions
+function getCurrentMinuteStart() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 
+                   now.getHours(), now.getMinutes(), 0, 0);
+}
+
+function isValidPrice(newPrice, previousPrice = 0) {
+    if (!newPrice || newPrice <= 0 || !isFinite(newPrice)) return false;
+    if (previousPrice > 0) {
+        const changePercent = Math.abs((newPrice - previousPrice) / previousPrice) * 100;
+        if (changePercent > 20) return false;
+    }
+    return true;
+}
+
+// Dashboard Data
 async function getDashboardData(userId) {
     try {
         const user = await User.findById(userId).select('username balance email');
@@ -216,7 +330,6 @@ io.on('connection', (socket) => {
 
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
-        console.log(`User ${socket.decoded.id} joined their room`);
     }
 
     socket.on('request_dashboard_data', async () => {
@@ -244,33 +357,16 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', (reason) => {
-        console.log(`User disconnected: ${socket.id} - Reason: ${reason}`);
+        console.log(`User disconnected: ${socket.id}`);
     });
 });
 
-// ------------------ MARKET DATA FUNCTIONS ------------------
-function getCurrentMinuteStart() {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 
-                   now.getHours(), now.getMinutes(), 0, 0);
-}
-
-function isValidPrice(newPrice, previousPrice = 0) {
-    if (!newPrice || newPrice <= 0 || !isFinite(newPrice)) return false;
-    if (previousPrice > 0) {
-        const changePercent = Math.abs((newPrice - previousPrice) / previousPrice) * 100;
-        if (changePercent > 20) return false;
-    }
-    return true;
-}
-
 // Initialize Market Data
 async function initializeMarketData() {
-    console.log("📈 Initializing market data with 100 candles...");
+    console.log("Initializing market data...");
     
     for (const pair of TRADE_PAIRS) {
         try {
-            // Load 100 candles for good history
             const klines = await binance.futuresCandles(pair, '1m', { limit: 100 });
             
             if (Array.isArray(klines) && klines.length > 0) {
@@ -286,7 +382,6 @@ async function initializeMarketData() {
                 const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
                 marketData[pair].currentPrice = lastCandle.close;
                 
-                // Start current candle
                 marketData[pair].currentCandle = {
                     asset: pair,
                     timestamp: getCurrentMinuteStart(),
@@ -296,11 +391,10 @@ async function initializeMarketData() {
                     close: lastCandle.close
                 };
                 
-                console.log(`✅ Loaded ${marketData[pair].candles.length} candles for ${pair}`);
+                console.log(`Loaded ${marketData[pair].candles.length} candles for ${pair}`);
             }
         } catch (err) {
-            console.error(`❌ Error loading ${pair}:`, err.message);
-            // Set default values if loading fails
+            console.error(`Error loading ${pair}:`, err.message);
             marketData[pair].currentPrice = 100;
             marketData[pair].currentCandle = {
                 asset: pair,
@@ -319,11 +413,10 @@ let isStreaming = false;
 
 function startMarketDataStream() {
     if (isStreaming) {
-        console.log('⚠️ Market data stream already running');
         return;
     }
     
-    console.log("⚡ Starting real-time market data stream...");
+    console.log("Starting real-time market data stream...");
     
     const streams = TRADE_PAIRS.map(pair => `${pair.toLowerCase()}@trade`);
     
@@ -336,15 +429,12 @@ function startMarketDataStream() {
                 
                 if (!md) return;
                 
-                // Validate price
                 if (!isValidPrice(price, md.currentPrice)) return;
                 
-                // Update current price
                 md.currentPrice = price;
                 
                 const currentMinuteStart = getCurrentMinuteStart();
                 
-                // Initialize current candle if needed
                 if (!md.currentCandle) {
                     md.currentCandle = {
                         asset: pair,
@@ -359,16 +449,13 @@ function startMarketDataStream() {
                 const isNewMinute = md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
                 if (isNewMinute) {
-                    // Complete previous candle
                     const completedCandle = { ...md.currentCandle };
                     completedCandle.close = price;
                     
-                    // Add to history (keep last 100 candles)
                     if (completedCandle.open > 0) {
                         md.candles.push(completedCandle);
                         if (md.candles.length > 100) md.candles.shift();
                         
-                        // Save to database async
                         Candle.updateOne(
                             { asset: pair, timestamp: completedCandle.timestamp }, 
                             { $set: completedCandle }, 
@@ -376,7 +463,6 @@ function startMarketDataStream() {
                         ).catch(err => console.error(`DB save error for ${pair}:`, err.message));
                     }
                     
-                    // Start new candle
                     md.currentCandle = {
                         asset: pair,
                         timestamp: currentMinuteStart,
@@ -386,13 +472,11 @@ function startMarketDataStream() {
                         close: price
                     };
                 } else {
-                    // Update current candle
                     if (price > md.currentCandle.high) md.currentCandle.high = price;
                     if (price < md.currentCandle.low) md.currentCandle.low = price;
                     md.currentCandle.close = price;
                 }
 
-                // Emit chart data (optimized - not every price change)
                 const now = Date.now();
                 if (now - md.lastEmitTime > 1000) {
                     md.lastEmitTime = now;
@@ -415,10 +499,10 @@ function startMarketDataStream() {
         });
 
         isStreaming = true;
-        console.log('✅ WebSocket connected - Real-time data active');
+        console.log('WebSocket connected - Real-time data active');
         
     } catch (err) {
-        console.error('❌ WebSocket failed:', err.message);
+        console.error('WebSocket failed:', err.message);
         setTimeout(startMarketDataStream, 10000);
     }
 }
@@ -449,7 +533,7 @@ setInterval(() => {
     }
 }, 100);
 
-// ------------------ DATABASE CONNECTION ------------------
+// Database connection with retry logic
 const connectWithRetry = () => {
     mongoose.connect(process.env.MONGO_URI, { 
         useNewUrlParser: true, 
@@ -457,10 +541,9 @@ const connectWithRetry = () => {
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
     }).then(() => {
-        console.log('✅ MongoDB connected successfully');
+        console.log('MongoDB connected successfully');
     }).catch(err => {
-        console.error('❌ MongoDB connection failed:', err.message);
-        console.log('🔄 Retrying connection in 5 seconds...');
+        console.error('MongoDB connection failed:', err.message);
         setTimeout(connectWithRetry, 5000);
     });
 };
@@ -469,9 +552,8 @@ connectWithRetry();
 
 // Initialize everything when database is ready
 mongoose.connection.once("open", async () => {
-    console.log("✅ Database ready - Initializing application...");
+    console.log("Database ready - Initializing application...");
 
-    // Clean up corrupted trades
     try {
         const tradeUpdateResult = await Trade.updateMany(
             { 
@@ -490,82 +572,39 @@ mongoose.connection.once("open", async () => {
                 } 
             }
         );
-        console.log(`🧹 Cleaned ${tradeUpdateResult.modifiedCount} corrupted trades`);
+        console.log(`Cleaned ${tradeUpdateResult.modifiedCount} corrupted trades`);
     } catch (error) {
         console.error("Cleanup warning:", error.message);
     }
 
-    // Initialize market data and trading
+    await initializeKYCRoutes();
     await initializeMarketData();
     startMarketDataStream();
 
-    // Initialize trade module
     try {
         const tradeModule = require("./trade");
         if (typeof tradeModule.initialize === "function") {
             tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
-            console.log("✅ Trade module initialized with all features");
+            console.log("Trade module initialized");
         }
     } catch (error) {
-        console.error("❌ Trade module error:", error.message);
+        console.error("Trade module error:", error.message);
     }
 
-    console.log("🚀 Application fully initialized and ready");
+    console.log("Application fully initialized and ready");
 });
 
-// ------------------ ADDITIONAL ENDPOINTS ------------------
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'OK', 
         timestamp: new Date().toISOString(),
         mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-        marketData: Object.keys(marketData).length > 0 ? 'active' : 'inactive',
-        azureEnabled: azureEnabled
+        marketData: Object.keys(marketData).length > 0 ? 'active' : 'inactive'
     });
 });
 
-// KYC Test endpoint
-app.get('/api/kyc/test', async (req, res) => {
-    try {
-        if (!azureEnabled) {
-            throw new Error('Azure Storage configuration missing');
-        }
-
-        const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-        await containerClient.getProperties();
-        
-        res.json({ 
-            success: true, 
-            message: 'KYC Azure Storage is working properly',
-            azureStatus: 'connected',
-            storage: 'azure'
-        });
-        
-    } catch (error) {
-        res.json({ 
-            success: false, 
-            message: 'KYC Azure Storage error: ' + error.message,
-            azureStatus: 'error',
-            storage: 'azure'
-        });
-    }
-});
-
-// Debug endpoint for Azure status
-app.get('/api/debug/azure-status', (req, res) => {
-    res.json({
-        hasAzureConfig: !!STORAGE_ACCOUNT_NAME && !!STORAGE_ACCOUNT_KEY,
-        azureEnabled: azureEnabled,
-        hasKycContainer: !!KYC_CONTAINER_NAME,
-        accountName: STORAGE_ACCOUNT_NAME ? 'set' : 'not set',
-        accountKey: STORAGE_ACCOUNT_KEY ? 'set' : 'not set',
-        kycContainer: KYC_CONTAINER_NAME,
-        environment: process.env.NODE_ENV || 'development'
-    });
-});
-
-// ------------------ STATIC FILE SERVING ------------------
+// Static file serving
 app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) {
         return res.status(404).json({ 
@@ -582,7 +621,7 @@ app.get('*', (req, res) => {
     });
 });
 
-// ------------------ ERROR HANDLING ------------------
+// Global error handling
 app.use((error, req, res, next) => {
     console.error('Unhandled error:', error);
     res.status(500).json({ 
@@ -592,16 +631,14 @@ app.use((error, req, res, next) => {
     });
 });
 
-// ------------------ START SERVER ------------------
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-    console.log(`✅ Server running on port ${PORT}`);
-    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔐 Admin key required: ${!!process.env.ADMIN_KEY}`);
-    console.log(`📁 Azure Storage: ${azureEnabled ? '✅ Enabled' : '❌ Disabled'}`);
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// ------------------ GRACEFUL SHUTDOWN ------------------
+// Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('SIGTERM received, shutting down gracefully');
     server.close(() => {
@@ -614,10 +651,10 @@ process.on('SIGTERM', () => {
 });
 
 process.on('unhandledRejection', (err) => {
-    console.error('❌ Unhandled Promise Rejection:', err);
+    console.error('Unhandled Promise Rejection:', err);
 });
 
 process.on('uncaughtException', (err) => {
-    console.error('❌ Uncaught Exception:', err);
+    console.error('Uncaught Exception:', err);
     process.exit(1);
 });
