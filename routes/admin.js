@@ -1,11 +1,14 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const { 
-    generateBlobSas, 
+    // KEEP THESE TOP-LEVEL IMPORTS
     BlobSASPermissions,
     StorageSharedKeyCredential, 
     ContainerClient
 } = require('@azure/storage-blob');
+// FIX: Import the utility function separately for stability across Node environments
+const { generateBlobSas } = require('@azure/storage-blob'); 
+
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
@@ -99,7 +102,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
 
         try {
-            // FIX: Ensure the query includes both 'review' (set by kyc.js) and 'under_review'
             const usersToReview = await User.find({ 
                 $or: [
                     { kycStatus: 'review' },
@@ -164,7 +166,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 };
             }));
 
-            // Filter out users who somehow lost their documents during processing, only show those with at least one URL
             res.json({ success: true, users: usersWithUrls.filter(u => u.documents.front || u.documents.back) });
 
         } catch (error) {
