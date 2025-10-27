@@ -498,36 +498,36 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
 async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
     // lastCompletedCandle is the final candle object from marketData.md.candles
     const exitPrice = lastCompletedCandle.close;
-    const exitTime = new Date(lastCompletedCandle.timestamp); // This is the START of the candle
-
-    // Add 60 seconds (1 minute) to get the time when the trade should be settled against this candle
-    const settlementTime = exitTime.getTime() + (60 * 1000); 
+    // The timestamp of the candle that just closed (e.g., if current time is 10:01:30, this is 10:00:00)
+    const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime(); 
+    
+    // The moment the trade should be eligible for settlement is after the candle closes.
+    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000); // 1 minute after the candle started
 
     try {
         const actives = await Trade.find({ status: "active", asset: pair });
         for (const t of actives) {
-            // CRITICAL FIX: Check if the trade's activation minute has passed
-            // A 1-minute trade activated at time T should be settled by the close of the candle starting at T.
-            // We use the lastCompletedCandle's timestamp (which is the start of the completed candle's minute).
+            // CRITICAL FIX: Check if the trade's activation time is less than the settlement eligibility time.
+            // This ensures we only settle trades that were opened BEFORE this candle closed.
+            // For a 1-minute trade opened at T=10:00:00, we settle when the candle for 10:00:00 closes (at 10:01:00).
+            // We use the candle's start time (lastCompletedCandle.timestamp) to define the settlement boundary.
             
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
-            const candleSettlementTime = tradeActivationTime + (60 * 1000); // 1 minute duration
 
-            // We settle if the trade was activated at the start of the candle being processed (lastCompletedCandle)
-            // or any candle before it.
-            if (tradeActivationTime >= exitTime.getTime() || tradeActivationTime < exitTime.getTime()) {
-                // If the trade was activated at the start of the completed candle's minute:
-                // Example: Trade activated at 10:00:00. lastCompletedCandle is 10:00:00. This trade is settled.
-                
-                // For simplicity and 1-minute binary options:
-                // We check if the trade's activation time matches the start time of the candle being settled.
-                
-                // We assume a trade activated in minute N must be settled against the candle for minute N.
-                // Since the lastCompletedCandle is the candle that just closed (i.e., minute N),
-                // we settle all currently active trades, as they all activated in the previous minute N-1.
+            // Settle the trade only if the trade was activated at the start of the completed candle's minute
+            // OR any time before it (which accounts for the trade being opened on the previous candle).
+            // We ensure the trade has spent at least one full candle cycle (1 minute).
+            
+            // To settle the trade on the *next* candle (the one that just finished closing), we simply check:
+            // Is the trade's activation minute equal to the previous completed candle's minute?
+            // Since the system pushes completed candles every minute, all active trades should be settled on the NEXT complete candle.
+            
+            // We rely on the fact that an active trade was opened in the minute *prior* to the minute of this completed candle.
+            
+            // Check if the trade's activation time (plus one minute) is less than or equal to the time this candle closes.
+            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
 
-                // Because you only want the trade to be settled against the *next* candle,
-                // we assume all active trades were opened in the minute *before* the completed candle.
+            if (tradeShouldCloseBy <= settlementEligibilityTime) { // This condition should always be true for 1-minute trades
                 
                 const win = (t.direction === "UP" && exitPrice > t.entryPrice) || (t.direction === "DOWN" && exitPrice < t.entryPrice);
                 const tie = exitPrice === t.entryPrice;
