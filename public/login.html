@@ -60,15 +60,6 @@
             const loginForm = document.getElementById('login-form');
             const messageDiv = document.getElementById('message');
 
-            // Function to retrieve user data (including email) for verification redirect
-            // NOTE: This relies on the server returning the email upon failed verification login
-            async function getUnverifiedUser(username) {
-                // A quick way to find the user ID/Email for the verification redirect, 
-                // but for simplicity here, we rely on the error response.
-                // Since the login endpoint already returns userId, we can fetch email if needed.
-                return null;
-            }
-
             loginForm.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 messageDiv.textContent = '';
@@ -91,23 +82,14 @@
                         localStorage.setItem('authToken', data.token);
                         window.location.href = '/dashboard.html';
 
-                    } else if (data.requiresVerification && data.userId) {
-                        // CRITICAL FIX: Account unverified. Fetch email to pass to signup page.
+                    } else if (data.requiresVerification && data.userId && data.email) {
+                        // CRITICAL FIX: Account unverified. Redirect with UserId and Email.
                         
-                        // To get the email, we'd need another endpoint, but for a fast fix, 
-                        // we can try fetching the user info, or redirect with a message.
-                        
-                        // For simplicity, we redirect and let the signup page handle the next steps.
-                        
-                        // Temporarily store username for verification step to fetch email
-                        localStorage.setItem('unverifiedUsername', username);
-                        
-                        alert(data.message || 'Account not verified. Redirecting for verification.');
+                        alert(`Account requires verification. Check ${data.email}. Redirecting...`);
 
-                        // Simple redirect. The signup page will not auto-fill email, 
-                        // but the user knows they need to check their email.
-                        window.location.href = VERIFICATION_PAGE_URL; 
-
+                        // Redirect to signup.html, passing required data in URL parameters
+                        window.location.href = `${VERIFICATION_PAGE_URL}?userId=${data.userId}&email=${encodeURIComponent(data.email)}`;
+                        
                     } else if (!response.ok) {
                         // Generic error (Invalid password, etc.)
                         throw new Error(data.message || 'Login failed');
@@ -115,7 +97,6 @@
                         messageDiv.textContent = data.message || 'Login failed.';
                         messageDiv.classList.add('text-red-400');
                     }
-
                 } catch (error) {
                     messageDiv.textContent = `Error: ${error.message}`;
                     messageDiv.classList.add('text-red-400');
