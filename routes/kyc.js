@@ -178,7 +178,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
 
-            user.kycStatus = 'under_review';
+            // ✅ FIXED: Use 'review' instead of 'under_review' to match User model enum
+            user.kycStatus = 'review';
             user.kycDocuments = {
                 front: frontBlobPath,
                 back: backBlobPath,
@@ -195,7 +196,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
-                kycStatus: 'under_review',
+                kycStatus: 'review', // ✅ FIXED: Use 'review' instead of 'under_review'
                 serviceStatus: 'active'
             });
 
@@ -230,6 +231,16 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                     success: false, 
                     message: 'Storage container not available. Please contact support.',
                     serviceStatus: 'error'
+                });
+            }
+            
+            if (error.message.includes('Public access is not permitted')) {
+                console.error('🔐 Azure public access disabled');
+                return res.status(503).json({ 
+                    success: false, 
+                    message: 'Storage configuration issue. Please enable "Allow blob public access" in Azure Portal or contact support.',
+                    serviceStatus: 'error',
+                    solution: 'Go to Azure Portal → Storage Account → Configuration → Set "Allow blob public access" to Enabled'
                 });
             }
             
