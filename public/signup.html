@@ -105,7 +105,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             const SIGNUP_API_URL = '/api/auth/signup';
             const VERIFY_API_URL = '/api/auth/verify';
-            const LOGIN_API_URL = '/api/auth/login'; // Needed if redirected from login
+            const LOGIN_API_URL = '/api/auth/login'; 
 
             const signupForm = document.getElementById('signup-form');
             const verificationStep = document.getElementById('verification-step');
@@ -131,7 +131,7 @@
             
             if (redirectUserId && redirectEmail) {
                 // If redirected from login, go straight to verification step
-                showVerificationStep(redirectUserId, redirectEmail);
+                showVerificationStep(redirectUserId, decodeURIComponent(redirectEmail));
                 history.replaceState(null, null, 'signup.html'); // Clean URL after loading
             }
             // --- END URL CHECK ---
@@ -141,6 +141,7 @@
             signupForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 messageDiv.textContent = '';
+                messageDiv.className = 'text-center text-sm min-h-[20px]';
                 
                 const formData = {
                     username: document.getElementById('username').value,
