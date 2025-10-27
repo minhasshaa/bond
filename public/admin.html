@@ -1,674 +1,888 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const { 
-    // FIX: Keep these necessary imports for objects and clients
-    BlobSASPermissions,
-    StorageSharedKeyCredential, 
-    ContainerClient,
-    BlobClient // Import BlobClient for the stable generateSasUrl method
-} = require('@azure/storage-blob');
-// Removed: const { generateBlobSas } = require('@azure/storage-blob'); to avoid TypeError
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .tab-button.active { background-color: #4A5568; color: #E2E8F0; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .time-scroller-container { overflow-x: auto; white-space: nowrap; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937; }
+        .time-scroller-container::-webkit-scrollbar { height: 6px; }
+        .time-scroller-container::-webkit-scrollbar-track { background: #1f2937; }
+        .time-scroller-container::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 3px; }
+        .time-scroller { display: inline-flex; gap: 10px; }
+        .time-option { padding: 8px 16px; background-color: #374151; color: #d1d5db; border: 1px solid transparent; border-radius: 9999px; cursor: pointer; font-weight: 500; transition: all 0.2s ease-in-out; }
+        .time-option:hover { background-color: #4b5563; }
+        .time-option.active { background-color: #3b82f6; color: white; font-weight: 700; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+        .disabled-link { pointer-events: none; opacity: 0.5; text-decoration: none; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
 
-const User = require('../models/User');
-const Trade = require('../models/Trade');
-const AdminCopyTrade = require('../models/AdminCopyTrade');
-// Rely on index.js to provide these global constants
-const { candleOverride, TRADE_PAIRS } = require('../index'); 
+    <div id="login-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-sm">
+            <h2 class="text-xl font-bold mb-4">Admin Access</h2>
+            <input type="password" id="admin-key-input" class="w-full bg-gray-700 text-white p-2 rounded" placeholder="Enter Admin Key">
+            <button id="login-button" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Login</button>
+        </div>
+    </div>
 
-// The entire module is now a function that accepts Azure dependencies
-module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }) {
-    const router = express.Router();
+    <div id="dashboard-content" class="container mx-auto p-4 hidden">
+        <header class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold">Admin Panel</h1>
+            <button id="refresh-button" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Refresh Data</button>
+        </header>
 
-    // Admin security middleware (remains the same)
-    const adminAuth = (req, res, next) => {
-        const adminKey = req.headers['x-admin-key'];
-        if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
-            return res.status(403).json({ success: false, message: "Forbidden: Invalid Admin Key" });
-        }
-        next();
-    };
+        <div class="mb-4 border-b border-gray-700">
+            <nav class="flex flex-wrap space-x-4" aria-label="Tabs">
+                <button class="tab-button active font-medium px-3 py-2 rounded-t-lg" data-tab="transactions">Transactions</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="kyc-review">KYC Review</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="copy-trade">Copy Trading</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="volume">Live Volume</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="credit">Manual Credit</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="commission">Commission</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="market">Market Control</button>
+            </nav>
+        </div>
 
-    router.use(adminAuth);
+        <div>
+            <div id="transactions-tab" class="tab-content active">
+                <div class="mb-4">
+                    <input type="text" id="search-input" class="w-full max-w-md bg-gray-700 p-2 rounded" placeholder="Search by username...">
+                </div>
+                <div class="overflow-x-auto bg-gray-800 rounded-lg p-4">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-700">
+                            <tr>
+                                <th class="p-3 text-left text-sm font-semibold">User Info</th>
+                                <th class="p-3 text-left text-sm font-semibold">Balance</th>
+                                <th class="p-3 text-left text-sm font-semibold">Total Deposits</th>
+                                <th class="p-3 text-left text-sm font-semibold">Trade Volume</th>
+                                <th class="p-3 text-left text-sm font-semibold">Referred By</th>
+                                <th class="p-3 text-left text-sm font-semibold">Pending Deposits</th>
+                                <th class="p-3 text-left text-sm font-semibold">Pending Withdrawals</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
 
-    // ----------------------------------------------------------------------
-    // [GET] /api/admin/data - General Admin Dashboard Data
-    // ----------------------------------------------------------------------
-    router.get('/data', async (req, res) => {
-        const { search } = req.query;
-        try {
-            let userQuery = {};
-            if (search) {
-                userQuery = { username: { $regex: search, $options: 'i' } };
+            <div id="kyc-review-tab" class="tab-content">
+                <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+                    <h2 class="text-xl font-semibold mb-4 text-white">Pending KYC Documents</h2>
+                    <div id="kyc-review-list" class="space-y-4">
+                        <p class="text-gray-400">Click the KYC Review tab to load pending users...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="copy-trade-tab" class="tab-content">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <h2 class="text-xl font-bold mb-4 text-white">Create Copy Trade</h2>
+                        <form id="copy-trade-form" class="space-y-4">
+                            <div>
+                                <label for="copy-trade-pair" class="block mb-2 text-sm font-medium">Trading Pair</label>
+                                <select id="copy-trade-pair" class="w-full bg-gray-700 p-2 rounded" required>
+                                    <option value="">Select Pair</option>
+                                    <option value="BTCUSDT">BTC/USDT</option>
+                                    <option value="ETHUSDT">ETH/USDT</option>
+                                    <option value="BNBUSDT">BNB/USDT</option>
+                                    <option value="SOLUSDT">SOL/USDT</option>
+                                    <option value="XRPUSDT">XRP/USDT</option>
+                                    <option value="ADAUSDT">ADA/USDT</option>
+                                    <option value="DOGEUSDT">DOGE/USDT</option>
+                                    <option value="AVAXUSDT">AVAX/USDT</option>
+                                    <option value="LINKUSDT">LINK/USDT</option>
+                                    <option value="MATICUSDT">MATIC/USDT</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for="copy-trade-direction" class="block mb-2 text-sm font-medium">Direction</label>
+                                <select id="copy-trade-direction" class="w-full bg-gray-700 p-2 rounded" required>
+                                    <option value="">Select Direction</option>
+                                    <option value="CALL">CALL (UP)</option>
+                                    <option value="PUT">PUT (DOWN)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for="copy-trade-percentage" class="block mb-2 text-sm font-medium">Percentage (%)</label>
+                                <input type="number" id="copy-trade-percentage" min="1" max="100" step="1" 
+                                       class="w-full bg-gray-700 p-2 rounded" placeholder="e.g., 10" required>
+                                <p class="text-xs text-gray-400 mt-1">Percentage of user's balance to invest (1-100%)</p>
+                            </div>
+
+                            <div>
+                                <label class="block mb-2 text-sm font-medium">Execution Time</label>
+                                <div class="time-scroller-container">
+                                    <div id="copy-trade-time-scroller" class="time-scroller"></div>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-1">Select execution time (next 15 minutes)</p>
+                            </div>
+
+                            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-all">
+                                Create Copy Trade
+                            </button>
+                        </form>
+
+                        <div id="copy-trade-status" class="mt-4 text-center min-h-[24px]"></div>
+                    </div>
+
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-bold text-white">Active Copy Trades</h2>
+                            <button id="refresh-copy-trades" class="bg-gray-700 hover:bg-gray-600 text-white text-sm py-1 px-3 rounded">
+                                Refresh
+                            </button>
+                        </div>
+
+                        <div id="active-copy-trades" class="space-y-3 max-h-96 overflow-y-auto">
+                            <p class="text-gray-400 text-center py-4">No active copy trades</p>
+                        </div>
+
+                        <div class="mt-4">
+                            <button id="cleanup-copy-trades" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                                Cleanup Expired Trades
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="volume-tab" class="tab-content">
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <h2 class="text-xl font-bold mb-4">Live Trade Exposure</h2>
+                    <p class="text-sm text-gray-400 mb-4">This shows the total amount of money in active trades for each direction.</p>
+                    <table class="min-w-full">
+                        <thead class="bg-gray-700">
+                            <tr>
+                                <th class="p-3 text-left text-sm font-semibold">Pair</th>
+                                <th class="p-3 text-left text-sm font-semibold">Total UP Volume</th>
+                                <th class="p-3 text-left text-sm font-semibold">Total DOWN Volume</th>
+                                <th class="p-3 text-left text-sm font-semibold">Net Exposure</th>
+                            </tr>
+                        </thead>
+                        <tbody id="volume-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="credit-tab" class="tab-content">
+                <div class="bg-gray-800 rounded-lg p-6 max-w-md mx-auto">
+                    <h2 class="text-xl font-bold mb-4">Adjust User Balance</h2>
+                    <form id="credit-form">
+                        <div class="mb-4">
+                            <label for="credit-username" class="block mb-2 text-sm font-medium">Username</label>
+                            <input type="text" id="credit-username" class="w-full bg-gray-700 p-2 rounded" placeholder="Enter exact username" required>
+                        </div>
+                        <div class="mb-4">
+                            <label for="credit-amount" class="block mb-2 text-sm font-medium">Amount</label>
+                            <input type="number" step="0.01" id="credit-amount" class="w-full bg-gray-700 p-2 rounded" placeholder="e.g., 100 or -50" required>
+                        </div>
+                        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Submit Adjustment</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="commission-tab" class="tab-content">
+                <div class="bg-gray-800 rounded-lg p-6 max-w-md mx-auto">
+                    <h2 class="text-xl font-bold mb-4">Award Referral Commission</h2>
+                    <form id="commission-form">
+                        <div class="mb-4">
+                            <label for="commission-username" class="block mb-2 text-sm font-medium">Username</label>
+                            <input type="text" id="commission-username" class="w-full bg-gray-700 p-2 rounded" placeholder="Enter exact username of referrer" required>
+                        </div>
+                        <div class="mb-4">
+                            <label for="commission-amount" class="block mb-2 text-sm font-medium">Commission Amount</label>
+                            <input type="number" step="0.01" id="commission-amount" class="w-full bg-gray-700 p-2 rounded" placeholder="e.g., 5.00" required>
+                        </div>
+                        <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">Award Commission</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="market-tab" class="tab-content">
+                <div class="bg-gray-800 rounded-lg p-6 max-w-md mx-auto text-center">
+                    <h2 class="text-xl font-bold mb-4">Force Current Candle</h2>
+                    <div class="mb-4">
+                        <label for="pair-select" class="block mb-2 text-sm font-medium">Select Trading Pair</label>
+                        <select id="pair-select" class="w-full bg-gray-700 p-2 rounded"></select>
+                    </div>
+                    <p class="mb-2">Current Status for Selected Pair: <strong id="market-status" class="text-xl"></strong></p>
+                    <div class="flex justify-center space-x-4 mt-4">
+                        <button class="market-btn bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded" data-direction="up">Force UP</button>
+                        <button class="market-btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded" data-direction="down">Force DOWN</button>
+                        <button id="market-disable-btn" class="market-btn bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-6 rounded" data-direction="null">Disable</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const getAdminKey = () => sessionStorage.getItem('adminKey');
+            const setAdminKey = (key) => sessionStorage.setItem('adminKey', key);
+
+            const ADMIN_API_BASE_URL = "/api/admin"; 
+            const kycReviewList = document.getElementById('kyc-review-list');
+
+            const loginModal = document.getElementById('login-modal');
+            const dashboardContent = document.getElementById('dashboard-content');
+            const adminKeyInput = document.getElementById('admin-key-input');
+            const loginButton = document.getElementById('login-button');
+            const refreshButton = document.getElementById('refresh-button');
+
+            const usersTableBody = document.getElementById('users-table-body');
+            const searchInput = document.getElementById('search-input');
+            const creditForm = document.getElementById('credit-form');
+            const commissionForm = document.getElementById('commission-form');
+            const marketStatusEl = document.getElementById('market-status');
+            const pairSelect = document.getElementById('pair-select');
+            const volumeTableBody = document.getElementById('volume-table-body');
+            
+            // NEW: Market Disable Button
+            const marketDisableBtn = document.getElementById('market-disable-btn'); 
+
+            // NEW: Copy Trade Elements
+            const copyTradeForm = document.getElementById('copy-trade-form');
+            const copyTradeStatus = document.getElementById('copy-trade-status');
+            const activeCopyTrades = document.getElementById('active-copy-trades');
+            const refreshCopyTradesBtn = document.getElementById('refresh-copy-trades');
+            const cleanupCopyTradesBtn = document.getElementById('cleanup-copy-trades');
+            const copyTradeTimeScroller = document.getElementById('copy-trade-time-scroller');
+
+            const tabs = document.querySelectorAll('.tab-button');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            // NEW: Populate Time Scroller for Copy Trade
+            function populateCopyTradeTimeSelector() {
+                const now = new Date();
+                copyTradeTimeScroller.innerHTML = '';
+
+                // Create options for next 15 minutes (00:01 to 00:15)
+                for (let i = 1; i <= 15; i++) {
+                    const futureTime = new Date(now.getTime() + i * 60 * 1000);
+                    const timeString = `${futureTime.getHours().toString().padStart(2, '0')}:${futureTime.getMinutes().toString().padStart(2, '0')}`;
+
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'time-option';
+                    button.textContent = timeString;
+                    button.dataset.minutes = i;
+
+                    if (i === 1) button.classList.add('active');
+
+                    button.addEventListener('click', () => {
+                        copyTradeTimeScroller.querySelectorAll('.time-option').forEach(btn => btn.classList.remove('active'));
+                        button.classList.add('active');
+                    });
+
+                    copyTradeTimeScroller.appendChild(button);
+                }
             }
 
-            const users = await User.find(userQuery)
-                .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt kycStatus')
-                .populate('referredBy', 'username');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    tabContents.forEach(c => c.classList.remove('active'));
+                    const contentElement = document.getElementById(`${tab.dataset.tab}-tab`);
+                    contentElement.classList.add('active');
 
-            // Calculate total volume by pair and direction
-            const tradeVolume = await Trade.aggregate([
-                { $match: { status: { $in: ['pending', 'active', 'scheduled'] } } },
-                { 
-                    $group: { 
-                        _id: { asset: '$asset', direction: '$direction' },
-                        totalAmount: { $sum: '$amount' }
+                    // ⭐ KYC: Load data only when the KYC tab is opened
+                    if (tab.dataset.tab === 'kyc-review') {
+                        fetchPendingKycUsers();
                     }
-                }
-            ]);
-            
-            const marketStatus = {};
-            TRADE_PAIRS.forEach(pair => {
-                marketStatus[pair] = candleOverride[pair] || 'auto'; 
+
+                    // ⭐ COPY TRADE: Load data when copy trade tab is opened
+                    if (tab.dataset.tab === 'copy-trade') {
+                        fetchActiveCopyTrades();
+                        populateCopyTradeTimeSelector();
+                    }
+                    // ⭐ MARKET CONTROL: Load status when market control tab is opened
+                    if (tab.dataset.tab === 'market') {
+                         if (pairSelect.options.length > 0) {
+                            fetchMarketStatus();
+                        } else {
+                            // If initial data fetch missed, force a full data reload
+                            fetchData();
+                        }
+                    }
+                });
             });
-            
-            // Calculate pending deposits and withdrawals with amounts
-            const usersWithPending = await Promise.all(users.map(async (user) => {
-                const pendingDeposits = user.transactions?.filter(tx => 
-                    tx.type === 'deposit' && tx.status === 'pending_review'
-                ) || [];
 
-                const pendingWithdrawals = user.transactions?.filter(tx => 
-                    tx.type === 'withdrawal' && tx.status === 'pending_processing'
-                ) || [];
+            // NEW: Fetch Active Copy Trades
+            async function fetchActiveCopyTrades() {
+                const adminKey = getAdminKey();
+                if (!adminKey) return;
 
-                return {
-                    ...user.toObject(), 
-                    pendingDeposits: pendingDeposits.length,
-                    pendingWithdrawals: pendingWithdrawals.length,
-                    pendingDepositsTotal: pendingDeposits.reduce((sum, tx) => sum + (tx.amount || 0), 0),
-                    pendingWithdrawalsTotal: pendingWithdrawals.reduce((sum, tx) => sum + (tx.amount || 0), 0),
-                    pendingDepositTransactions: pendingDeposits,
-                    pendingWithdrawalTransactions: pendingWithdrawals
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/active`, {
+                        headers: { 'x-admin-key': adminKey }
+                    });
+
+                    const data = await response.json();
+
+                    if (!data.success) {
+                        activeCopyTrades.innerHTML = `<p class="text-red-400 text-center">Error: ${data.message}</p>`;
+                        return;
+                    }
+
+                    if (data.copyTrades.length === 0) {
+                        activeCopyTrades.innerHTML = '<p class="text-gray-400 text-center py-4">No active copy trades</p>';
+                        return;
+                    }
+
+                    activeCopyTrades.innerHTML = '';
+
+                    data.copyTrades.forEach(trade => {
+                        const executionTime = new Date(trade.executionTime);
+                        const now = new Date();
+                        const timeLeft = executionTime - now;
+                        const minutesLeft = Math.max(0, Math.floor(timeLeft / (1000 * 60)));
+                        const hoursLeft = Math.floor(minutesLeft / 60);
+                        const remainingMinutes = minutesLeft % 60;
+
+                        // Format time display
+                        let timeDisplay = '';
+                        if (hoursLeft > 0) {
+                            timeDisplay = `${hoursLeft}h ${remainingMinutes}m`;
+                        } else {
+                            timeDisplay = `${minutesLeft}m`;
+                        }
+
+                        const isExpiringSoon = minutesLeft < 5;
+
+                        const tradeCard = document.createElement('div');
+                        tradeCard.className = `p-4 rounded-lg border ${isExpiringSoon ? 'bg-red-900/20 border-red-600' : 'bg-gray-700/50 border-gray-600'}`;
+
+                        tradeCard.innerHTML = `
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <span class="font-bold text-white text-lg">${trade.tradingPair}</span>
+                                    <span class="ml-2 px-2 py-1 text-xs rounded-full ${trade.direction === 'CALL' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
+                                        ${trade.direction}
+                                    </span>
+                                </div>
+                                <button onclick="deleteCopyTrade('${trade._id}')" class="text-red-400 hover:text-red-300 text-sm">
+                                    Delete
+                                </button>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+                                <div>
+                                    <span class="text-gray-300">Percentage:</span>
+                                    <span class="text-yellow-400 font-semibold">${trade.percentage}%</span>
+                                </div>
+                                <div>
+                                    <span class="text-gray-300">Copied by:</span>
+                                    <span class="text-blue-400 font-semibold">${trade.userCopies.length} users</span>
+                                </div>
+                                <div class="col-span-2">
+                                    <span class="text-gray-300">Executes in:</span>
+                                    <span class="${isExpiringSoon ? 'text-orange-400' : 'text-blue-400'} font-semibold">
+                                        ${timeDisplay}
+                                    </span>
+                                </div>
+                                <div class="col-span-2">
+                                    <span class="text-gray-300">Execution Time:</span>
+                                    <span class="text-gray-200 text-xs">${executionTime.toLocaleString()}</span>
+                                </div>
+                            </div>
+
+                            ${trade.userCopies.length > 0 ? `
+                                <div class="mt-2">
+                                    <p class="text-xs text-gray-400 mb-1">Copied by:</p>
+                                    <div class="flex flex-wrap gap-1">
+                                        ${trade.userCopies.map(copy => 
+                                            `<span class="text-xs bg-gray-600 px-2 py-1 rounded">${copy.userId?.username || 'Unknown'}</span>`
+                                        ).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        `;
+
+                        activeCopyTrades.appendChild(tradeCard);
+                    });
+
+                } catch (error) {
+                    console.error('Error fetching copy trades:', error);
+                    activeCopyTrades.innerHTML = '<p class="text-red-400 text-center">Error loading copy trades</p>';
+                }
+            }
+
+            // NEW: Delete Copy Trade Function
+            window.deleteCopyTrade = async (copyTradeId) => {
+                if (!confirm('Are you sure you want to delete this copy trade?')) return;
+
+                const adminKey = getAdminKey();
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/${copyTradeId}`, {
+                        method: 'DELETE',
+                        headers: { 'x-admin-key': adminKey }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showCopyTradeStatus('Copy trade deleted successfully', 'green');
+                        fetchActiveCopyTrades();
+                    } else {
+                        showCopyTradeStatus(`Error: ${data.message}`, 'red');
+                    }
+                } catch (error) {
+                    console.error('Error deleting copy trade:', error);
+                    showCopyTradeStatus('Error deleting copy trade', 'red');
+                }
+            };
+
+            // NEW: Show Copy Trade Status
+            function showCopyTradeStatus(message, color) {
+                const colorMap = { red: 'text-red-400', green: 'text-green-400', blue: 'text-blue-400' };
+                copyTradeStatus.textContent = message;
+                copyTradeStatus.className = `mt-4 text-center min-h-[24px] font-semibold ${colorMap[color] || 'text-gray-400'}`;
+
+                setTimeout(() => {
+                    copyTradeStatus.textContent = '';
+                    copyTradeStatus.className = 'mt-4 text-center min-h-[24px]';
+                }, 5000);
+            }
+
+            // NEW: Create Copy Trade Form Handler - FIXED VERSION
+            copyTradeForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const tradingPair = document.getElementById('copy-trade-pair').value;
+                const direction = document.getElementById('copy-trade-direction').value;
+                const percentage = parseFloat(document.getElementById('copy-trade-percentage').value);
+
+                // Get selected time
+                const activeTimeButton = copyTradeTimeScroller.querySelector('.time-option.active');
+                if (!activeTimeButton) {
+                    return showCopyTradeStatus('Please select an execution time', 'red');
+                }
+
+                const executionMinutes = parseInt(activeTimeButton.dataset.minutes);
+
+                // Validation
+                if (!tradingPair || !direction || !percentage || !executionMinutes) {
+                    return showCopyTradeStatus('Please fill all fields', 'red');
+                }
+
+                if (percentage < 1 || percentage > 100) {
+                    return showCopyTradeStatus('Percentage must be between 1 and 100', 'red');
+                }
+
+                // Calculate execution time (current time + minutes)
+                const executionTime = new Date(Date.now() + (executionMinutes * 60 * 1000));
+                executionTime.setSeconds(0, 0); // ⭐ FIX: Remove seconds and milliseconds
+
+                const tradeData = {
+                    tradingPair,
+                    direction,
+                    percentage,
+                    executionTime: executionTime.toISOString()
                 };
-            }));
 
+                const adminKey = getAdminKey();
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/create`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-admin-key': adminKey
+                        },
+                        body: JSON.stringify(tradeData)
+                    });
 
-            res.json({ success: true, users: usersWithPending, tradeVolume, marketStatus, tradePairs: TRADE_PAIRS });
+                    const data = await response.json();
 
-        } catch (error) {
-            console.error('Admin Data Fetch Error:', error);
-            res.status(500).json({ success: false, message: "Server error fetching data." });
-        }
-    });
+                    if (data.success) {
+                        showCopyTradeStatus(`Copy trade created successfully! Executes in ${executionMinutes} minutes at ${activeTimeButton.textContent}`, 'green');
+                        copyTradeForm.reset();
+                        fetchActiveCopyTrades();
+                        populateCopyTradeTimeSelector(); // Refresh time options
+                    } else {
+                        showCopyTradeStatus(`Error: ${data.message}`, 'red');
+                    }
+                } catch (error) {
+                    console.error('Error creating copy trade:', error);
+                    showCopyTradeStatus('Error creating copy trade', 'red');
+                }
+            });
 
-    // ----------------------------------------------------------------------
-    // KYC MANAGEMENT ENDPOINTS
-    // ----------------------------------------------------------------------
+            // NEW: Refresh Copy Trades Button
+            refreshCopyTradesBtn.addEventListener('click', fetchActiveCopyTrades);
 
-    // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
-    router.get('/kyc/pending-users', async (req, res) => {
-        if (!blobServiceClient || !KYC_CONTAINER_NAME || !azureEnabled) {
-            return res.status(200).json({ success: false, message: 'Azure Storage not configured for KYC review. Cannot fetch documents.' });
-        }
+            // NEW: Cleanup Expired Trades
+            cleanupCopyTradesBtn.addEventListener('click', async () => {
+                const adminKey = getAdminKey();
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/cleanup`, {
+                        method: 'POST',
+                        headers: { 'x-admin-key': adminKey }
+                    });
 
-        try {
-            const usersToReview = await User.find({ 
-                $or: [
-                    { kycStatus: 'review' },
-                    { kycStatus: 'under_review' }
-                ]
-            }).select('username kycStatus kycDocuments createdAt');
+                    const data = await response.json();
 
-            const usersWithUrls = await Promise.all(usersToReview.map(async (user) => {
+                    if (data.success) {
+                        showCopyTradeStatus(data.message, 'green');
+                        fetchActiveCopyTrades();
+                    } else {
+                        showCopyTradeStatus(`Error: ${data.message}`, 'red');
+                    }
+                } catch (error) {
+                    console.error('Error cleaning up copy trades:', error);
+                    showCopyTradeStatus('Error cleaning up copy trades', 'red');
+                }
+            });
 
-                // Helper to generate secure SAS URLs
-                const getSignedUrl = async (blobPath) => {
-                    if (!blobPath || !STORAGE_ACCOUNT_NAME || !STORAGE_ACCOUNT_KEY) return null;
+            const fetchData = async () => {
+                const adminKey = getAdminKey();
+                if (!adminKey) { showLogin(); return; }
 
-                    try {
-                        // 1. Create credential using the raw key passed from index.js
-                        const sharedKeyCredential = new StorageSharedKeyCredential(
-                            STORAGE_ACCOUNT_NAME,
-                            STORAGE_ACCOUNT_KEY
-                        );
-                        
-                        // 2. Create BlobClient using the raw key
-                        const blobClient = new BlobClient(
-                             `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net/${KYC_CONTAINER_NAME}/${blobPath}`,
-                            sharedKeyCredential
-                        );
+                loginModal.style.display = 'none';
+                dashboardContent.classList.remove('hidden');
 
-                        // 3. Define Start/Expiry Times with Clock Skew Buffer
-                        const startTime = new Date();
-                        startTime.setMinutes(startTime.getMinutes() - 5); // CRITICAL: 5 minutes buffer into the past
-                        
-                        const expiresOn = new Date();
-                        expiresOn.setMinutes(expiresOn.getMinutes() + 30); // Valid for 30 minutes
+                const searchTerm = searchInput.value;
+                const url = searchTerm ? `${ADMIN_API_BASE_URL}/data?search=${encodeURIComponent(searchTerm)}` : `${ADMIN_API_BASE_URL}/data`;
 
-                        // 4. Generate SAS token using the BlobClient method (stable and reliable)
-                        const sasToken = await blobClient.generateSasUrl({
-                            permissions: BlobSASPermissions.parse("r"), // Read permission
-                            startsOn: startTime, 
-                            expiresOn: expiresOn,
+                try {
+                    const response = await fetch(url, { headers: { 'x-admin-key': adminKey } });
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.message);
+
+                    usersTableBody.innerHTML = '';
+                    (data.users || []).forEach(user => {
+                        const row = document.createElement('tr');
+
+                        const pendingDeposits = user.transactions.filter(tx => tx.status === 'pending_review');
+                        let depositsHTML = pendingDeposits.length > 0 ? '' : '<p class="text-gray-500 text-xs">None</p>';
+                        pendingDeposits.forEach(tx => {
+                            // ⭐ DEPOSIT FIX: Use transaction amount directly, remove input field, add data-amount
+                            const depositAmount = (tx.amount || 0).toFixed(2);
+                            depositsHTML += `<div class="my-2 p-2 bg-gray-700 rounded">
+                                                <p class="text-sm font-bold text-green-400 mb-1">$${depositAmount}</p>
+                                                <p class="text-xs break-all"><strong>TXID:</strong> ${tx.txid}</p>
+                                                <div class="mt-2">
+                                                    <button class="approve-deposit-btn bg-green-600 hover:bg-green-700 text-xs p-1 rounded" 
+                                                            data-userid="${user._id}" 
+                                                            data-txid="${tx.txid}" 
+                                                            data-amount="${depositAmount}">Approve</button> 
+                                                    <button class="reject-deposit-btn bg-red-600 hover:bg-red-700 text-xs p-1 rounded" data-userid="${user._id}" data-txid="${tx.txid}">Reject</button>
+                                                </div>
+                                            </div>`;
                         });
+
+                        const pendingWithdrawals = user.transactions.filter(tx => tx.status === 'pending_processing');
+                        let withdrawalsHTML = pendingWithdrawals.length > 0 ? '' : '<p class="text-gray-500 text-xs">None</p>';
+                        pendingWithdrawals.forEach(tx => {
+                            withdrawalsHTML += `<div class="my-2 p-2 bg-gray-700 rounded"><p class="text-sm font-bold">$${tx.amount.toFixed(2)}</p><p class="text-xs break-all"><strong>To:</strong> ${tx.address}</p><div class="mt-2"><button class="approve-withdrawal-btn bg-green-600 text-xs p-1 rounded" data-userid="${user._id}" data-txid="${tx.txid}">Approve</button> <button class="reject-withdrawal-btn bg-red-600 text-xs p-1 rounded" data-userid="${user._id}" data-txid="${tx.txid}">Reject</button></div></div>`;
+                        });
+
+                        const referrerUsername = user.referredBy ? user.referredBy.username : '<span class="text-gray-500">N/A</span>';
+
+                        const formattedBalance = (user.balance || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                        const formattedDeposits = (user.totalDeposits || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                        const formattedVolume = (user.totalTradeVolume || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+                        row.innerHTML = `
+                            <td class="p-3 align-top text-sm"><strong>${user.username}</strong></td>
+                            <td class="p-3 align-top text-sm font-mono">${formattedBalance}</td>
+                            <td class="p-3 align-top text-sm font-mono">${formattedDeposits}</td>
+                            <td class="p-3 align-top text-sm font-mono">${formattedVolume}</td>
+                            <td class="p-3 align-top text-sm">${referrerUsername}</td>
+                            <td class="p-3 align-top">${depositsHTML}</td>
+                            <td class="p-3 align-top">${withdrawalsHTML}</td>`;
+                        usersTableBody.appendChild(row);
+                    });
+
+                    const volumeByPair = {};
+                    (data.tradePairs || []).forEach(pair => {
+                        volumeByPair[pair] = { UP: 0, DOWN: 0 };
+                    });
+                    (data.tradeVolume || []).forEach(item => {
+                        if (volumeByPair[item._id.asset]) {
+                            volumeByPair[item._id.asset][item._id.direction] = item.totalAmount;
+                        }
+                    });
+                    volumeTableBody.innerHTML = '';
+                    for (const pair in volumeByPair) {
+                        const upVolume = volumeByPair[pair].UP;
+                        const downVolume = volumeByPair[pair].DOWN;
+                        const netExposure = upVolume - downVolume;
+                        const netColor = netExposure > 0 ? 'text-green-400' : (netExposure < 0 ? 'text-red-400' : '');
+                        const rowHTML = `<tr>
+                            <td class="p-3 font-bold">${pair}</td>
+                            <td class="p-3 text-green-400">$${upVolume.toFixed(2)}</td>
+                            <td class="p-3 text-red-400">$${downVolume.toFixed(2)}</td>
+                            <td class="p-3 font-bold ${netColor}">$${netExposure.toFixed(2)}</td>
+                        </tr>`;
+                        volumeTableBody.innerHTML += rowHTML;
+                    }
+
+                    if (pairSelect.options.length === 0 && data.tradePairs) {
+                        data.tradePairs.forEach(pair => {
+                            const option = document.createElement('option');
+                            option.value = pair;
+                            option.textContent = pair;
+                            pairSelect.appendChild(option);
+                        });
+                    }
+                    if (data.marketStatus) {
+                        updateMarketStatus(data.marketStatus);
+                    }
+
+                } catch (error) {
+                    alert(`Error fetching data: ${error.message}`);
+                    showLogin();
+                }
+            };
+            
+            // ⭐ NEW: Fetch Market Status Function
+            async function fetchMarketStatus() {
+                const adminKey = getAdminKey();
+                const selectedPair = pairSelect.value;
+                if (!adminKey || !selectedPair) {
+                    marketStatusEl.textContent = 'N/A';
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/market-control/status`, {
+                        headers: { 'x-admin-key': adminKey }
+                    });
+                    const data = await response.json();
+
+                    if (data.success && data.marketStatus) {
+                        const status = data.marketStatus[selectedPair] || 'auto';
+                        updateMarketStatus({ [selectedPair]: status });
+                    } else {
+                        marketStatusEl.textContent = 'Error';
+                        marketStatusEl.className = 'text-red-400';
+                    }
+                } catch (error) {
+                    marketStatusEl.textContent = 'Server Error';
+                    marketStatusEl.className = 'text-red-400';
+                    console.error("Error fetching market status:", error);
+                }
+            }
+
+
+            // ⭐ NEW: KYC FETCH FUNCTION (USES SIGNED URLs)
+            async function fetchPendingKycUsers() {
+                const adminKey = getAdminKey();
+                kycReviewList.innerHTML = '<p class="text-gray-400">Loading pending users...</p>';
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/kyc/pending-users`, { 
+                        headers: { 'x-admin-key': adminKey } 
+                    });
+                    const data = await response.json();
+
+                    if (!data.success) {
+                        // FIX: Display server message if Azure is not configured
+                        return kycReviewList.innerHTML = `<p class="text-red-400">Error: ${data.message}</p>`;
+                    }
+
+                    if (data.users.length === 0) {
+                        return kycReviewList.innerHTML = '<p class="text-green-400">No users currently pending KYC review. ✅</p>';
+                    }
+
+                    kycReviewList.innerHTML = ''; // Clear loading message
+
+                    data.users.forEach(user => {
+                        const userElement = document.createElement('div');
+                        userElement.className = 'p-4 border border-gray-700 rounded-lg bg-gray-700';
                         
-                        // FIX: generateSasUrl returns the full URL with the SAS token appended
-                        return sasToken; 
+                        // ⭐ KYC LINK FIX: The links are now the secure, signed URLs from admin.js
+                        const frontLink = user.documents.front || '#';
+                        const backLink = user.documents.back || '#';
+                        const frontDisabled = user.documents.front ? '' : 'disabled-link';
+                        const backDisabled = user.documents.back ? '' : 'disabled-link';
+                        const noDocsMessage = user.documents.front || user.documents.back ? '' : '<p class="text-red-400 text-xs mt-2">No documents found (Admin Error or Upload Failed).</p>';
 
-                    } catch (error) {
-                        console.error(`Error generating SAS URL for ${blobPath}:`, error.message);
-                        return null; 
+
+                        userElement.innerHTML = `
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="text-lg font-bold text-white">${user.username} (ID: ${user._id})</h3>
+                                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-yellow-600 text-white">${user.kycStatus.toUpperCase()}</span>
+                            </div>
+                            <p class="text-sm text-gray-400 mb-2">Joined: ${new Date(user.joined).toLocaleDateString()}</p>
+
+                            <div class="flex space-x-4 mb-4">
+                                <a href="${frontLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium ${frontDisabled}">View ID Front</a>
+                                <a href="${backLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium ${backDisabled}">View ID Back</a>
+                            </div>
+                            ${noDocsMessage}
+
+                            <div class="flex space-x-2">
+                                <button data-userid="${user._id}" data-status="verified" class="kyc-action-btn bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg">Verify</button>
+                                <button data-userid="${user._id}" data-status="rejected" class="kyc-action-btn bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg">Reject</button>
+                            </div>
+                        `;
+                        kycReviewList.appendChild(userElement);
+                    });
+
+                    document.querySelectorAll('.kyc-action-btn').forEach(button => {
+                        button.addEventListener('click', handleKycAction);
+                    });
+
+                } catch (error) {
+                    console.error('Error fetching KYC review data:', error);
+                    kycReviewList.innerHTML = '<p class="text-red-400">Connection error fetching KYC data.</p>';
+                }
+            }
+
+            // ⭐ NEW: KYC ACTION HANDLER
+            async function handleKycAction(event) {
+                const button = event.target;
+                const userId = button.getAttribute('data-userid');
+                const newStatus = button.getAttribute('data-status');
+                let reason = null;
+
+                if (newStatus === 'rejected') {
+                    reason = prompt("Enter a brief reason for rejection (required):");
+                    if (!reason || reason.trim() === '') return; 
+                }
+
+                button.disabled = true;
+                button.textContent = 'Processing...';
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/kyc/update`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-admin-key': getAdminKey() },
+                        body: JSON.stringify({ userId, newStatus, reason })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        alert(`User ${userId} status updated to ${newStatus}.`);
+                        fetchPendingKycUsers(); // Re-fetch the list to update the display
+                    } else {
+                        alert(`Action failed: ${data.message}`);
                     }
-                };
-
-                const frontUrl = await getSignedUrl(user.kycDocuments?.front);
-                const backUrl = await getSignedUrl(user.kycDocuments?.back);
-
-                return {
-                    _id: user._id,
-                    username: user.username,
-                    kycStatus: user.kycStatus,
-                    joined: user.createdAt,
-                    documents: {
-                        front: frontUrl, 
-                        back: backUrl,   
-                    }
-                };
-            }));
-
-            res.json({ success: true, users: usersWithUrls.filter(u => u.documents.front || u.documents.back) });
-
-        } catch (error) {
-            console.error('Admin KYC Fetch Error:', error);
-            res.status(500).json({ success: false, message: 'Failed to fetch pending KYC users.' });
-        }
-    });
-
-
-    // [POST] /api/admin/kyc/update - Update a user's KYC status
-    router.post('/kyc/update', async (req, res) => {
-        const { userId, newStatus, reason } = req.body;
-
-        if (!['verified', 'rejected'].includes(newStatus)) {
-            return res.status(400).json({ success: false, message: 'Invalid status provided.' });
-        }
-
-        try {
-            const user = await User.findById(userId);
-            if (!user) {
-                return res.status(404).json({ success: false, message: 'User not found.' });
+                } catch (error) {
+                    console.error('KYC Action Error:', error);
+                    alert('A network error occurred while updating the status.');
+                }
             }
 
-            user.kycStatus = newStatus;
-            if (newStatus === 'rejected') {
-                user.kycRejectionReason = reason || 'Documents did not meet requirements.';
-            } else if (newStatus === 'verified') {
-                user.kycRejectionReason = undefined;
-            }
 
-            await user.save();
-
-            res.json({ success: true, message: `KYC status updated to ${newStatus}.` });
-
-        } catch (error) {
-            console.error('Admin KYC Update Error:', error);
-            res.status(500).json({ success: false, message: 'Failed to update KYC status.' });
-        }
-    });
-    
-    // ----------------------------------------------------------------------
-    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS
-    // ----------------------------------------------------------------------
-
-    router.post('/approve-deposit', async (req, res) => {
-        const { userId, txid, amount } = req.body;
-        if (!userId || !txid || typeof amount !== 'number' || amount <= 0) {
-            return res.status(400).json({ success: false, message: "Missing required fields or invalid amount." });
-        }
-
-        const session = await mongoose.startSession();
-        session.startTransaction();
-
-        try {
-            const user = await User.findById(userId).session(session);
-            if (!user) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(404).json({ success: false, message: "User not found." });
-            }
-
-            const transaction = user.transactions.find(tx => 
-                tx.txid === txid && 
-                tx.status === 'pending_review' && 
-                tx.type === 'deposit'
-            );
-
-            if (!transaction) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(400).json({ 
-                    success: false, 
-                    message: "Invalid or already processed deposit transaction." 
-                });
-            }
-
-            // Update user's balance and totalDeposits
-            user.balance += amount;
-            user.totalDeposits += amount;
-
-            // Update transaction status
-            transaction.status = 'completed';
-            transaction.processedAt = new Date();
-            transaction.amount = amount;
-
-            await user.save({ session });
-            await session.commitTransaction();
-            session.endSession();
-
-            res.json({ success: true, message: `Deposit of $${amount.toFixed(2)} approved for ${user.username}.` });
-
-        } catch (error) {
-            await session.abortTransaction();
-            session.endSession();
-            console.error('Deposit Approval Error:', error);
-            res.status(500).json({ success: false, message: "Deposit approval failed due to a server error." });
-        }
-    });
-
-    router.post('/reject-deposit', async (req, res) => {
-        const { userId, txid } = req.body;
-        if (!userId || !txid) {
-            return res.status(400).json({ success: false, message: "Missing required fields." });
-        }
-
-        try {
-            const user = await User.findById(userId);
-            if (!user) return res.status(404).json({ success: false, message: "User not found." });
-
-            const transaction = user.transactions.find(tx => 
-                tx.txid === txid && 
-                tx.status === 'pending_review' && 
-                tx.type === 'deposit'
-            );
-
-            if (!transaction) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: "Invalid or already processed deposit transaction." 
-                });
-            }
-
-            transaction.status = 'rejected';
-            transaction.processedAt = new Date();
-
-            await user.save();
-            res.json({ success: true, message: `Deposit rejected for ${user.username}.` });
-
-        } catch (error) {
-            console.error('Deposit Rejection Error:', error);
-            res.status(500).json({ success: false, message: "Deposit rejection failed due to a server error." });
-        }
-    });
-
-    router.post('/approve-withdrawal', async (req, res) => {
-        const { userId, txid } = req.body;
-        if (!userId || !txid) {
-            return res.status(400).json({ success: false, message: "Missing required fields." });
-        }
-
-        try {
-            const user = await User.findById(userId);
-            if (!user) return res.status(404).json({ success: false, message: "User not found." });
-
-            const transaction = user.transactions.find(tx => 
-                tx.txid === txid && 
-                tx.status === 'pending_processing' && 
-                tx.type === 'withdrawal'
-            );
-
-            if (!transaction) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: "Invalid or already processed withdrawal transaction." 
-                });
-            }
-
-            // NOTE: The balance was already deducted on user's request.
-            transaction.status = 'completed';
-            transaction.processedAt = new Date();
-
-            await user.save();
-            res.json({ success: true, message: `Withdrawal of $${transaction.amount.toFixed(2)} approved for ${user.username}.` });
-
-        } catch (error) {
-            console.error('Withdrawal Approval Error:', error);
-            res.status(500).json({ success: false, message: "Withdrawal approval failed due to a server error." });
-        }
-    });
-
-    router.post('/reject-withdrawal', async (req, res) => {
-        const { userId, txid } = req.body;
-        if (!userId || !txid) {
-            return res.status(400).json({ success: false, message: "Missing required fields." });
-        }
-
-        const session = await mongoose.startSession();
-        session.startTransaction();
-
-        try {
-            const user = await User.findById(userId).session(session);
-            if (!user) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(404).json({ success: false, message: "User not found." });
-            }
-
-            const transaction = user.transactions.find(tx => 
-                tx.txid === txid && 
-                tx.status === 'pending_processing' && 
-                tx.type === 'withdrawal'
-            );
-
-            if (!transaction) {
-                await session.abortTransaction();
-                session.endSession();
-                return res.status(400).json({ 
-                    success: false, 
-                    message: "Invalid or already processed withdrawal transaction." 
-                });
-            }
-
-            // Refund the user's balance
-            user.balance += transaction.amount;
-
-            // Update transaction status
-            transaction.status = 'rejected';
-            transaction.processedAt = new Date();
-
-            await user.save({ session });
-            await session.commitTransaction();
-            session.endSession();
-
-            res.json({ success: true, message: `Withdrawal of $${transaction.amount.toFixed(2)} rejected and funds refunded to ${user.username}.` });
-
-        } catch (error) {
-            await session.abortTransaction();
-            session.endSession();
-            console.error('Withdrawal Rejection Error:', error);
-            res.status(500).json({ success: false, message: "Withdrawal rejection failed due to a server error." });
-        }
-    });
-
-    // ----------------------------------------------------------------------
-    // MANUAL USER CREDIT
-    // ----------------------------------------------------------------------
-
-    router.post('/credit-user', async (req, res) => {
-        const { username, amount } = req.body;
-        const creditAmount = parseFloat(amount);
-
-        if (!username || isNaN(creditAmount) || creditAmount === 0) {
-            return res.status(400).json({ success: false, message: "Invalid username or amount." });
-        }
-
-        try {
-            const user = await User.findOne({ username });
-            if (!user) {
-                return res.status(404).json({ success: false, message: "User not found." });
-            }
-
-            user.balance += creditAmount;
-
-            // Add transaction record with proper schema
-            const transactionData = {
-                txid: `ADMIN-${Date.now()}`,
-                type: creditAmount > 0 ? 'manual_credit' : 'manual_debit',
-                amount: Math.abs(creditAmount),
-                status: 'completed',
-                date: new Date(),
-                note: `Admin adjustment of ${creditAmount > 0 ? '+' : ''}${creditAmount.toFixed(2)}`
+            const updateMarketStatus = (marketStatus) => {
+                const selectedPair = pairSelect.value;
+                const status = (marketStatus && marketStatus[selectedPair]) || 'Auto';
+                marketStatusEl.textContent = status.toUpperCase();
+                marketStatusEl.className = status === 'up' ? 'text-green-400' : status === 'down' ? 'text-red-400' : 'text-yellow-400';
             };
 
-            user.transactions.push(transactionData);
-            await user.save();
+            const handleApiAction = async (url, body) => {
+                const adminKey = getAdminKey();
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+                        body: JSON.stringify(body)
+                    });
+                    const result = await response.json();
+                    if (!result.success) throw new Error(result.message);
+                    alert(result.message);
+                    
+                    // Always update status after market control action
+                    if (url.includes('/market-control')) {
+                        fetchMarketStatus(); // NEW: Fetch status after force action
+                    }
 
-            res.json({ 
-                success: true, 
-                message: `Balance for ${username} adjusted by ${creditAmount.toFixed(2)}. New balance: ${user.balance.toFixed(2)}` 
-            });
-
-        } catch (error) {
-            console.error('Manual Credit Error:', error);
-            res.status(500).json({ success: false, message: "Failed to adjust user balance." });
-        }
-    });
-
-    // ----------------------------------------------------------------------
-    // REFERRAL COMMISSION
-    // ----------------------------------------------------------------------
-
-    router.post('/give-commission', async (req, res) => {
-        const { username, amount } = req.body;
-        const commissionAmount = parseFloat(amount);
-
-        if (!username || isNaN(commissionAmount) || commissionAmount <= 0) {
-            return res.status(400).json({ success: false, message: "Invalid username or amount." });
-        }
-
-        try {
-            const user = await User.findOne({ username });
-            if (!user) {
-                return res.status(404).json({ success: false, message: "User not found." });
-            }
-
-            user.balance += commissionAmount;
-            user.referralCommissions += commissionAmount;
-
-            // Add transaction record with proper schema
-            const transactionData = {
-                txid: `COMM-${Date.now()}`,
-                type: 'commission',
-                amount: commissionAmount,
-                status: 'completed',
-                date: new Date(),
-                note: `Referral commission awarded by admin.`
+                    fetchData();
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                }
             };
 
-            user.transactions.push(transactionData);
-            await user.save();
+            const showLogin = () => {
+                sessionStorage.removeItem('adminKey');
+                loginModal.style.display = 'flex';
+                dashboardContent.classList.add('hidden');
+            };
 
-            res.json({ 
-                success: true, 
-                message: `Commission of $${commissionAmount.toFixed(2)} awarded to ${username}. New balance: ${user.balance.toFixed(2)}` 
+            loginButton.addEventListener('click', () => {
+                const key = adminKeyInput.value;
+                if (key) { setAdminKey(key); fetchData(); }
             });
 
-        } catch (error) {
-            console.error('Commission Error:', error);
-            res.status(500).json({ success: false, message: "Failed to award commission." });
-        }
-    });
+            refreshButton.addEventListener('click', fetchData);
+            searchInput.addEventListener('input', fetchData);
 
-    // ----------------------------------------------------------------------
-    // MARKET CONTROL
-    // ----------------------------------------------------------------------
-
-    router.post('/market-control', (req, res) => {
-        const { pair, direction } = req.body;
-
-        if (!pair || (direction !== 'up' && direction !== 'down' && direction !== null)) {
-            return res.status(400).json({ success: false, message: "Invalid pair or direction. Direction must be 'up', 'down', or null to disable." });
-        }
-
-        if (!TRADE_PAIRS.includes(pair)) {
-            return res.status(400).json({ success: false, message: "Invalid trading pair." });
-        }
-
-        candleOverride[pair] = direction; // Update the global state
-
-        const message = direction ? `Market control set to ${direction.toUpperCase()} for ${pair}.` : `Market control disabled for ${pair}.`;
-        res.json({ success: true, message });
-    });
-
-    router.get('/market-control/status', (req, res) => {
-        const status = {};
-        TRADE_PAIRS.forEach(pair => {
-            // Read the current state
-            status[pair] = candleOverride[pair] || 'auto'; 
-        });
-
-        res.json({
-            success: true,
-            marketStatus: status
-        });
-    });
-    
-    // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES
-    // ----------------------------------------------------------------------
-
-    router.post('/copy-trade/create', async (req, res) => {
-        const { tradingPair, direction, percentage, executionTime } = req.body;
-
-        if (!tradingPair || !direction || !percentage || !executionTime) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Missing required fields: tradingPair, direction, percentage, executionTime" 
-            });
-        }
-
-        if (!['CALL', 'PUT'].includes(direction.toUpperCase())) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Direction must be either 'CALL' or 'PUT'" 
-            });
-        }
-
-        if (percentage < 1 || percentage > 100) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Percentage must be between 1 and 100" 
-            });
-        }
-
-        try {
-            const copyTrade = new AdminCopyTrade({
-                tradingPair: tradingPair.toUpperCase(),
-                direction: direction.toUpperCase(),
-                percentage: parseFloat(percentage),
-                executionTime: new Date(executionTime),
-                createdBy: req.headers['x-admin-user-id'] || new mongoose.Types.ObjectId()
-            });
-
-            await copyTrade.save();
-
-            res.json({ 
-                success: true, 
-                message: "Copy trade created successfully",
-                copyTrade: {
-                    id: copyTrade._id,
-                    tradingPair: copyTrade.tradingPair,
-                    direction: copyTrade.direction,
-                    percentage: copyTrade.percentage,
-                    executionTime: copyTrade.executionTime
+            usersTableBody.addEventListener('click', e => {
+                if (e.target.classList.contains('approve-deposit-btn')) {
+                    // ⭐ DEPOSIT FIX: Read amount from dataset (no more input field)
+                    const amount = e.target.dataset.amount;
+                    if (!amount || isNaN(parseFloat(amount))) return alert('Transaction amount missing.');
+                    handleApiAction(`${ADMIN_API_BASE_URL}/approve-deposit`, { 
+                        userId: e.target.dataset.userid, 
+                        txid: e.target.dataset.txid, 
+                        amount: parseFloat(amount) 
+                    });
+                }
+                if (e.target.classList.contains('reject-deposit-btn')) {
+                    handleApiAction(`${ADMIN_API_BASE_URL}/reject-deposit`, { userId: e.target.dataset.userid, txid: e.target.dataset.txid });
+                }
+                if (e.target.classList.contains('approve-withdrawal-btn')) {
+                    handleApiAction(`${ADMIN_API_BASE_URL}/approve-withdrawal`, { userId: e.target.dataset.userid, txid: e.target.dataset.txid });
+                }
+                if (e.target.classList.contains('reject-withdrawal-btn')) {
+                    handleApiAction(`${ADMIN_API_BASE_URL}/reject-withdrawal`, { userId: e.target.dataset.userid, txid: e.target.dataset.txid });
                 }
             });
 
-        } catch (error) {
-            console.error('Copy Trade Creation Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: "Failed to create copy trade" 
-            });
-        }
-    });
-
-    router.get('/copy-trade/active', async (req, res) => {
-        try {
-            const activeTrades = await AdminCopyTrade.find({ 
-                status: 'active',
-                executionTime: { $gt: new Date() }
-            })
-            .populate('createdBy', 'username')
-            .populate('userCopies.userId', 'username')
-            .sort({ executionTime: 1 });
-
-            res.json({ 
-                success: true, 
-                copyTrades: activeTrades 
+            creditForm.addEventListener('submit', e => {
+                e.preventDefault();
+                const username = document.getElementById('credit-username').value;
+                const amount = document.getElementById('credit-amount').value;
+                handleApiAction(`${ADMIN_API_BASE_URL}/credit-user`, { username, amount });
+                creditForm.reset();
             });
 
-        } catch (error) {
-            console.error('Active Copy Trades Fetch Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: "Failed to fetch active copy trades" 
-            });
-        }
-    });
-
-    router.get('/copy-trade/history', async (req, res) => {
-        try {
-            const { page = 1, limit = 20 } = req.query;
-
-            const history = await AdminCopyTrade.find()
-                .populate('createdBy', 'username')
-                .populate('userCopies.userId', 'username')
-                .sort({ createdAt: -1 })
-                .limit(limit * 1)
-                .skip((page - 1) * limit);
-
-            const total = await AdminCopyTrade.countDocuments();
-
-            res.json({ 
-                success: true, 
-                history,
-                totalPages: Math.ceil(total / limit),
-                currentPage: page
+            commissionForm.addEventListener('submit', e => {
+                e.preventDefault();
+                const username = document.getElementById('commission-username').value;
+                const amount = document.getElementById('commission-amount').value;
+                handleApiAction(`${ADMIN_API_BASE_URL}/give-commission`, { username, amount });
+                commissionForm.reset();
             });
 
-        } catch (error) {
-            console.error('Copy Trade History Fetch Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: "Failed to fetch copy trade history" 
-            });
-        }
-    });
-
-    router.delete('/copy-trade/:id', async (req, res) => {
-        try {
-            const { id } = req.params;
-
-            const deletedTrade = await AdminCopyTrade.findByIdAndDelete(id);
-
-            if (!deletedTrade) {
-                return res.status(404).json({ 
-                    success: false, 
-                    message: "Copy trade not found" 
+            document.querySelectorAll('.market-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    const pair = pairSelect.value;
+                    if (!pair) return alert('Please select a trading pair first.');
+                    
+                    // FIX: Pass null for 'Disable' and the direction for UP/DOWN
+                    const direction = button.dataset.direction === 'null' ? null : button.dataset.direction; 
+                    
+                    handleApiAction(`${ADMIN_API_BASE_URL}/market-control`, { pair, direction });
                 });
-            }
-
-            res.json({ 
-                success: true, 
-                message: "Copy trade deleted successfully" 
             });
 
-        } catch (error) {
-            console.error('Copy Trade Deletion Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: "Failed to delete copy trade" 
-            });
-        }
-    });
-
-    router.post('/copy-trade/cleanup', async (req, res) => {
-        try {
-            const result = await AdminCopyTrade.cleanupExpiredTrades();
-
-            res.json({ 
-                success: true, 
-                message: `Cleaned up ${result.modifiedCount} expired copy trades` 
+            pairSelect.addEventListener('change', () => {
+                // When pair changes, fetch the current status
+                fetchMarketStatus();
             });
 
-        } catch (error) {
-            console.error('Copy Trade Cleanup Error:', error);
-            res.status(500).json({ 
-                success: false, 
-                message: "Failed to cleanup expired copy trades" 
-            });
-        }
-    });
+            // Initialize time scroller
+            populateCopyTradeTimeSelector();
 
-    return router;
-};
+            if (getAdminKey()) { fetchData(); } else { showLogin(); }
+        });
+    </script>
+</body>
+</html>
