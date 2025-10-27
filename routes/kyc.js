@@ -27,7 +27,7 @@ const userAuth = async (req, res, next) => {
 };
 
 // The entire module is a function that accepts Azure dependencies
-module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false }) {
+module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME = 'id-document-uploads', azureEnabled = false }) {
     const router = express.Router();
 
     // Helper function to check Azure connection
@@ -72,7 +72,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         { name: 'back', maxCount: 1 }
     ]), async (req, res) => {
         try {
-            console.log('🔧 KYC Upload Started - Azure Storage Only');
+            console.log('🔧 KYC Upload Started - Container:', KYC_CONTAINER_NAME);
             
             // 1. Validation Checks
             if (!req.files || !req.files.front || !req.files.back) {
@@ -88,7 +88,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
             const userId = req.userId;
             const frontFile = req.files.front[0];
-            const backFile = req.files.back[0]; // ✅ FIXED: Changed from [1] to [0]
+            const backFile = req.files.back[0];
             
             console.log('🔧 Files received - Front:', frontFile.originalname, 'Back:', backFile.originalname);
 
@@ -101,17 +101,31 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
 
-            // 4. Create container if it doesn't exist
+            // 4. Get container client
             const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-            await containerClient.createIfNotExists({ access: 'blob' });
+            
+            // 5. Check if container exists and is accessible
+            try {
+                await containerClient.getProperties();
+                console.log('✅ Azure container is accessible:', KYC_CONTAINER_NAME);
+            } catch (containerError) {
+                console.error('❌ Azure container error:', containerError.message);
+                if (containerError.statusCode === 404) {
+                    throw new Error(`Azure container '${KYC_CONTAINER_NAME}' not found. Please create it in Azure Portal.`);
+                } else if (containerError.statusCode === 403) {
+                    throw new Error('Azure Storage access denied. Check public access settings.');
+                } else {
+                    throw containerError;
+                }
+            }
 
-            // 5. Define secure blob paths
-            const frontBlobPath = `kyc-${userId}/front_${Date.now()}_${frontFile.originalname}`;
-            const backBlobPath = `kyc-${userId}/back_${Date.now()}_${backFile.originalname}`;
+            // 6. Define secure blob paths
+            const frontBlobPath = `user-${userId}/front_${Date.now()}_${frontFile.originalname}`;
+            const backBlobPath = `user-${userId}/back_${Date.now()}_${backFile.originalname}`;
 
-            console.log('🔧 Uploading to Azure Blob Storage...');
+            console.log('🔧 Uploading to Azure container:', KYC_CONTAINER_NAME);
 
-            // 6. Upload Files to Azure Blob Storage
+            // 7. Upload Files to Azure Blob Storage
             const frontBlobClient = containerClient.getBlockBlobClient(frontBlobPath);
             await frontBlobClient.uploadData(frontFile.buffer, {
                 blobHTTPHeaders: { blobContentType: frontFile.mimetype }
@@ -122,9 +136,9 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 blobHTTPHeaders: { blobContentType: backFile.mimetype }
             });
 
-            console.log('✅ Azure upload successful');
+            console.log('✅ Azure upload successful to container:', KYC_CONTAINER_NAME);
 
-            // 7. Update User KYC Status in Database
+            // 8. Update User KYC Status in Database
             const user = await User.findById(userId);
             if (!user) {
                 return res.status(404).json({ 
@@ -138,7 +152,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 front: frontBlobPath,
                 back: backBlobPath,
                 uploadDate: new Date(),
-                storageType: 'azure'
+                storageType: 'azure',
+                container: KYC_CONTAINER_NAME
             };
             user.kycRejectionReason = undefined; 
 
@@ -146,7 +161,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
             console.log('✅ User KYC status updated to under_review');
 
-            // 8. Send successful response
+            // 9. Send successful response
             res.json({ 
                 success: true, 
                 message: 'Documents uploaded successfully. Your KYC status is now under review.',
@@ -162,17 +177,25 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 return res.status(503).json({ 
                     success: false, 
                     message: 'KYC service is currently unavailable. Azure Storage not configured.',
-                    serviceStatus: 'disabled',
-                    currentStatus: 'Service connection failed'
+                    serviceStatus: 'disabled'
                 });
             }
             
-            if (error.message.includes('Public access is not permitted')) {
+            if (error.message.includes('container') && error.message.includes('not found')) {
                 return res.status(503).json({ 
                     success: false, 
-                    message: 'KYC service configuration error. Azure Storage public access is disabled.',
+                    message: `Azure container '${KYC_CONTAINER_NAME}' not found.`,
                     serviceStatus: 'disabled',
-                    solution: 'Enable "Allow blob public access" in Azure Portal → Storage Account → Configuration'
+                    solution: `Create container '${KYC_CONTAINER_NAME}' in Azure Portal with public access level 'Blob'`
+                });
+            }
+            
+            if (error.message.includes('Public access is not permitted') || error.message.includes('access denied')) {
+                return res.status(503).json({ 
+                    success: false, 
+                    message: 'Azure Storage access denied.',
+                    serviceStatus: 'disabled',
+                    solution: 'Enable: 1) Allow blob public access, 2) Allow all networks in Azure Storage settings'
                 });
             }
             
@@ -186,7 +209,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             
             res.status(500).json({ 
                 success: false, 
-                message: 'Failed to complete KYC submission due to a server error.',
+                message: 'Failed to upload documents. Please try again.',
                 serviceStatus: 'error'
             });
         }
@@ -213,28 +236,28 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.json({
                 success: true,
                 serviceAvailable: true,
-                status: 'KYC service is active and connected to Azure Storage',
-                currentStatus: 'Service connected'
+                status: `KYC service is active and connected to Azure container: ${KYC_CONTAINER_NAME}`,
+                currentStatus: 'Service connected',
+                container: KYC_CONTAINER_NAME
             });
 
         } catch (error) {
             console.error('KYC Service Status Check Error:', error);
             
-            if (error.statusCode === 403) {
-                return res.json({
-                    success: true,
-                    serviceAvailable: false,
-                    status: 'KYC service connection failed - Azure Storage public access disabled',
-                    currentStatus: 'Service configuration error',
-                    solution: 'Enable "Allow blob public access" in Azure Portal'
-                });
+            let errorMessage = 'KYC service connection failed';
+            
+            if (error.statusCode === 404) {
+                errorMessage = `Azure container '${KYC_CONTAINER_NAME}' not found`;
+            } else if (error.statusCode === 403) {
+                errorMessage = 'Azure Storage access denied';
             }
             
             res.json({
                 success: true,
                 serviceAvailable: false,
-                status: 'KYC service connection failed - ' + error.message,
-                currentStatus: 'Service connection failed'
+                status: `${errorMessage} - ${error.message}`,
+                currentStatus: 'Service connection failed',
+                container: KYC_CONTAINER_NAME
             });
         }
     });
@@ -247,29 +270,38 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             const user = await User.findById(req.userId).select('kycStatus kycDocuments');
             
             let azureStatus = 'unknown';
+            let containerInfo = {};
+            
             try {
                 const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-                await containerClient.getProperties();
+                const properties = await containerClient.getProperties();
                 azureStatus = 'connected';
+                containerInfo = {
+                    name: KYC_CONTAINER_NAME,
+                    exists: true,
+                    publicAccess: properties.blobPublicAccess || 'private'
+                };
+                
             } catch (error) {
-                azureStatus = 'error: ' + error.message;
+                azureStatus = `error: ${error.message}`;
+                containerInfo = {
+                    name: KYC_CONTAINER_NAME,
+                    exists: false,
+                    error: error.message,
+                    statusCode: error.statusCode
+                };
             }
             
             res.json({
                 success: true,
+                azure: {
+                    enabled: azureEnabled,
+                    container: containerInfo,
+                    status: azureStatus
+                },
                 user: {
                     kycStatus: user?.kycStatus || 'pending',
                     hasDocuments: !!user?.kycDocuments
-                },
-                service: {
-                    azureEnabled: azureEnabled,
-                    hasBlobClient: !!blobServiceClient,
-                    containerName: KYC_CONTAINER_NAME,
-                    azureStatus: azureStatus
-                },
-                upload: {
-                    maxFileSize: '5MB',
-                    allowedFields: ['front', 'back']
                 }
             });
         } catch (error) {
