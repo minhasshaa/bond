@@ -18,6 +18,7 @@
         .time-option { padding: 8px 16px; background-color: #374151; color: #d1d5db; border: 1px solid transparent; border-radius: 9999px; cursor: pointer; font-weight: 500; transition: all 0.2s ease-in-out; }
         .time-option:hover { background-color: #4b5563; }
         .time-option.active { background-color: #3b82f6; color: white; font-weight: 700; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+        .disabled-link { pointer-events: none; opacity: 0.5; text-decoration: none; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200">
@@ -218,6 +219,7 @@
                     <div class="flex justify-center space-x-4 mt-4">
                         <button class="market-btn bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded" data-direction="up">Force UP</button>
                         <button class="market-btn bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded" data-direction="down">Force DOWN</button>
+                        <button id="market-disable-btn" class="market-btn bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-6 rounded" data-direction="null">Disable</button>
                     </div>
                 </div>
             </div>
@@ -245,6 +247,9 @@
             const marketStatusEl = document.getElementById('market-status');
             const pairSelect = document.getElementById('pair-select');
             const volumeTableBody = document.getElementById('volume-table-body');
+            
+            // NEW: Market Disable Button
+            const marketDisableBtn = document.getElementById('market-disable-btn'); 
 
             // NEW: Copy Trade Elements
             const copyTradeForm = document.getElementById('copy-trade-form');
@@ -302,9 +307,14 @@
                         fetchActiveCopyTrades();
                         populateCopyTradeTimeSelector();
                     }
-                     // ⭐ MARKET CONTROL: Load status when market control tab is opened
+                    // ⭐ MARKET CONTROL: Load status when market control tab is opened
                     if (tab.dataset.tab === 'market') {
-                        fetchMarketStatus();
+                         if (pairSelect.options.length > 0) {
+                            fetchMarketStatus();
+                        } else {
+                            // If initial data fetch missed, force a full data reload
+                            fetchData();
+                        }
                     }
                 });
             });
@@ -472,7 +482,6 @@
                 }
 
                 // Calculate execution time (current time + minutes)
-                // Calculate execution time (current time + minutes) - REMOVE SECONDS
                 const executionTime = new Date(Date.now() + (executionMinutes * 60 * 1000));
                 executionTime.setSeconds(0, 0); // ⭐ FIX: Remove seconds and milliseconds
 
@@ -668,7 +677,7 @@
             }
 
 
-            // ⭐ NEW: KYC FETCH FUNCTION - REDIRECT FIX IS APPLIED HERE
+            // ⭐ NEW: KYC FETCH FUNCTION (USES SIGNED URLs)
             async function fetchPendingKycUsers() {
                 const adminKey = getAdminKey();
                 kycReviewList.innerHTML = '<p class="text-gray-400">Loading pending users...</p>';
@@ -680,6 +689,7 @@
                     const data = await response.json();
 
                     if (!data.success) {
+                        // FIX: Display server message if Azure is not configured
                         return kycReviewList.innerHTML = `<p class="text-red-400">Error: ${data.message}</p>`;
                     }
 
@@ -693,10 +703,12 @@
                         const userElement = document.createElement('div');
                         userElement.className = 'p-4 border border-gray-700 rounded-lg bg-gray-700';
                         
-                        // ⭐ KYC REDIRECT FIX: The href should point to a dedicated viewing endpoint (will be fixed in admin.js)
-                        // It currently uses the blob path directly in admin.js which is incorrect without Azure config.
-                        const frontLink = `${ADMIN_API_BASE_URL}/kyc/document/${user._id}/front`;
-                        const backLink = `${ADMIN_API_BASE_URL}/kyc/document/${user._id}/back`;
+                        // ⭐ KYC LINK FIX: The links are now the secure, signed URLs from admin.js
+                        const frontLink = user.documents.front || '#';
+                        const backLink = user.documents.back || '#';
+                        const frontDisabled = user.documents.front ? '' : 'disabled-link';
+                        const backDisabled = user.documents.back ? '' : 'disabled-link';
+                        const noDocsMessage = user.documents.front || user.documents.back ? '' : '<p class="text-red-400 text-xs mt-2">No documents found (Admin Error or Upload Failed).</p>';
 
 
                         userElement.innerHTML = `
@@ -707,9 +719,10 @@
                             <p class="text-sm text-gray-400 mb-2">Joined: ${new Date(user.joined).toLocaleDateString()}</p>
 
                             <div class="flex space-x-4 mb-4">
-                                <a href="${frontLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">View ID Front</a>
-                                <a href="${backLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium">View ID Back</a>
+                                <a href="${frontLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium ${frontDisabled}">View ID Front</a>
+                                <a href="${backLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium ${backDisabled}">View ID Back</a>
                             </div>
+                            ${noDocsMessage}
 
                             <div class="flex space-x-2">
                                 <button data-userid="${user._id}" data-status="verified" class="kyc-action-btn bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg">Verify</button>
@@ -768,7 +781,7 @@
 
             const updateMarketStatus = (marketStatus) => {
                 const selectedPair = pairSelect.value;
-                const status = (marketStatus && marketStatus[selectedPair]) || 'auto';
+                const status = (marketStatus && marketStatus[selectedPair]) || 'Auto';
                 marketStatusEl.textContent = status.toUpperCase();
                 marketStatusEl.className = status === 'up' ? 'text-green-400' : status === 'down' ? 'text-red-400' : 'text-yellow-400';
             };
@@ -852,15 +865,17 @@
                 button.addEventListener('click', () => {
                     const pair = pairSelect.value;
                     if (!pair) return alert('Please select a trading pair first.');
-                    // Use null when button.dataset.direction is not 'up' or 'down'
-                    const direction = button.dataset.direction === 'up' ? 'up' : 'down'; 
+                    
+                    // FIX: Pass null for 'Disable' and the direction for UP/DOWN
+                    const direction = button.dataset.direction === 'null' ? null : button.dataset.direction; 
+                    
                     handleApiAction(`${ADMIN_API_BASE_URL}/market-control`, { pair, direction });
                 });
             });
 
             pairSelect.addEventListener('change', () => {
-                fetchData(); // Reloads data and updates status from data.marketStatus
-                // If not loading all data, use fetchMarketStatus() here.
+                // When pair changes, fetch the current status
+                fetchMarketStatus();
             });
 
             // Initialize time scroller
