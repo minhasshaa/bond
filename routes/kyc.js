@@ -72,7 +72,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
         } catch (error) {
             console.error('KYC Status Fetch Error:', error);
-            // Return a 500 error if DB query fails
             res.status(500).json({ 
                 success: false, 
                 message: 'Failed to fetch KYC status (Internal Server Error).',
