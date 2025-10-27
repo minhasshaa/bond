@@ -262,55 +262,5 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME = 'id-document
         }
     });
 
-    // ----------------------------------------------------------------------
-    // [GET] /api/kyc/debug - Debug endpoint to check current configuration
-    // ----------------------------------------------------------------------
-    router.get('/debug', userAuth, async (req, res) => {
-        try {
-            const user = await User.findById(req.userId).select('kycStatus kycDocuments');
-            
-            let azureStatus = 'unknown';
-            let containerInfo = {};
-            
-            try {
-                const containerClient = blobServiceClient.getContainerClient(KYC_CONTAINER_NAME);
-                const properties = await containerClient.getProperties();
-                azureStatus = 'connected';
-                containerInfo = {
-                    name: KYC_CONTAINER_NAME,
-                    exists: true,
-                    publicAccess: properties.blobPublicAccess || 'private'
-                };
-                
-            } catch (error) {
-                azureStatus = `error: ${error.message}`;
-                containerInfo = {
-                    name: KYC_CONTAINER_NAME,
-                    exists: false,
-                    error: error.message,
-                    statusCode: error.statusCode
-                };
-            }
-            
-            res.json({
-                success: true,
-                azure: {
-                    enabled: azureEnabled,
-                    container: containerInfo,
-                    status: azureStatus
-                },
-                user: {
-                    kycStatus: user?.kycStatus || 'pending',
-                    hasDocuments: !!user?.kycDocuments
-                }
-            });
-        } catch (error) {
-            res.json({
-                success: false,
-                error: error.message
-            });
-        }
-    });
-
     return router;
 };
