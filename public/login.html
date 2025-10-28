@@ -56,13 +56,13 @@
 
         <form id="login-form" class="space-y-6">
             <div>
-                <label for="username" class="text-sm font-medium text-gray-300">Username</label>
+                <label for="username" class="text-sm font-medium text-gray-300">Username/Email</label>
                 <input 
                     type="text" 
                     id="username" 
                     required 
                     class="w-full px-4 py-2 mt-2 text-gray-100 bg-gray-700 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter your username"
+                    placeholder="Enter your username or email"
                 >
             </div>
 
@@ -98,12 +98,10 @@
         </p>
     </div>
     
-    <!-- Forgot Password Modal -->
     <div id="forgot-password-modal" class="modal-backdrop hidden">
         <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md space-y-6">
             <h2 class="text-2xl font-bold text-white text-center" id="modal-title">Password Reset</h2>
             
-            <!-- Step 1: Identity Verification -->
             <div id="step-identity" class="space-y-4">
                 <p class="text-gray-400 text-sm">To reset your password, please verify your identity using the details submitted during KYC.</p>
                 <form id="verify-identity-form" class="space-y-4">
@@ -125,7 +123,6 @@
                 </form>
             </div>
             
-            <!-- Step 2: Set New Password (Hidden initially) -->
             <div id="step-password" class="space-y-4 hidden">
                 <p class="text-gray-400 text-sm">Identity verified. Enter and confirm your new password below.</p>
                 <form id="set-new-password-form" class="space-y-4">
@@ -171,6 +168,10 @@
         const verifyIdentityBtn = document.getElementById('verify-identity-btn');
         const setNewPasswordBtn = document.getElementById('set-new-password-btn');
 
+        // ⭐ NEW STATE VARIABLES for the two-step token flow
+        let currentResetToken = null; 
+        let resetUsernameForStep2 = null; 
+
         // Helper function for password toggles
         const setupPasswordToggles = () => {
             document.querySelectorAll('.toggle-password').forEach(toggle => {
@@ -195,6 +196,11 @@
             stepIdentity.classList.remove('hidden');
             stepPassword.classList.add('hidden');
             resetMessageDiv.textContent = '';
+            
+            // Reset state variables on open
+            currentResetToken = null;
+            resetUsernameForStep2 = null;
+
             // Reset forms on open
             verifyIdentityForm.reset();
             setNewPasswordForm.reset();
@@ -203,6 +209,9 @@
 
         const closeModal = () => {
             modal.classList.add('hidden');
+            // Clear token regardless of how modal was closed
+            currentResetToken = null; 
+            resetUsernameForStep2 = null; 
         };
         
         // --- Event Listeners for Modal ---
@@ -216,6 +225,7 @@
         verifyIdentityForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             resetMessageDiv.textContent = '';
+            resetMessageDiv.classList.remove('text-green-400', 'text-red-400');
             verifyIdentityBtn.disabled = true;
             verifyIdentityBtn.textContent = 'Verifying...';
 
@@ -234,15 +244,19 @@
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.message || 'Verification failed');
                 
+                // ⭐ NEW: Store the token received from the server (Step 1 success)
+                currentResetToken = data.resetToken; 
+                // ⭐ NEW: Store username for use in Step 2
+                resetUsernameForStep2 = username;
+
                 // Success: Move to step 2 (Set new password)
                 stepIdentity.classList.add('hidden');
                 stepPassword.classList.remove('hidden');
-                resetMessageDiv.textContent = 'Identity verified successfully.';
+                resetMessageDiv.textContent = 'Identity verified successfully. Proceed to set new password.';
                 resetMessageDiv.classList.add('text-green-400');
                 
             } catch (error) {
                 resetMessageDiv.textContent = `Error: ${error.message}`;
-                resetMessageDiv.classList.remove('text-green-400');
                 resetMessageDiv.classList.add('text-red-400');
             } finally {
                 verifyIdentityBtn.disabled = false;
@@ -254,13 +268,24 @@
         setNewPasswordForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             resetMessageDiv.textContent = '';
+            resetMessageDiv.classList.remove('text-green-400', 'text-red-400');
             setNewPasswordBtn.disabled = true;
             setNewPasswordBtn.textContent = 'Updating...';
             
-            const username = document.getElementById('reset-username').value; // Use username from step 1
+            // ⭐ MODIFIED: Use the stored username and token
+            const username = resetUsernameForStep2; 
             const newPassword = document.getElementById('new-password').value;
             const confirmPassword = document.getElementById('confirm-new-password').value;
+            const resetToken = currentResetToken; // ⭐ CRUCIAL: Get the token from the variable
             
+            if (!resetToken || !username) {
+                resetMessageDiv.textContent = 'Error: Verification state is missing. Please restart the process.';
+                resetMessageDiv.classList.add('text-red-400');
+                setNewPasswordBtn.disabled = false;
+                setNewPasswordBtn.textContent = 'Update Password';
+                return;
+            }
+
             if (newPassword !== confirmPassword) {
                 resetMessageDiv.textContent = 'Error: New passwords do not match.';
                 resetMessageDiv.classList.add('text-red-400');
@@ -270,11 +295,11 @@
             }
 
             try {
-                // API call to update the password
+                // ⭐ CRUCIAL: Include the resetToken in the payload for Step 2
                 const response = await fetch('/api/auth/reset-password/update-password', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, newPassword }),
+                    body: JSON.stringify({ username, newPassword, resetToken }), // Pass the token!
                 });
 
                 const data = await response.json();
@@ -282,18 +307,18 @@
                 
                 // Final Success
                 resetMessageDiv.textContent = 'Password updated successfully. You can now log in.';
-                resetMessageDiv.classList.remove('text-red-400');
                 resetMessageDiv.classList.add('text-green-400');
                 setNewPasswordForm.reset();
                 setTimeout(closeModal, 3000); 
 
             } catch (error) {
                 resetMessageDiv.textContent = `Error: ${error.message}`;
-                resetMessageDiv.classList.remove('text-green-400');
                 resetMessageDiv.classList.add('text-red-400');
             } finally {
                 setNewPasswordBtn.disabled = false;
                 setNewPasswordBtn.textContent = 'Update Password';
+                // ⭐ NEW: Clear token regardless of success or fail to prevent token reuse
+                currentResetToken = null; 
             }
         });
 
@@ -308,6 +333,7 @@
             const password = document.getElementById('password').value;
 
             try {
+                // This request now supports login with username or email (due to server-side fix)
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
