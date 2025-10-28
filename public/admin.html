@@ -677,7 +677,7 @@
             }
 
 
-            // ⭐ NEW: KYC FETCH FUNCTION (USES SIGNED URLs)
+            // ⭐ UPDATED: KYC FETCH FUNCTION (to include Name, ID Number, and Selfie)
             async function fetchPendingKycUsers() {
                 const adminKey = getAdminKey();
                 kycReviewList.innerHTML = '<p class="text-gray-400">Loading pending users...</p>';
@@ -703,12 +703,16 @@
                         const userElement = document.createElement('div');
                         userElement.className = 'p-4 border border-gray-700 rounded-lg bg-gray-700';
                         
-                        // ⭐ KYC LINK FIX: The links are now the secure, signed URLs from admin.js
+                        // ⭐ NEW DATA
                         const frontLink = user.documents.front || '#';
                         const backLink = user.documents.back || '#';
+                        const selfieLink = user.documents.selfie || '#'; // Get the new selfie URL
+                        
                         const frontDisabled = user.documents.front ? '' : 'disabled-link';
                         const backDisabled = user.documents.back ? '' : 'disabled-link';
-                        const noDocsMessage = user.documents.front || user.documents.back ? '' : '<p class="text-red-400 text-xs mt-2">No documents found (Admin Error or Upload Failed).</p>';
+                        const selfieDisabled = user.documents.selfie ? '' : 'disabled-link'; // Check for selfie URL
+                        
+                        const noDocsMessage = (user.documents.front || user.documents.back || user.documents.selfie) ? '' : '<p class="text-red-400 text-xs mt-2">No documents found (Admin Error or Upload Failed).</p>';
 
 
                         userElement.innerHTML = `
@@ -716,11 +720,20 @@
                                 <h3 class="text-lg font-bold text-white">${user.username} (ID: ${user._id})</h3>
                                 <span class="px-3 py-1 text-xs font-semibold rounded-full bg-yellow-600 text-white">${user.kycStatus.toUpperCase()}</span>
                             </div>
+                            
+                            <!-- ⭐ NEW: IDENTITY INFORMATION -->
+                            <div class="mb-3 p-3 bg-gray-800 rounded-md">
+                                <p class="text-sm"><strong>Full Name:</strong> ${user.fullName || 'N/A'}</p>
+                                <p class="text-sm"><strong>ID Number:</strong> ${user.identityNumber || 'N/A'}</p>
+                            </div>
+
                             <p class="text-sm text-gray-400 mb-2">Joined: ${new Date(user.joined).toLocaleDateString()}</p>
 
-                            <div class="flex space-x-4 mb-4">
+                            <!-- ⭐ NEW: DOCUMENT LINKS (including Selfie) -->
+                            <div class="flex flex-wrap gap-4 mb-4">
                                 <a href="${frontLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium ${frontDisabled}">View ID Front</a>
                                 <a href="${backLink}" target="_blank" class="text-blue-400 hover:text-blue-300 underline font-medium ${backDisabled}">View ID Back</a>
+                                <a href="${selfieLink}" target="_blank" class="text-yellow-400 hover:text-yellow-300 underline font-medium ${selfieDisabled}">View Selfie</a>
                             </div>
                             ${noDocsMessage}
 
@@ -742,7 +755,7 @@
                 }
             }
 
-            // ⭐ NEW: KYC ACTION HANDLER
+            // ⭐ NEW: KYC ACTION HANDLER (Unchanged logic)
             async function handleKycAction(event) {
                 const button = event.target;
                 const userId = button.getAttribute('data-userid');
@@ -886,3 +899,4 @@
     </script>
 </body>
 </html>
+
