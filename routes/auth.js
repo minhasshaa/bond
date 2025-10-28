@@ -8,7 +8,6 @@ const bcrypt = require('bcryptjs'); // Needed for password hashing
 // --- REGISTER A NEW USER ---
 router.post('/register', async (req, res) => {
     try {
-        // ✅ CHANGED: Added 'refCode' to the request body
         const { username, email, password, confirmPassword, region, refCode } = req.body;
 
         if (!username || !email || !password || !confirmPassword || !region) {  
@@ -19,7 +18,7 @@ router.post('/register', async (req, res) => {
         }  
 
         let referredBy = null;
-        // This logic is now correctly receiving the refCode from the frontend
+        // Referral tracking fix: checks for and finds the referrer
         if (refCode) {
             const referrer = await User.findOne({ referralCode: refCode });
             if (referrer) {
@@ -27,10 +26,9 @@ router.post('/register', async (req, res) => {
             }
         }
 
-        // Create a new user, including the referrer's ID if found
         const user = new User({ username, email, password, region, referredBy });  
 
-        // ✅ NEW: Generate a unique referral code for the new user
+        // Generate and assign unique referral code
         let isUnique = false;
         let referralCode = '';
         while (!isUnique) {
@@ -42,6 +40,7 @@ router.post('/register', async (req, res) => {
         }
         user.referralCode = referralCode;
 
+        // This save operation should now succeed due to the User model fix
         await user.save();  
 
         res.status(201).json({ message: "User registered successfully. Please log in." });
@@ -55,6 +54,7 @@ router.post('/register', async (req, res) => {
                 return res.status(409).json({ message: "Email is already registered." });
             }
         }
+        // Log the error for debugging but return a generic message to the user
         console.error("Registration Error:", error);  
         res.status(500).json({ message: "Server error during registration." });
     }
@@ -102,7 +102,6 @@ router.post('/login', async (req, res) => {
 // ----------------------------------------------------------------------
 
 // [POST] /api/auth/reset-password/verify-identity
-// Verifies user's identity against KYC data (Full Name and ID Number)
 router.post('/reset-password/verify-identity', async (req, res) => {
     const { username, fullName, identityNumber } = req.body;
 
@@ -114,21 +113,17 @@ router.post('/reset-password/verify-identity', async (req, res) => {
         const user = await User.findOne({ username });
 
         if (!user) {
-            // Return a generic error to prevent user enumeration
             return res.status(400).json({ success: false, message: 'Verification failed. Please check your credentials.' });
         }
         
-        // Ensure KYC data is present on the user's profile
         if (!user.fullName || !user.identityNumber) {
              return res.status(400).json({ success: false, message: 'KYC identity data is missing for this account. Please contact support.' });
         }
 
-        // Perform strict case-insensitive comparison for name and ID number
         const nameMatches = user.fullName.trim().toLowerCase() === fullName.trim().toLowerCase();
         const idMatches = user.identityNumber.trim().toLowerCase() === identityNumber.trim().toLowerCase();
 
         if (nameMatches && idMatches) {
-            // Identity verified successfully
             return res.json({ success: true, message: 'Identity verified. You can now set a new password.' });
         } else {
             return res.status(400).json({ success: false, message: 'Verification failed. Full Name or Identity Number do not match our records.' });
@@ -142,7 +137,6 @@ router.post('/reset-password/verify-identity', async (req, res) => {
 
 
 // [POST] /api/auth/reset-password/update-password
-// Sets the new password after identity verification
 router.post('/reset-password/update-password', async (req, res) => {
     const { username, newPassword } = req.body;
 
@@ -150,7 +144,6 @@ router.post('/reset-password/update-password', async (req, res) => {
         return res.status(400).json({ success: false, message: 'Username and new password are required.' });
     }
     
-    // Simple password complexity check
     if (newPassword.length < 6) {
         return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
     }
@@ -162,7 +155,6 @@ router.post('/reset-password/update-password', async (req, res) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
         
-        // The user model's pre('save') hook will automatically hash the new password when saving
         user.password = newPassword; 
 
         await user.save();
