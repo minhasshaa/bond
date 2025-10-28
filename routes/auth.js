@@ -15,11 +15,11 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ message: "All fields are required." });  
         }  
         if (password !== confirmPassword) {  
-            return res.status(400).json({ message: "Passwords do not match." });  
+            return res.status(400).json({ message: "Passwords do not match." });
         }  
 
         let referredBy = null;
-        // If a referral code was provided, find the user who owns it
+        // This logic is now correctly receiving the refCode from the frontend
         if (refCode) {
             const referrer = await User.findOne({ referralCode: refCode });
             if (referrer) {
@@ -31,7 +31,6 @@ router.post('/register', async (req, res) => {
         const user = new User({ username, email, password, region, referredBy });  
 
         // ✅ NEW: Generate a unique referral code for the new user
-        // This loop ensures the generated code is truly unique
         let isUnique = false;
         let referralCode = '';
         while (!isUnique) {
@@ -99,7 +98,7 @@ router.post('/login', async (req, res) => {
 
 
 // ----------------------------------------------------------------------
-// NEW: PASSWORD RESET ROUTES
+// NEW: PASSWORD RESET ROUTES (KYC Verification)
 // ----------------------------------------------------------------------
 
 // [POST] /api/auth/reset-password/verify-identity
@@ -163,7 +162,7 @@ router.post('/reset-password/update-password', async (req, res) => {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
         
-        // The user model's pre('save') hook should handle hashing, but we set the raw password here.
+        // The user model's pre('save') hook will automatically hash the new password when saving
         user.password = newPassword; 
 
         await user.save();
