@@ -38,7 +38,7 @@ const userSchema = new mongoose.Schema({
         lowercase: true,
         match: [/.+\@.+\..+/, 'Please fill a valid email address']
     },
-    // ⭐ FIX: ADDED REGION FIELD
+    // ⭐ ADDED REGION FIELD (Required by signup)
     region: { 
         type: String,
         required: true,
@@ -112,13 +112,13 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null,
         sparse: true,
-        unique: true, // Enforce one account per name (will be combined with ID check)
+        // unique: true REMOVED to fix duplicate key error on null
     },
     identityNumber: {
         type: String,
         default: null,
         sparse: true,
-        unique: true, // Enforce one account per ID number
+        // unique: true REMOVED to fix duplicate key error on null
     },
     
     // ADDED: KYC Verification Fields
