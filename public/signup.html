@@ -44,7 +44,6 @@
         <h1 class="text-3xl font-bold text-center text-white">Create Your Account</h1>
 
         <form id="signup-form" class="space-y-4">
-            <!-- Hidden field to store referral code from URL -->
             <input type="hidden" id="referralCodeInput" value="">
             <div id="referral-display" class="bg-gray-700 text-sm p-3 rounded-lg hidden">
                 You were invited by a friend!
@@ -110,6 +109,7 @@
         const referralCodeInput = document.getElementById('referralCodeInput');
         const referralDisplay = document.getElementById('referral-display');
         
+        // If code is found in URL, set the hidden input value and display the message
         if (refCode) {
             referralCodeInput.value = refCode;
             referralDisplay.classList.remove('hidden');
@@ -118,19 +118,17 @@
         // --- Password Visibility Toggle Logic ---
         const setupPasswordToggles = () => {
             document.querySelectorAll('.toggle-password').forEach(toggle => {
-                // Ensure we only attach the event listener once
                 if (toggle.classList.contains('listener-attached')) return;
 
                 toggle.onclick = () => {
                     const targetId = toggle.getAttribute('data-target');
                     const targetInput = document.getElementById(targetId);
-                    if (!targetInput) return; // Ignore if input is not found
+                    if (!targetInput) return;
                     
                     const isPassword = targetInput.type === 'password';
                     
                     targetInput.type = isPassword ? 'text' : 'password';
                     
-                    // Change the icon 
                     toggle.innerHTML = isPassword ? 
                         '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057 5.064-7 9.542-7 1.258 0 2.484.225 3.637.643M19.5 12l-1.5-1.5M4.5 12l1.5-1.5M21 21l-1.5-1.5m-5.49-5.49L21 21"></path></svg>' : // Closed eye icon
                         '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>'; // Open eye icon
