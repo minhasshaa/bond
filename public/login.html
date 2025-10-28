@@ -19,6 +19,7 @@
 
         <form id="login-form" class="space-y-6">
             <div>
+                <!-- Changed from User ID to Username -->
                 <label for="username" class="text-sm font-medium text-gray-300">Username</label>
                 <input 
                     type="text" 
@@ -45,7 +46,7 @@
             </button>
         </form>
 
-        <div id="message" class="text-center text-sm min-h-[20px]"></div>
+        <div id="message" class="text-center text-sm"></div>
 
         <p class="text-sm text-center text-gray-400">
             Don't have an account? 
@@ -54,54 +55,34 @@
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const LOGIN_API_URL = '/api/auth/login';
-            const VERIFICATION_PAGE_URL = '/signup.html'; 
-            const loginForm = document.getElementById('login-form');
-            const messageDiv = document.getElementById('message');
+        const loginForm = document.getElementById('login-form');
+        const messageDiv = document.getElementById('message');
 
-            loginForm.addEventListener('submit', async (event) => {
-                event.preventDefault();
-                messageDiv.textContent = '';
-                messageDiv.className = 'text-center text-sm';
+        loginForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            messageDiv.textContent = '';
+            messageDiv.className = 'text-center text-sm';
 
-                const username = document.getElementById('username').value;
-                const password = document.getElementById('password').value;
+            const username = document.getElementById('username').value; // Changed from userId
+            const password = document.getElementById('password').value;
 
-                try {
-                    const response = await fetch(LOGIN_API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ username, password }),
-                    });
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }), // Changed from userId
+                });
 
-                    const data = await response.json();
-                    
-                    if (data.success && data.token) {
-                        // Success: Store token and redirect
-                        localStorage.setItem('authToken', data.token);
-                        window.location.href = '/dashboard.html';
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || 'Login failed');
 
-                    } else if (data.requiresVerification && data.userId && data.email) {
-                        // CRITICAL FIX: Account unverified. Redirect with UserId and Email.
-                        
-                        alert(`Account requires verification. Check ${data.email}. Redirecting...`);
+                localStorage.setItem('authToken', data.token);
+                window.location.href = '/dashboard.html';
 
-                        // Redirect to signup.html, passing required data in URL parameters
-                        window.location.href = `${VERIFICATION_PAGE_URL}?userId=${data.userId}&email=${encodeURIComponent(data.email)}`;
-                        
-                    } else if (!response.ok) {
-                        // Generic error (Invalid password, etc.)
-                        throw new Error(data.message || 'Login failed');
-                    } else {
-                        messageDiv.textContent = data.message || 'Login failed.';
-                        messageDiv.classList.add('text-red-400');
-                    }
-                } catch (error) {
-                    messageDiv.textContent = `Error: ${error.message}`;
-                    messageDiv.classList.add('text-red-400');
-                }
-            });
+            } catch (error) {
+                messageDiv.textContent = `Error: ${error.message}`;
+                messageDiv.classList.add('text-red-400');
+            }
         });
     </script>
 </body>
