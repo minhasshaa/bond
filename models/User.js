@@ -107,6 +107,17 @@ const userSchema = new mongoose.Schema({
     sparse: true,
     unique: true, // Enforce one account per ID number
   },
+    region: {
+    type: String,
+    required: true,
+    enum: [
+        'Africa', 
+        'Asia', 
+        'Europe', 
+        'North America', 
+        'South America', 
+        'Oceania'
+  },
   
   // ADDED: KYC Verification Fields
   kycStatus: {
