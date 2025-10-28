@@ -123,9 +123,54 @@
         </header>
 
         <main class="space-y-6">
-            <!-- Trading Stats, Volume, Account Actions and Password/Referral sections are unchanged for brevity -->
-            <!-- ... (Omitted unchanged sections for file size) ... -->
+            <!-- TRADING STATISTICS SECTION (Original Content) -->
+            <div class="p-4 space-y-4">
+                <h2 class="text-xl font-semibold mb-4">Trading Statistics</h2>
+                <div id="stats-loading" class="text-center text-gray-400 py-8">Loading stats...</div>
+                <div id="stats-content" class="hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-6 items-center mb-6">
+                        <div class="md:col-span-2 grid grid-cols-2 gap-4 text-center">
+                            <div class="bg-gray-800 p-4 rounded-lg"><p class="text-2xl font-bold text-green-400" id="stats-netpnl">$0.00</p><p class="text-sm text-gray-400">Net P&L</p></div>
+                            <div class="bg-gray-800 p-4 rounded-lg"><p class="text-2xl font-bold" id="stats-wins">-</p><p class="text-sm text-gray-400">Wins</p></div>
+                            <div class="bg-gray-800 p-4 rounded-lg col-span-2"><p class="text-2xl font-bold" id="stats-losses">-</p><p class="text-sm text-gray-400">Losses</p></div>
+                        </div>
+                        <div id="win-loss-chart-container" class="md:col-span-3 flex justify-center">
+                            <div id="win-loss-chart" style="width: 220px; height: 220px;"></div>
+                        </div>
+                    </div>
+                    <div class="border-t border-gray-700 pt-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                        <div class="bg-gray-800 p-4 rounded-lg"><p class="text-2xl font-bold" id="stats-total-trades">-</p><p class="text-sm text-gray-400">Total Trades</p></div>
+                        <div class="bg-gray-800 p-4 rounded-lg"><p class="text-2xl font-bold" id="stats-volume">$0.00</p><p class="text-sm text-gray-400">Total Volume</p></div>
+                        <div class="bg-gray-800 p-4 rounded-lg col-span-2 sm:col-span-2"><p class="text-2xl font-bold" id="stats-avg-size">$0.00</p><p class="text-sm text-gray-400">Avg. Trade Size</p></div>
+                    </div>
+                </div>
+            </div>
 
+            <div class="h-px bg-gray-700 mx-4"></div>
+
+            <!-- TRADING VOLUME REQUIREMENT (Original Content) -->
+            <div class="p-4 space-y-4">
+                <h2 class="text-xl font-semibold mb-2">Trading Volume Requirement</h2>
+                <p class="text-xs text-gray-400 mb-4">A 50% tax is applied to withdrawals if your total trade volume is less than 110% of your total deposits.</p>
+                <div id="volume-loading" class="text-center text-gray-400 py-4">Loading volume data...</div>
+                <div id="volume-content" class="hidden">
+                    <div class="flex justify-between mb-1 text-sm font-medium text-gray-300">
+                        <span id="volume-traded-text">$0.00</span>
+                        <span id="volume-required-text">$0.00</span>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-2.5">
+                        <div id="volume-progress-bar" class="bg-green-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between mt-1 text-xs text-gray-500">
+                        <span>Volume Traded</span>
+                        <span>Requirement</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="h-px bg-gray-700 mx-4"></div>
+
+            <!-- ACCOUNT ACTIONS (Original Content) -->
             <div class="p-4 space-y-4">
                  <h2 class="text-xl font-semibold mb-4">Account Actions</h2>
                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -322,6 +367,25 @@
             const avatarDiv = document.getElementById('avatar');
             const balanceDisplay = document.getElementById('balance-display');
             const logoutButton = document.getElementById('logout-button');
+            const statsLoading = document.getElementById('stats-loading');
+            const statsContent = document.getElementById('stats-content');
+            const winLossChart = echarts.init(document.getElementById('win-loss-chart'));
+            const refLoading = document.getElementById('ref-loading');
+            const refContent = document.getElementById('ref-content');
+            const copyBtn = document.getElementById('copy-ref-link-btn');
+            const refLinkInput = document.getElementById('ref-link-input');
+            const passwordForm = document.getElementById('change-password-form');
+            const passwordMessage = document.getElementById('password-message');
+            const passwordSubmitBtn = document.getElementById('password-submit-btn');
+            const showPasswordBtn = document.getElementById('show-password-btn');
+            const showReferralBtn = document.getElementById('show-referral-btn');
+            const securitySection = document.getElementById('security-section');
+            const referralSection = document.getElementById('referral-section');
+            const volumeLoading = document.getElementById('volume-loading');
+            const volumeContent = document.getElementById('volume-content');
+            const volumeTradedText = document.getElementById('volume-traded-text');
+            const volumeRequiredText = document.getElementById('volume-required-text');
+            const volumeProgressBar = document.getElementById('volume-progress-bar');
 
             // KYC Elements
             const kycStatusSpan = document.getElementById('kyc-status');
@@ -349,11 +413,24 @@
             const errorModal = document.getElementById('error-modal');
             const closeModalButton = document.getElementById('close-modal-button');
 
-
             // --------------------------------------------------
             // UTILITIES AND HELPERS
             // --------------------------------------------------
 
+            const generateColor = (str) => {
+                let hash = 0;
+                if (!str) return '#6b7280';
+                for (let i = 0; i < str.length; i++) {
+                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                let color = '#';
+                for (let i = 0; i < 3; i++) {
+                    let value = (hash >> (i * 8)) & 0xFF;
+                    color += ('00' + value.toString(16)).substr(-2);
+                }
+                return color;
+            };
+            
             const showModal = (message) => {
                 document.getElementById('modal-message').textContent = message;
                 errorModal.classList.remove('hidden');
@@ -365,8 +442,7 @@
 
             closeModalButton.addEventListener('click', hideModal);
 
-
-            const activateTab = (tabName, persistContent = false) => {
+            const activateTab = (tabName) => {
                 document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(content => content.classList.add('hidden'));
 
@@ -377,7 +453,6 @@
                 if (activeContent) activeContent.classList.remove('hidden');
 
                 if (tabName === 'upload') {
-                    // Enable the tab permanently once identity is confirmed
                     tabUpload.disabled = false;
                     tabUpload.classList.add('text-white');
                 }
@@ -420,12 +495,18 @@
                     if (data.success) {
                         identityMessageElement.textContent = data.message || 'Identity verified! Proceed to upload.';
                         identityMessageElement.style.color = 'rgb(34, 197, 94)';
+                        // Disable inputs and button on success
+                        fullNameInput.disabled = true;
+                        identityNumberInput.disabled = true;
+                        verifyIdentityButton.textContent = 'Identity Confirmed';
+                        verifyIdentityButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+                        verifyIdentityButton.classList.add('bg-gray-600');
                         // Move to the next tab
                         activateTab('upload');
                     } else {
                         // Handle the 'already_exists' error
-                        if (data.reason === 'already_exists' || data.reason === 'already_exists_db') {
-                            showModal('The Full Name or Identity Number you entered is already linked to another account in our system. Only one account is permitted per user.');
+                        if (data.reason && data.reason.includes('exists')) {
+                            showModal('The Full Name or Identity Number you entered is already linked to another account in our system. Only one account is permitted per identity.');
                         } else {
                             throw new Error(data.message || 'Identity verification failed.');
                         }
@@ -437,7 +518,9 @@
                     identityMessageElement.style.color = 'rgb(239, 68, 68)';
                 } finally {
                     verifyIdentityButton.disabled = false;
-                    verifyIdentityButton.textContent = 'Submit & Verify Identity';
+                    if (!verifyIdentityButton.classList.contains('bg-gray-600')) {
+                        verifyIdentityButton.textContent = 'Submit & Verify Identity';
+                    }
                 }
             });
 
@@ -490,7 +573,6 @@
                         kycUploadMessageElement.style.color = 'rgb(34, 197, 94)';
 
                         form.reset();
-                        // Call fetchKycStatus again to show the updated 'review' status
                         await fetchKycStatus();
                         kycUploadButton.textContent = 'Upload All Documents';
 
@@ -548,6 +630,16 @@
                             kycReviewMessage.style.display = 'block';
                         } else { // pending or rejected
                             kycTabsContainer.style.display = 'block';
+                            
+                            // Re-enable identity inputs for potential rejection or new pending status
+                            fullNameInput.disabled = false;
+                            identityNumberInput.disabled = false;
+                            verifyIdentityButton.disabled = false;
+                            verifyIdentityButton.textContent = 'Submit & Verify Identity';
+                            verifyIdentityButton.classList.add('bg-green-600', 'hover:bg-green-700');
+                            verifyIdentityButton.classList.remove('bg-gray-600');
+                            identityMessageElement.textContent = '';
+
 
                             if (status === 'rejected') {
                                 kycStatusSpan.classList.add('text-danger');
@@ -560,12 +652,12 @@
                             // Determine which tab to show based on submitted identity info
                             if (data.identitySubmitted) {
                                 // Identity confirmed, go to upload tab
-                                fullNameInput.value = ''; // Clear fields for new submission if needed
-                                identityNumberInput.value = '';
                                 fullNameInput.disabled = true;
                                 identityNumberInput.disabled = true;
                                 verifyIdentityButton.disabled = true;
                                 verifyIdentityButton.textContent = 'Identity Already Saved';
+                                verifyIdentityButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+                                verifyIdentityButton.classList.add('bg-gray-600');
                                 identityMessageElement.textContent = 'Your Name and ID are saved. Please upload the required documents.';
                                 identityMessageElement.style.color = 'rgb(59, 130, 246)';
                                 activateTab('upload');
@@ -579,7 +671,7 @@
                         // Service connection failed / general error
                         kycStatusSpan.textContent = data.message || 'Service connection failed';
                         kycStatusSpan.classList.add('text-danger');
-                        kycTabsContainer.style.display = 'block'; // Show the form just in case user needs to try again
+                        kycTabsContainer.style.display = 'block';
                         activateTab('identity');
                     }
 
@@ -593,29 +685,13 @@
             }
 
             // ==========================================
-            // INITIALIZATION
+            // INITIALIZATION (Including Original Stats Fetching)
             // ==========================================
 
             fetchKycStatus();
             if (kycUploadForm) {
                 kycUploadForm.addEventListener('submit', handleKycUpload);
             }
-
-            // --- Unchanged Initialization Logic Below ---
-
-            const generateColor = (str) => {
-                let hash = 0;
-                if (!str) return '#6b7280';
-                for (let i = 0; i < str.length; i++) {
-                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-                }
-                let color = '#';
-                for (let i = 0; i < 3; i++) {
-                    let value = (hash >> (i * 8)) & 0xFF;
-                    color += ('00' + value.toString(16)).substr(-2);
-                }
-                return color;
-            };
 
             fetch('/api/user/info', { headers })
                 .then(res => res.json())
@@ -630,33 +706,83 @@
                     }
                 });
 
-            // Omitted remaining chart and stats fetching for brevity, but they are still in the original file content
-            // The rest of the original script content (stats, volume, referral, password change) is assumed to be preserved here...
+            fetch('/api/user/stats', { headers })
+                .then(res => res.json())
+                .then(data => {
+                    statsLoading.style.display = 'none';
+                    statsContent.classList.remove('hidden');
+                    document.getElementById('stats-netpnl').textContent = `$${data.netPnl}`;
+                    document.getElementById('stats-wins').textContent = data.wins;
+                    document.getElementById('stats-losses').textContent = data.losses;
+                    document.getElementById('stats-total-trades').textContent = data.totalTrades;
+                    document.getElementById('stats-volume').textContent = `$${data.volume}`;
+                    document.getElementById('stats-avg-size').textContent = `$${data.averageTradeSize}`;
 
-            // Re-adding listeners for the sections that were omitted for brevity in the middle of the file:
-            const showPasswordBtn = document.getElementById('show-password-btn');
-            const showReferralBtn = document.getElementById('show-referral-btn');
-            const securitySection = document.getElementById('security-section');
-            const referralSection = document.getElementById('referral-section');
-            const passwordForm = document.getElementById('change-password-form');
-            const passwordSubmitBtn = document.getElementById('password-submit-btn');
-            const passwordMessage = document.getElementById('password-message');
-            const refLinkInput = document.getElementById('ref-link-input');
-            const copyBtn = document.getElementById('copy-ref-link-btn');
+                    winLossChart.setOption({
+                        backgroundColor: 'transparent',
+                        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                        legend: { show: false },
+                        title: {
+                            text: `${data.winRate}%`,
+                            subtext: 'Win Rate',
+                            left: 'center',
+                            top: 'center',
+                            textStyle: { fontSize: 28, fontWeight: 'bold', color: '#E2E8F0' },
+                            subtextStyle: { fontSize: 14, color: '#9CA3AF' }
+                        },
+                        series: [{
+                            name: 'Trade Results', type: 'pie', radius: ['75%', '100%'], avoidLabelOverlap: false, label: { show: false },
+                            data: [
+                                { value: data.wins, name: 'Wins', itemStyle: { color: '#22c55e' } },
+                                { value: data.losses, name: 'Losses', itemStyle: { color: '#ef4444' } },
+                                { value: data.ties, name: 'Ties', itemStyle: { color: '#6b7280' } }
+                            ]
+                        }]
+                    });
+                });
 
-            showPasswordBtn.addEventListener('click', () => {
-                securitySection.classList.toggle('hidden');
-                referralSection.classList.add('hidden');
-            });
+            fetch('/api/user/volume-data', { headers })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        const { totalDeposits, totalTradeVolume } = data;
+                        const volumeRequirement = totalDeposits * 1.10;
+                        let progressPercent = volumeRequirement > 0 ? (totalTradeVolume / volumeRequirement) * 100 : 100;
+                        if (progressPercent > 100) progressPercent = 100;
 
-            showReferralBtn.addEventListener('click', () => {
-                referralSection.classList.toggle('hidden');
-                securitySection.classList.add('hidden');
-            });
+                        const formatCurrency = (num) => (num || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
-            logoutButton.addEventListener('click', () => {
-                localStorage.removeItem('authToken');
-                window.location.href = '/login.html';
+                        volumeTradedText.textContent = formatCurrency(totalTradeVolume);
+                        volumeRequiredText.textContent = formatCurrency(volumeRequirement);
+                        volumeProgressBar.style.width = `${progressPercent}%`;
+
+                        volumeLoading.style.display = 'none';
+                        volumeContent.classList.remove('hidden');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching volume data:', error);
+                    volumeLoading.textContent = 'Could not load data.';
+                });
+
+            fetch('/api/user/referral-info', { headers })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        refLoading.style.display = 'none';
+                        refContent.classList.remove('hidden');
+                        const referralLink = `${window.location.origin}/signup.html?ref=${data.referralCode}`;
+                        refLinkInput.value = referralLink;
+                        document.getElementById('ref-count').textContent = data.referralCount;
+                        document.getElementById('ref-commissions').textContent = `$${data.totalCommissions.toFixed(2)}`;
+                    }
+                });
+
+            copyBtn.addEventListener('click', () => {
+                refLinkInput.select();
+                document.execCommand('copy');
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
             });
 
             passwordForm.addEventListener('submit', (e) => {
@@ -694,24 +820,24 @@
                 });
             });
 
+            showPasswordBtn.addEventListener('click', () => {
+                securitySection.classList.toggle('hidden');
+                referralSection.classList.add('hidden');
+            });
 
-            // Placeholder implementation for chart resizing (assuming chart was rendered)
-            const winLossChart = document.getElementById('win-loss-chart') ? echarts.init(document.getElementById('win-loss-chart')) : null;
-            if (winLossChart) {
-                window.addEventListener('resize', () => {
-                    winLossChart.resize();
-                });
-            }
+            showReferralBtn.addEventListener('click', () => {
+                referralSection.classList.toggle('hidden');
+                securitySection.classList.add('hidden');
+            });
 
-            // Copy button logic
-            if (copyBtn) {
-                copyBtn.addEventListener('click', () => {
-                    refLinkInput.select();
-                    document.execCommand('copy');
-                    copyBtn.textContent = 'Copied!';
-                    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
-                });
-            }
+            logoutButton.addEventListener('click', () => {
+                localStorage.removeItem('authToken');
+                window.location.href = '/login.html';
+            });
+
+            window.addEventListener('resize', () => {
+                winLossChart.resize();
+            });
         });
     </script>
 </body>
