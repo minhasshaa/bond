@@ -68,7 +68,14 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ message: "Username and password are required." });
         }
 
-        const user = await User.findOne({ username });  
+        // ⭐ FIX 1: Use $or to allow login via username OR email
+        const user = await User.findOne({ 
+            $or: [
+                { username: username }, 
+                { email: username } 
+            ] 
+        });
+        
         if (!user || !(await user.comparePassword(password))) {  
             return res.status(401).json({ message: "Invalid credentials." });  
         }  
@@ -98,10 +105,10 @@ router.post('/login', async (req, res) => {
 
 
 // ----------------------------------------------------------------------
-// NEW: PASSWORD RESET ROUTES (KYC Verification)
+// FIXED & SECURED: PASSWORD RESET ROUTES (KYC Verification with Token)
 // ----------------------------------------------------------------------
 
-// [POST] /api/auth/reset-password/verify-identity
+// [POST] /api/auth/reset-password/verify-identity (Step 1: Generates Token)
 router.post('/reset-password/verify-identity', async (req, res) => {
     const { username, fullName, identityNumber } = req.body;
 
@@ -117,16 +124,31 @@ router.post('/reset-password/verify-identity', async (req, res) => {
         }
         
         if (!user.fullName || !user.identityNumber) {
-             return res.status(400).json({ success: false, message: 'KYC identity data is missing for this account. Please contact support.' });
+             return res.status(400).json({ success: false, message: 'KYC identity data is missing for this account.' });
         }
 
         const nameMatches = user.fullName.trim().toLowerCase() === fullName.trim().toLowerCase();
         const idMatches = user.identityNumber.trim().toLowerCase() === identityNumber.trim().toLowerCase();
 
         if (nameMatches && idMatches) {
-            return res.json({ success: true, message: 'Identity verified. You can now set a new password.' });
+            // 1. Generate a temporary, one-time token
+            const resetToken = crypto.randomBytes(32).toString('hex');
+            
+            // 2. Store the token and an expiration time (e.g., 10 minutes)
+            user.resetToken = resetToken;
+            user.resetTokenExpires = Date.now() + 600000; // 10 minutes (600,000 ms)
+            
+            await user.save();
+            
+            // 3. Return the token to the client for use in Step 2
+            return res.json({ 
+                success: true, 
+                message: 'Identity verified. You can now set a new password.',
+                resetToken: resetToken // CRUCIAL: Pass this token to the client
+            });
+            
         } else {
-            return res.status(400).json({ success: false, message: 'Verification failed. Full Name or Identity Number do not match our records.' });
+            return res.status(400).json({ success: false, message: 'Verification failed. Please check your credentials.' });
         }
 
     } catch (error) {
@@ -136,12 +158,13 @@ router.post('/reset-password/verify-identity', async (req, res) => {
 });
 
 
-// [POST] /api/auth/reset-password/update-password
+// [POST] /api/auth/reset-password/update-password (Step 2: Consumes Token)
 router.post('/reset-password/update-password', async (req, res) => {
-    const { username, newPassword } = req.body;
+    // ⭐ FIX 2: Require the resetToken from the client
+    const { username, newPassword, resetToken } = req.body;
 
-    if (!username || !newPassword) {
-        return res.status(400).json({ success: false, message: 'Username and new password are required.' });
+    if (!username || !newPassword || !resetToken) {
+        return res.status(400).json({ success: false, message: 'Username, new password, and reset token are required.' });
     }
     
     if (newPassword.length < 6) {
@@ -149,17 +172,28 @@ router.post('/reset-password/update-password', async (req, res) => {
     }
 
     try {
-        const user = await User.findOne({ username });
+        // ⭐ FIX 3: Find the user by username AND ensure the token matches and is not expired
+        const user = await User.findOne({ 
+            username, 
+            resetToken: resetToken,
+            resetTokenExpires: { $gt: Date.now() } // $gt: greater than current time
+        });
 
         if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
+            // Generic message for security (token invalid/expired/user not found)
+            return res.status(400).json({ success: false, message: 'Token is invalid or has expired. Please restart the verification process.' });
         }
         
+        // Update the password (Mongoose pre-save hook handles hashing)
         user.password = newPassword; 
+        
+        // ⭐ FIX 4: Invalidate the token to prevent reuse
+        user.resetToken = undefined;
+        user.resetTokenExpires = undefined;
 
         await user.save();
 
-        res.json({ success: true, message: 'Password updated successfully.' });
+        res.json({ success: true, message: 'Password updated successfully. You can now log in.' });
 
     } catch (error) {
         console.error('Password Update Error:', error);
