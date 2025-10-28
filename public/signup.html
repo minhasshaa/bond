@@ -44,6 +44,12 @@
         <h1 class="text-3xl font-bold text-center text-white">Create Your Account</h1>
 
         <form id="signup-form" class="space-y-4">
+            <!-- Hidden field to store referral code from URL -->
+            <input type="hidden" id="referralCodeInput" value="">
+            <div id="referral-display" class="bg-gray-700 text-sm p-3 rounded-lg hidden">
+                You were invited by a friend!
+            </div>
+
             <div>
                 <label for="username" class="text-sm font-medium text-gray-300">Username</label>
                 <input type="text" id="username" required class="form-input" placeholder="Choose a username">
@@ -98,23 +104,43 @@
     </div>
 
     <script>
-        // Password Visibility Toggle Logic
-        document.querySelectorAll('.toggle-password').forEach(toggle => {
-            toggle.addEventListener('click', () => {
-                const targetId = toggle.getAttribute('data-target');
-                const targetInput = document.getElementById(targetId);
-                const isPassword = targetInput.type === 'password';
-                
-                targetInput.type = isPassword ? 'text' : 'password';
-                
-                // Change the icon (optional, but good UX)
-                toggle.innerHTML = isPassword ? 
-                    '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057 5.064-7 9.542-7 1.258 0 2.484.225 3.637.643M19.5 12l-1.5-1.5M4.5 12l1.5-1.5M21 21l-1.5-1.5m-5.49-5.49L21 21"></path></svg>' : // Closed eye icon
-                    '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>'; // Open eye icon
-            });
-        });
+        // --- Referral Code Extraction ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const refCode = urlParams.get('ref');
+        const referralCodeInput = document.getElementById('referralCodeInput');
+        const referralDisplay = document.getElementById('referral-display');
+        
+        if (refCode) {
+            referralCodeInput.value = refCode;
+            referralDisplay.classList.remove('hidden');
+        }
 
-        // Original Signup Logic
+        // --- Password Visibility Toggle Logic ---
+        const setupPasswordToggles = () => {
+            document.querySelectorAll('.toggle-password').forEach(toggle => {
+                // Ensure we only attach the event listener once
+                if (toggle.classList.contains('listener-attached')) return;
+
+                toggle.onclick = () => {
+                    const targetId = toggle.getAttribute('data-target');
+                    const targetInput = document.getElementById(targetId);
+                    if (!targetInput) return; // Ignore if input is not found
+                    
+                    const isPassword = targetInput.type === 'password';
+                    
+                    targetInput.type = isPassword ? 'text' : 'password';
+                    
+                    // Change the icon 
+                    toggle.innerHTML = isPassword ? 
+                        '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057 5.064-7 9.542-7 1.258 0 2.484.225 3.637.643M19.5 12l-1.5-1.5M4.5 12l1.5-1.5M21 21l-1.5-1.5m-5.49-5.49L21 21"></path></svg>' : // Closed eye icon
+                        '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>'; // Open eye icon
+                };
+                toggle.classList.add('listener-attached');
+            });
+        };
+        setupPasswordToggles();
+
+        // --- Original Signup Logic (Updated to include refCode) ---
         const signupForm = document.getElementById('signup-form');
         const messageDiv = document.getElementById('message');
 
@@ -128,6 +154,8 @@
             const region = document.getElementById('region').value;
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
+            // ⭐ FIX: Get the referral code from the hidden input field
+            const refCodeToSend = referralCodeInput.value; 
 
             if (password !== confirmPassword) {
                 messageDiv.textContent = 'Error: Passwords do not match.';
@@ -139,7 +167,8 @@
                 const response = await fetch('/api/auth/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, email, password, confirmPassword, region }),
+                    // ⭐ FIX: Include refCodeToSend in the payload
+                    body: JSON.stringify({ username, email, password, confirmPassword, region, refCode: refCodeToSend }),
                 });
 
                 const data = await response.json();
