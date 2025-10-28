@@ -64,6 +64,17 @@ const userSchema = new mongoose.Schema({
         default: null,
     },
     // END NEW VERIFICATION FIELDS
+    
+    // ⭐ ADDED: Fields for secure password reset token (REQUIRED for 2-step KYC reset in auth.js)
+    resetToken: {
+        type: String,
+        default: null,
+    },
+    resetTokenExpires: {
+        type: Date,
+        default: null,
+    },
+
     balance: {
         type: Number,
         default: 0.00,
@@ -107,18 +118,16 @@ const userSchema = new mongoose.Schema({
         default: 0
     },
 
-    // ADDED: KYC Identity Fields for anti-fraud
+    // ADDED: KYC Identity Fields for anti-fraud (unique: true removed for null safety)
     fullName: {
         type: String,
         default: null,
         sparse: true,
-        // unique: true REMOVED to fix duplicate key error on null
     },
     identityNumber: {
         type: String,
         default: null,
         sparse: true,
-        // unique: true REMOVED to fix duplicate key error on null
     },
     
     // ADDED: KYC Verification Fields
@@ -144,6 +153,7 @@ const userSchema = new mongoose.Schema({
 
 // Your original password hashing middleware (unchanged)
 userSchema.pre('save', async function (next) {
+    // Only hash if the password field is new or has been modified
     if (!this.isModified('password')) return next();
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
