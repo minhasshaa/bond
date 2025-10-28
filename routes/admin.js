@@ -102,12 +102,13 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
 
         try {
+            // ⭐ FIX 1: Select new identity fields and the selfie document path
             const usersToReview = await User.find({ 
                 $or: [
                     { kycStatus: 'review' },
                     { kycStatus: 'under_review' }
                 ]
-            }).select('username kycStatus kycDocuments createdAt');
+            }).select('username kycStatus kycDocuments fullName identityNumber createdAt');
 
             const usersWithUrls = await Promise.all(usersToReview.map(async (user) => {
 
@@ -153,20 +154,25 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
                 const frontUrl = await getSignedUrl(user.kycDocuments?.front);
                 const backUrl = await getSignedUrl(user.kycDocuments?.back);
+                const selfieUrl = await getSignedUrl(user.kycDocuments?.selfie); // ⭐ FIX 2: Generate URL for selfie
 
                 return {
                     _id: user._id,
                     username: user.username,
                     kycStatus: user.kycStatus,
                     joined: user.createdAt,
+                    fullName: user.fullName, // ⭐ FIX 3: Include Full Name
+                    identityNumber: user.identityNumber, // ⭐ FIX 4: Include Identity Number
                     documents: {
                         front: frontUrl, 
-                        back: backUrl,   
+                        back: backUrl,
+                        selfie: selfieUrl, // ⭐ FIX 5: Include Selfie URL
                     }
                 };
             }));
 
-            res.json({ success: true, users: usersWithUrls.filter(u => u.documents.front || u.documents.back) });
+            // Filter out users who somehow got status 'review' without documents
+            res.json({ success: true, users: usersWithUrls.filter(u => u.documents.front || u.documents.back || u.documents.selfie) });
 
         } catch (error) {
             console.error('Admin KYC Fetch Error:', error);
@@ -207,7 +213,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
     
     // ----------------------------------------------------------------------
-    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS
+    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS (Omitted)
     // ----------------------------------------------------------------------
 
     router.post('/approve-deposit', async (req, res) => {
@@ -390,7 +396,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // MANUAL USER CREDIT
+    // MANUAL USER CREDIT (Omitted)
     // ----------------------------------------------------------------------
 
     router.post('/credit-user', async (req, res) => {
@@ -434,7 +440,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // REFERRAL COMMISSION
+    // REFERRAL COMMISSION (Omitted)
     // ----------------------------------------------------------------------
 
     router.post('/give-commission', async (req, res) => {
@@ -479,7 +485,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // MARKET CONTROL
+    // MARKET CONTROL (Omitted)
     // ----------------------------------------------------------------------
 
     router.post('/market-control', (req, res) => {
@@ -513,7 +519,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
     
     // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES
+    // COPY TRADE MANAGEMENT ROUTES (Omitted)
     // ----------------------------------------------------------------------
 
     router.post('/copy-trade/create', async (req, res) => {
