@@ -58,6 +58,33 @@
         #avatar { 
             background-color: #4b5563;
         }
+        
+        /* Custom styles for the popup */
+        #duplicate-id-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .modal-content {
+            background-color: #1f2937;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            max-width: 90%;
+            width: 400px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body class="text-gray-100">
@@ -67,6 +94,21 @@
         if (!token) { window.location.href = '/login.html'; }
     </script>
 
+    <div id="duplicate-id-modal">
+        <div class="modal-content text-white space-y-4">
+            <h3 class="text-2xl font-bold text-red-500">Identity Already Used</h3>
+            <p class="text-gray-300">
+                The **Government ID Number** you entered is already associated with an existing account. 
+                Users are only permitted to create one verified account.
+            </p>
+            <p class="text-yellow-400 text-sm">
+                If you believe this is an error, please contact customer support immediately.
+            </p>
+            <button id="close-duplicate-modal" class="w-full bg-blue-600 hover:bg-blue-700 py-2 rounded-lg font-semibold">
+                Close
+            </button>
+        </div>
+    </div>
     <div class="container mx-auto p-4 max-w-4xl">
 
         <header class="p-4 border-b border-gray-700 mb-6 flex justify-between items-center">
@@ -186,24 +228,61 @@
                 </p>
 
                 <div id="kyc-upload-form-container" class="mt-4" style="display: none;">
-                    <form id="kyc-upload-form" class="space-y-4 max-w-lg" enctype="multipart/form-data">
-                        <p class="text-sm text-gray-400">Upload the front and back of your Government-issued ID (Max 5MB per file).</p>
+                    
+                    <form id="kyc-identity-form" class="space-y-4 max-w-lg">
+                        <p class="text-sm text-gray-400">Step 1: Confirm Identity Details</p>
 
                         <div>
-                            <label for="id-front" class="block text-sm font-medium text-gray-300 mb-1">1. ID Front Side</label>
-                            <input type="file" class="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700" id="id-front" name="front" accept="image/*,.pdf" required>
+                            <label for="full-name" class="block text-sm font-medium text-gray-300 mb-1">Full Name (Matching ID)</label>
+                            <input type="text" id="full-name" name="fullName" required 
+                                class="form-input w-full bg-gray-900 border border-gray-700 rounded-md p-3 text-white" 
+                                placeholder="Enter full name exactly as on ID">
                         </div>
 
                         <div>
-                            <label for="id-back" class="block text-sm font-medium text-gray-300 mb-1">2. ID Back Side</label>
-                            <input type="file" class="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700" id="id-back" name="back" accept="image/*,.pdf" required>
+                            <label for="id-number" class="block text-sm font-medium text-gray-300 mb-1">Government ID Number</label>
+                            <input type="text" id="id-number" name="idNumber" required 
+                                class="form-input w-full bg-gray-900 border border-gray-700 rounded-md p-3 text-white" 
+                                placeholder="Enter your official ID number">
+                        </div>
+
+                        <button type="submit" id="identity-submit-button" class="w-full px-4 py-2 font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+                            Submit Identity
+                        </button>
+                        <div id="identity-message" class="mt-4 text-center text-sm"></div>
+                    </form>
+                    
+                    <form id="kyc-document-form" class="space-y-4 max-w-lg" enctype="multipart/form-data" style="display: none;">
+                        <p class="text-sm text-gray-400 mt-6">Step 2: Upload Documents (Max 5MB per file)</p>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label for="id-front" class="block text-sm font-medium text-gray-300 mb-1">1. ID Front Side</label>
+                                <input type="file" 
+                                    class="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700" 
+                                    id="id-front" name="front" accept="image/*,.pdf" required>
+                            </div>
+                            <div>
+                                <label for="id-back" class="block text-sm font-medium text-gray-300 mb-1">2. ID Back Side</label>
+                                <input type="file" 
+                                    class="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700" 
+                                    id="id-back" name="back" accept="image/*,.pdf" required>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="id-selfie" class="block text-sm font-medium text-gray-300 mb-1">3. Selfie Holding ID</label>
+                            <input type="file" 
+                                class="w-full bg-gray-900 border border-gray-700 rounded-md p-2 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-600 file:text-white hover:file:bg-green-700" 
+                                id="id-selfie" name="selfie" accept="image/*" required>
+                            <p class="text-xs text-gray-500 mt-1">Clear photo of you holding the ID next to your face.</p>
                         </div>
 
                         <button type="submit" id="upload-button" class="w-full px-4 py-2 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700">
                             Upload Documents
                         </button>
+                        <div id="document-message" class="mt-4 text-center text-sm"></div>
                     </form>
-                    <div id="kyc-message" class="mt-4 text-center text-sm"></div>
                 </div>
 
                 <div id="kyc-review-message" class="mt-4 text-center text-sm text-warning" style="display:none;">
@@ -283,12 +362,18 @@
             const volumeTradedText = document.getElementById('volume-traded-text');
             const volumeRequiredText = document.getElementById('volume-required-text');
             const volumeProgressBar = document.getElementById('volume-progress-bar');
-
+            
+            // NEW KYC ELEMENTS
             const kycStatusSpan = document.getElementById('kyc-status');
             const kycFormContainer = document.getElementById('kyc-upload-form-container');
-            const kycUploadForm = document.getElementById('kyc-upload-form');
-            const kycUploadButton = document.getElementById('upload-button');
-            const kycMessageElement = document.getElementById('kyc-message');
+            const kycIdentityForm = document.getElementById('kyc-identity-form');
+            const kycDocumentForm = document.getElementById('kyc-document-form');
+            const identityMessage = document.getElementById('identity-message');
+            const documentMessage = document.getElementById('document-message');
+            const duplicateIdModal = document.getElementById('duplicate-id-modal');
+            const closeDuplicateModalBtn = document.getElementById('close-duplicate-modal');
+            
+            
             const kycReviewMessage = document.getElementById('kyc-review-message');
             const kycRejectedMessage = document.getElementById('kyc-rejected-message');
             const rejectionReasonText = document.getElementById('rejection-reason-text');
@@ -308,9 +393,10 @@
             };
 
             // ==========================================
-            // KYC FUNCTIONS - FIXED VERSION
+            // KYC FUNCTIONS - TWO STEP LOGIC
             // ==========================================
 
+            // Handles what forms are visible based on status
             async function fetchKycStatus() {
                 if (!token) {
                     kycStatusSpan.textContent = "Please log in to check status.";
@@ -327,7 +413,6 @@
                         }
                     });
 
-                    // Check for network/HTTP errors before parsing JSON
                     if (!response.ok) {
                         throw new Error(`HTTP Error: ${response.status}`);
                     }
@@ -338,84 +423,125 @@
                         const status = (data.kycStatus || 'pending').toLowerCase();
                         kycStatusSpan.textContent = status.toUpperCase();
 
-                        // Reset all status displays
                         kycStatusSpan.classList.remove('text-success', 'text-warning', 'text-danger', 'text-gray-400');
-                        kycFormContainer.style.display = 'none';
+                        kycFormContainer.style.display = 'block';
                         kycReviewMessage.style.display = 'none';
                         kycRejectedMessage.style.display = 'none';
-                        kycMessageElement.textContent = '';
                         
-                        // Handle server-side failure flag (from kyc.js status route)
-                        // The index.js fix prevents a crash, but kyc.js may return a temporary error status in the message
-                        if (data.message && data.message.includes('unavailable')) {
-                            kycStatusSpan.textContent = "Service connection failed";
-                            kycStatusSpan.classList.add('text-danger');
-                            kycFormContainer.style.display = 'block'; 
-                            return; 
-                        }
+                        kycIdentityForm.style.display = 'none';
+                        kycDocumentForm.style.display = 'none';
 
 
-                        if (status === 'pending') {
-                            kycStatusSpan.classList.add('text-warning');
-                            kycFormContainer.style.display = 'block';
-                        } else if (status === 'rejected') {
-                            kycStatusSpan.classList.add('text-danger');
-                            kycFormContainer.style.display = 'block';
-                            kycRejectedMessage.style.display = 'block';
-                            rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
-                        } else if (status === 'review' || status === 'under_review') { // FIXED: Check for 'review'
+                        if (status === 'verified') {
+                            kycStatusSpan.classList.add('text-success');
+                            kycFormContainer.style.display = 'none'; // Verified, hide form container
+                            
+                        } else if (status === 'review' || status === 'under_review') { 
                             kycStatusSpan.classList.add('text-warning');
                             kycReviewMessage.style.display = 'block';
-                        } else if (status === 'verified') {
-                            kycStatusSpan.classList.add('text-success');
-                        } else {
+                            
+                        } else if (status === 'rejected') {
+                            kycStatusSpan.classList.add('text-danger');
+                            kycRejectedMessage.style.display = 'block';
+                            rejectionReasonText.textContent = `Reason: ${data.rejectionReason || 'Documents did not meet requirements.'}`;
+                            
+                            // Re-open form for Step 1
+                            kycIdentityForm.style.display = 'block'; 
+                            
+                        } else { // 'pending' or initial state
                             kycStatusSpan.classList.add('text-gray-400');
-                            kycFormContainer.style.display = 'block';
+                            
+                            // Check if identity details are already saved (Step 1 completed)
+                            if (data.kycIdentityNumber && data.kycFullName) {
+                                // Identity submitted, proceed to document upload
+                                kycDocumentForm.style.display = 'block';
+                                
+                                // Display identity status (Optional)
+                                identityMessage.textContent = `Identity details saved: ${data.kycFullName} (${data.kycIdentityNumber})`;
+                                identityMessage.classList.remove('text-red-400');
+                                identityMessage.classList.add('text-green-400');
+                                
+                            } else {
+                                // Start with Step 1
+                                kycIdentityForm.style.display = 'block';
+                            }
                         }
                     } else {
-                        // This block runs if status is 200 OK but data.success is false
                         kycStatusSpan.textContent = data.message || 'Service connection failed';
                         kycStatusSpan.classList.add('text-danger');
                         kycFormContainer.style.display = 'block';
+                        kycIdentityForm.style.display = 'block';
                     }
 
                 } catch (error) {
-                    // This block runs if the network request fails (e.g., HTTP 500 or network error)
                     console.error("Error fetching KYC status:", error);
                     kycStatusSpan.textContent = "Service connection failed";
                     kycStatusSpan.classList.add('text-danger');
                     kycFormContainer.style.display = 'block';
-                    kycReviewMessage.style.display = 'none'; 
                 }
             }
-
-            async function handleKycUpload(event) {
+            
+            // --- Step 1: Submit Identity Details ---
+            kycIdentityForm.addEventListener('submit', async (event) => {
                 event.preventDefault();
+                identityMessage.textContent = 'Submitting identity...';
+                identityMessage.className = 'mt-4 text-center text-sm text-yellow-400';
+                
+                const fullName = document.getElementById('full-name').value;
+                const idNumber = document.getElementById('id-number').value;
+                
+                try {
+                    const response = await fetch(`${KYC_API_BASE_URL}/identity`, {
+                        method: 'POST',
+                        headers: postHeaders,
+                        body: JSON.stringify({ fullName, idNumber })
+                    });
 
-                const form = event.target;
-                const formData = new FormData(form);
+                    const data = await response.json();
 
-                kycMessageElement.textContent = "Uploading documents...";
-                kycMessageElement.style.color = 'rgb(59, 130, 246)';
-                kycUploadButton.disabled = true;
-                kycUploadButton.textContent = 'Uploading...';
+                    if (data.success) {
+                        identityMessage.textContent = data.message;
+                        identityMessage.classList.remove('text-yellow-400', 'text-red-400');
+                        identityMessage.classList.add('text-green-400');
+
+                        // Successful: Transition to document upload form
+                        kycIdentityForm.style.display = 'none';
+                        kycDocumentForm.style.display = 'block';
+                        
+                        // Update status display
+                        fetchKycStatus(); 
+                        
+                    } else {
+                         if (data.message.includes('already registered')) {
+                            duplicateIdModal.style.display = 'flex'; // Show custom modal
+                        } else {
+                            identityMessage.textContent = data.message || 'Identity submission failed.';
+                            identityMessage.classList.remove('text-yellow-400', 'text-green-400');
+                            identityMessage.classList.add('text-red-400');
+                        }
+                    }
+                } catch (error) {
+                    identityMessage.textContent = `Network error: ${error.message}`;
+                    identityMessage.classList.remove('text-yellow-400', 'text-green-400');
+                    identityMessage.classList.add('text-red-400');
+                }
+            });
+
+
+            // --- Step 2: Upload Documents ---
+            kycDocumentForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                documentMessage.textContent = "Uploading documents...";
+                documentMessage.className = 'mt-4 text-center text-sm text-yellow-400';
+                const uploadButton = document.getElementById('upload-button');
+                uploadButton.disabled = true;
+                uploadButton.textContent = 'Uploading...';
 
                 try {
-                    const frontFileInput = document.getElementById('id-front');
-                    const backFileInput = document.getElementById('id-back');
+                    // Create FormData object (Note: full name and id number are NOT needed here, 
+                    // as they are already saved in the database from Step 1)
+                    const formData = new FormData(event.target);
                     
-                    const frontFile = frontFileInput.files[0];
-                    const backFile = backFileInput.files[0];
-
-                    if (!frontFile || !backFile) {
-                        throw new Error("Please select both front and back files.");
-                    }
-
-                    const maxSize = 5 * 1024 * 1024;
-                    if (frontFile.size > maxSize || backFile.size > maxSize) {
-                        throw new Error("Each file must be less than 5MB.");
-                    }
-
                     const response = await fetch(`${KYC_API_BASE_URL}/upload`, {
                         method: 'POST',
                         headers: {
@@ -427,13 +553,12 @@
                     const data = await response.json();
 
                     if (data.success) {
-                        kycMessageElement.textContent = data.message || 'Upload successful!';
-                        kycMessageElement.style.color = 'rgb(34, 197, 94)';
-
-                        form.reset();
-                        // Call fetchKycStatus again to show the updated 'review' status
-                        await fetchKycStatus(); 
-                        kycUploadButton.textContent = 'Upload Documents';
+                        documentMessage.textContent = data.message || 'Upload successful!';
+                        documentMessage.classList.remove('text-yellow-400', 'text-red-400');
+                        documentMessage.classList.add('text-green-400');
+                        
+                        event.target.reset();
+                        fetchKycStatus(); // Update status to 'REVIEW'
 
                     } else {
                         throw new Error(data.message || 'Upload failed');
@@ -441,22 +566,30 @@
 
                 } catch (error) {
                     console.error("KYC Upload error:", error);
-                    kycMessageElement.textContent = error.message;
-                    kycMessageElement.style.color = 'rgb(239, 68, 68)';
-                    kycUploadButton.textContent = 'Upload Documents';
+                    documentMessage.textContent = error.message;
+                    documentMessage.classList.remove('text-yellow-400', 'text-green-400');
+                    documentMessage.classList.add('text-red-400');
                 } finally {
-                    kycUploadButton.disabled = false;
+                    uploadButton.disabled = false;
+                    uploadButton.textContent = 'Upload Documents';
                 }
-            }
+            });
+
+
+            // --- Modal Close Logic ---
+            closeDuplicateModalBtn.addEventListener('click', () => {
+                duplicateIdModal.style.display = 'none';
+                kycIdentityForm.reset(); // Clear form fields
+            });
+
 
             // ==========================================
-            // INITIALIZATION
+            // INITIALIZATION (Existing Logic)
             // ==========================================
 
             fetchKycStatus();
-            if (kycUploadForm) {
-                kycUploadForm.addEventListener('submit', handleKycUpload);
-            }
+            // KYC upload form listeners moved into the specific form submit handlers
+            // Removed redundant kycUploadForm.addEventListener('submit', handleKycUpload);
 
             fetch('/api/user/info', { headers })
                 .then(res => res.json())
