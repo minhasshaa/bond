@@ -38,7 +38,7 @@ const userSchema = new mongoose.Schema({
         lowercase: true,
         match: [/.+\@.+\..+/, 'Please fill a valid email address']
     },
-    // ⭐ ADDED REGION FIELD (Required by signup)
+    // ⭐ ADDED REGION FIELD
     region: { 
         type: String,
         required: true,
