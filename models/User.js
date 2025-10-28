@@ -6,10 +6,10 @@ const transactionSchema = new mongoose.Schema({
     txid: { type: String, required: true },
     status: { type: String, default: 'pending_review' },
     date: { type: Date, default: Date.now },
-    type: { 
-        type: String, 
-        enum: ['deposit', 'withdrawal', 'manual_credit', 'manual_debit', 'commission'], 
-        default: 'deposit' 
+    type: {
+        type: String,
+        enum: ['deposit', 'withdrawal', 'manual_credit', 'manual_debit', 'commission'],
+        default: 'deposit'
     },
     amount: { type: Number },
     address: { type: String },
@@ -29,6 +29,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // START NEW VERIFICATION FIELDS
   email: {
     type: String,
     required: true,
@@ -49,6 +50,7 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  // END NEW VERIFICATION FIELDS
   balance: {
     type: Number,
     default: 0.00,
@@ -91,25 +93,22 @@ const userSchema = new mongoose.Schema({
     required: true,
     default: 0
   },
-  
-  // START NEW PERMANENT IDENTITY FIELDS
-  kycFullName: { 
-    type: String, 
-    default: null 
-  },
-  kycIdentityNumber: { 
-    type: String, 
-    unique: true, // CRITICAL: Ensures no two users share the same ID number
-    sparse: true, // Allows null values but enforces uniqueness when a value is present
-    default: null 
-  },
-  kycSelfie: { 
-    type: String, // Path to the uploaded selfie blob
-    default: null 
-  },
-  // END NEW PERMANENT IDENTITY FIELDS
 
-  // ADDED: KYC Verification Fields (existing)
+  // ADDED: KYC Identity Fields for anti-fraud
+  fullName: {
+    type: String,
+    default: null,
+    sparse: true,
+    unique: true, // Enforce one account per name (will be combined with ID check)
+  },
+  identityNumber: {
+    type: String,
+    default: null,
+    sparse: true,
+    unique: true, // Enforce one account per ID number
+  },
+  
+  // ADDED: KYC Verification Fields
   kycStatus: {
     type: String,
     enum: ['pending', 'review', 'verified', 'rejected'],
@@ -118,6 +117,7 @@ const userSchema = new mongoose.Schema({
   kycDocuments: {
     front: { type: String }, // Store Azure blob path for front ID
     back: { type: String },  // Store Azure blob path for back ID
+    selfie: { type: String }, // Store Azure blob path for selfie
     uploadDate: { type: Date }
   },
   kycRejectionReason: {
