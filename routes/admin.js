@@ -10,6 +10,8 @@ const {
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
+const Message = require('../models/Message'); // ⭐ NEW: Import Message model
+
 // Rely on index.js to provide these global constants
 const { candleOverride, TRADE_PAIRS } = require('../index'); 
 
@@ -211,7 +213,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
     
     // ----------------------------------------------------------------------
-    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS
+    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS (Unchanged)
     // ----------------------------------------------------------------------
 
     // [POST] /api/admin/approve-deposit - *** UPDATED FOR REFERRAL COMMISSION ***
@@ -710,6 +712,129 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             });
         }
     });
+
+
+    // ----------------------------------------------------------------------
+    // ⭐ NEW: SUPPORT CHAT ROUTES (ADMIN FACING) ⭐
+    // ----------------------------------------------------------------------
+
+    // [GET] /api/admin/support/open - Get list of users with unread messages
+    router.get('/support/open', async (req, res) => {
+        try {
+            // Find unique user IDs that have unread messages sent by the user
+            const unreadChats = await Message.aggregate([
+                { $match: { sender: 'user', readByAdmin: false } },
+                {
+                    $group: {
+                        _id: '$userId', // Group by userId
+                        unreadCount: { $sum: 1 },
+                        lastMessageTime: { $max: '$createdAt' }
+                    }
+                },
+                { $sort: { lastMessageTime: -1 } }
+            ]);
+
+            if (unreadChats.length === 0) {
+                return res.json({ success: true, openChats: [] });
+            }
+
+            // Get the last message sent by anyone for each conversation
+            const conversations = await Promise.all(unreadChats.map(async (chat) => {
+                const user = await User.findById(chat._id).select('username');
+                
+                if (!user) return null;
+
+                const lastMessage = await Message.findOne({ userId: chat._id })
+                    .sort({ createdAt: -1 })
+                    .select('text sender');
+
+                return {
+                    userId: chat._id,
+                    username: user.username,
+                    unreadCount: chat.unreadCount,
+                    lastMessage: lastMessage ? lastMessage.text : 'No message',
+                    lastMessageTime: chat.lastMessageTime
+                };
+            }));
+
+            res.json({ 
+                success: true, 
+                openChats: conversations.filter(c => c !== null).sort((a, b) => b.lastMessageTime - a.lastMessageTime) 
+            });
+
+        } catch (error) {
+            console.error('Admin Fetch Open Chats Error:', error);
+            res.status(500).json({ success: false, message: 'Failed to fetch open support chats.' });
+        }
+    });
+
+    // [GET] /api/admin/support/messages/:userId - Get conversation and mark as read
+    router.get('/support/messages/:userId', async (req, res) => {
+        const { userId } = req.params;
+
+        try {
+            const messages = await Message.find({ userId: userId })
+                .select('sender text createdAt')
+                .sort('createdAt');
+
+            if (messages.length === 0) {
+                return res.json({ success: true, messages: [] });
+            }
+
+            // Mark all user messages in this conversation as read by admin
+            await Message.updateMany(
+                { userId: userId, sender: 'user', readByAdmin: false },
+                { $set: { readByAdmin: true } }
+            );
+
+            res.json({
+                success: true,
+                messages: messages.map(msg => ({
+                    sender: msg.sender,
+                    text: msg.text,
+                    timestamp: msg.createdAt,
+                }))
+            });
+
+        } catch (error) {
+            console.error('Admin Load Conversation Error:', error);
+            res.status(500).json({ success: false, message: 'Failed to load conversation.' });
+        }
+    });
+
+    // [POST] /api/admin/support/send - Send a reply from the admin
+    router.post('/support/send', async (req, res) => {
+        const { userId, message } = req.body;
+
+        if (!userId || !message || message.trim().length === 0) {
+            return res.status(400).json({ success: false, message: 'Missing user ID or message.' });
+        }
+
+        try {
+            // Find the user to ensure the ID is valid
+            const user = await User.findById(userId).select('username');
+            if (!user) {
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+
+            const newMessage = new Message({
+                userId: userId,
+                sender: 'admin',
+                text: message.trim(),
+                readByAdmin: true, // Always read by admin
+                readByUser: false, // Mark as UNREAD for the user
+            });
+
+            await newMessage.save();
+
+            res.json({ success: true, message: 'Reply sent successfully.' });
+
+        } catch (error) {
+            console.error('Admin Message Send Error:', error);
+            res.status(500).json({ success: false, message: 'Failed to send reply.' });
+        }
+    });
+
 
     return router;
 };
