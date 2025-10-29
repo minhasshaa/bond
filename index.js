@@ -9,7 +9,7 @@ const cors = require("cors");
 const path = require("path");
 const Binance = require("node-binance-api");
 const jwt = require('jsonwebtoken'); 
-const axios = require('axios'); // <-- NEW: AXIOS FOR PUBLIC API CALLS
+const axios = require('axios');
 // >>> START KYC ADDITIONS <<<
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
 // >>> END KYC ADDITIONS <<<
@@ -28,7 +28,7 @@ module.exports.candleOverride = candleOverride;
 
 // >>> START AZURE CONFIGURATION (CLEANED) <<<
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
-const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
+const STORAGE_ACCOUNT_KEY = processs.env.AZURE_STORAGE_ACCOUNT_KEY;
 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
 
 let blobServiceClient = null;
@@ -60,7 +60,7 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
-const Message = require('./models/Message');
+const Message = require('./models/Message'); // Message model confirmed
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
@@ -80,12 +80,11 @@ const io = socketIo(server, {
 });
 
 const marketData = {};
-// *** NEW: Add storage for 24h change percent ***
 const ticker24hData = {}; 
 
 TRADE_PAIRS.forEach(pair => {
     marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
-    ticker24hData[pair] = { changePercent: 0 }; // Initialize 24h data
+    ticker24hData[pair] = { changePercent: 0 };
 });
 
 module.exports.marketData = marketData;
@@ -115,23 +114,22 @@ app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnab
 
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ MODIFIED FUNCTION: Fetch and store 24h Ticker Data using public API URL via Axios
+// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    // Public Binance Futures API endpoint for 24-hour ticker data
-    const API_URL = 'https://fapi.binance.com/fapi/v1/ticker/24hr';
+    // ⭐ FIX: Change URL from fapi/v1/ to the stable spot api/v3/ to resolve 410 error.
+    const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
-        // Use axios.get for a direct, unauthenticated public API call
         const response = await axios.get(API_URL); 
         const tickers = response.data;
 
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
+            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
-                    // priceChangePercent is the 24h change
                     changePercent: parseFloat(ticker.priceChangePercent) 
                 };
             }
@@ -139,7 +137,6 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
-        // Log the error details (Axios error message)
         console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
     }
 }
@@ -169,14 +166,13 @@ async function getDashboardData(userId) {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
 
-        // *** MODIFIED: Use the stored 24h change instead of the 1-minute change ***
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
 
         return {
             name: pair.replace('USDT', ''),
             ticker: `${pair.replace('USDT', '')}/USD`,
             price: data.currentPrice,
-            change: parseFloat(changeValue.toFixed(2)), // Use the 24h change
+            change: parseFloat(changeValue.toFixed(2)),
             candles: data.candles
         };
     }).filter(Boolean);
@@ -233,7 +229,7 @@ io.on('connection', (socket) => {
 // ------------------ CANDLE / MARKET DATA LOGIC (MINOR CHANGES) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
-    await fetchAndStore24hTicker(); // Run once at startup
+    await fetchAndStore24hTicker(); 
     
     for (const pair of TRADE_PAIRS) {
         try {
@@ -311,11 +307,11 @@ function startMarketDataPolling() {
     console.log("✅ Starting market data polling every second...");
     // Update every second for real-time price updates
     setInterval(updateMarketData, 1000); 
-    // ⭐ NEW: Fetch 24h ticker data every 60 seconds (Binance updates this slowly)
+    // Fetch 24h ticker data every 60 seconds
     setInterval(fetchAndStore24hTicker, 60000); 
 }
 
-// ------------------ FIX: SUPPORT BOTH DASHBOARD + TRADING PRICE UPDATES (MODIFIED) ------------------
+// ------------------ PRICE UPDATE BROADCAST ------------------
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
@@ -324,14 +320,12 @@ setInterval(() => {
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
-        // *** MODIFIED: Use the stored 24h change value ***
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
         
         // Dashboard format
         const tickerForClient = `${pair.replace('USDT', '')}/USD`;
         payloadDashboard[tickerForClient] = {
             price: md.currentPrice,
-            // Use the 24h change
             change: parseFloat(changeValue.toFixed(2)), 
             countdown: secondsUntilNextMinute
         };
@@ -359,7 +353,9 @@ db.once("open", async () => {
     try {
         const TradeModel = mongoose.model('Trade');
         const UserModel = mongoose.model('User');
-
+        // The Message model now contains the TTL index which handles its cleanup.
+        // const MessageModel = mongoose.model('Message'); 
+        
         const tradeUpdateResult = await TradeModel.updateMany(
             { 
                 status: { $ne: 'closed' },
