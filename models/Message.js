@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
@@ -29,7 +28,11 @@ const messageSchema = new mongoose.Schema({
         default: true // Assume user reads their own sent message instantly
     },
 }, {
-    timestamps: true // Adds createdAt and updatedAt fields
+    timestamps: true // Creates 'createdAt' and 'updatedAt'
 });
+
+// ⭐ NEW: TTL Index definition for automatic deletion after 24 hours (86400 seconds)
+const ONE_DAY_IN_SECONDS = 24 * 60 * 60; 
+messageSchema.index({ "createdAt": 1 }, { expireAfterSeconds: ONE_DAY_IN_SECONDS });
 
 module.exports = mongoose.model('Message', messageSchema);
