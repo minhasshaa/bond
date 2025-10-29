@@ -9,6 +9,7 @@ const cors = require("cors");
 const path = require("path");
 const Binance = require("node-binance-api");
 const jwt = require('jsonwebtoken'); 
+const axios = require('axios'); // <-- NEW: AXIOS FOR PUBLIC API CALLS
 // >>> START KYC ADDITIONS <<<
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
 // >>> END KYC ADDITIONS <<<
@@ -113,24 +114,32 @@ app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnab
 
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ NEW FUNCTION: Fetch and store 24h Ticker Data
+// ⭐ MODIFIED FUNCTION: Fetch and store 24h Ticker Data using public API URL via Axios
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
+    // Public Binance Futures API endpoint for 24-hour ticker data
+    const API_URL = 'https://fapi.binance.com/fapi/v1/ticker/24hr';
+    
     try {
-        const tickers = await binance.futuresTicker();
+        // Use axios.get for a direct, unauthenticated public API call
+        const response = await axios.get(API_URL); 
+        const tickers = response.data;
+
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
-                    // priceChangePercent is the correct field for 24h change
+                    // priceChangePercent is the 24h change
                     changePercent: parseFloat(ticker.priceChangePercent) 
                 };
             }
         }
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
+
     } catch (err) {
-        console.error("❌ Failed to fetch 24h ticker data:", (err && err.body) || err);
+        // Log the error details (Axios error message)
+        console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
     }
 }
 // --------------------------------------------------------------------------------------------------
