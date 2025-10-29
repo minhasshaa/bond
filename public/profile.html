@@ -97,6 +97,14 @@
             0% { transform: scale(0.5); opacity: 0; }
             100% { transform: scale(1); opacity: 1; }
         }
+        
+        /* ⭐ NEW CHAT STYLES ⭐ */
+        #support-chat-window {
+            height: 450px; /* Taller chat window */
+            max-height: 80vh;
+            border: 1px solid #374151;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body class="text-gray-100">
@@ -121,9 +129,10 @@
                 <button id="logout-button" class="mt-2 px-3 py-1 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">Logout</button>
             </div>
         </header>
+        
+        <input type="hidden" id="client-user-id" value=""> 
 
         <main class="space-y-6">
-            <!-- TRADING STATISTICS SECTION (Original Content) -->
             <div class="p-4 space-y-4">
                 <h2 class="text-xl font-semibold mb-4">Trading Statistics</h2>
                 <div id="stats-loading" class="text-center text-gray-400 py-8">Loading stats...</div>
@@ -148,7 +157,6 @@
 
             <div class="h-px bg-gray-700 mx-4"></div>
 
-            <!-- TRADING VOLUME REQUIREMENT (Original Content) -->
             <div class="p-4 space-y-4">
                 <h2 class="text-xl font-semibold mb-2">Trading Volume Requirement</h2>
                 <p class="text-xs text-gray-400 mb-4">A 50% tax is applied to withdrawals if your total trade volume is less than 110% of your total deposits.</p>
@@ -170,7 +178,6 @@
 
             <div class="h-px bg-gray-700 mx-4"></div>
 
-            <!-- ACCOUNT ACTIONS (Original Content) -->
             <div class="p-4 space-y-4">
                  <h2 class="text-xl font-semibold mb-4">Account Actions</h2>
                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -220,7 +227,6 @@
 
             <div class="h-px bg-gray-700 mx-4"></div>
 
-            <!-- KYC Verification Section - Updated with Tabs and New Logic -->
             <div class="p-4 space-y-4">
                 <h2 class="text-xl font-semibold mb-4">KYC Verification</h2>
 
@@ -228,7 +234,6 @@
                     Current Status: <strong id="kyc-status" class="text-gray-400">Loading...</strong>
                 </p>
 
-                <!-- Status Messages -->
                 <div id="kyc-review-message" class="mt-4 text-center p-4 bg-yellow-900/50 border border-yellow-700 rounded-lg text-sm text-warning" style="display:none;">
                     <p class="font-bold">Under Review</p>
                     <p>Documents and Identity are currently being verified by our team.</p>
@@ -244,7 +249,6 @@
                 </div>
 
 
-                <!-- KYC Tabs -->
                 <div id="kyc-tabs-container" class="mt-6 space-y-4 max-w-lg mx-auto" style="display: none;">
                     <div class="flex border-b border-gray-700">
                         <button id="tab-identity" data-tab="identity" class="tab-button flex-1 py-2 text-sm font-medium text-gray-400 border-b-2 border-transparent transition-colors duration-200">
@@ -255,7 +259,6 @@
                         </button>
                     </div>
 
-                    <!-- Tab 1: Identity Information (Name & ID Number) -->
                     <div id="content-identity" class="tab-content space-y-4">
                         <form id="kyc-identity-form" class="space-y-4">
                             <div>
@@ -273,7 +276,6 @@
                         <div id="identity-message" class="mt-4 text-center text-sm"></div>
                     </div>
 
-                    <!-- Tab 2: Document Upload (ID Front/Back & Selfie) -->
                     <div id="content-upload" class="tab-content space-y-4 hidden">
                         <form id="kyc-upload-form" class="space-y-4" enctype="multipart/form-data">
                             <p class="text-sm text-gray-400">Upload your ID front, ID back, and a clear selfie holding your ID (Max 5MB per file).</p>
@@ -302,11 +304,9 @@
                 </div>
 
             </div>
-            <!-- End KYC Section -->
-        </main>
+            </main>
     </div>
-    
-    <!-- Custom Error Pop-up Modal -->
+
     <div id="error-modal" class="custom-modal-backdrop hidden">
         <div class="custom-modal-content text-center space-y-4">
             <svg class="mx-auto h-16 w-16 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -320,7 +320,6 @@
     </div>
 
 
-    <!-- Bottom Navigation Bar (Unchanged) -->
     <nav class="bottom-nav">
         <a href="dashboard.html" class="nav-link" id="nav-dashboard">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
@@ -343,6 +342,30 @@
             <span>Profile</span>
         </a>
     </nav>
+    
+    <button id="support-chat-fab" class="fixed bottom-20 right-4 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-all z-40">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M3 20l1.3-3.9A9 9 0 1119 19L3 20z" />
+        </svg>
+    </button>
+
+    <div id="support-chat-window" class="fixed bottom-32 right-4 w-80 bg-gray-900 rounded-lg shadow-2xl flex flex-col hidden z-50">
+        <div class="bg-blue-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+            <h4 class="font-bold">Support Chat</h4>
+            <button id="close-chat-window" class="text-white hover:text-blue-200 text-xl font-bold leading-none">&times;</button>
+        </div>
+        
+        <div id="client-chat-messages" class="flex-grow p-3 overflow-y-auto space-y-3 bg-gray-800" style="height: 380px;">
+            </div>
+        
+        <form id="client-chat-form" class="p-3 border-t border-gray-700 bg-gray-800 rounded-b-lg">
+            <div class="flex space-x-2">
+                <input type="text" id="client-chat-input" class="flex-grow bg-gray-700 border border-gray-600 p-2 rounded-lg text-sm text-white" placeholder="Ask your question...">
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">Send</button>
+            </div>
+        </form>
+    </div>
+
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -361,6 +384,8 @@
             };
 
             const KYC_API_BASE_URL = "/api/kyc";
+            // ⭐ NEW: API Base URL for user-facing support chat
+            const USER_API_BASE_URL = "/api/user"; 
 
             const usernameDisplay = document.getElementById('username-display');
             const joinedDateDisplay = document.getElementById('joined-date-display');
@@ -412,6 +437,15 @@
             // Modal Elements
             const errorModal = document.getElementById('error-modal');
             const closeModalButton = document.getElementById('close-modal-button');
+            
+            // ⭐ NEW CHAT ELEMENTS
+            const chatFab = document.getElementById('support-chat-fab');
+            const chatWindow = document.getElementById('support-chat-window');
+            const closeChatBtn = document.getElementById('close-chat-window');
+            const clientChatMessages = document.getElementById('client-chat-messages');
+            const clientChatForm = document.getElementById('client-chat-form');
+            const clientChatInput = document.getElementById('client-chat-input');
+            const clientIdInput = document.getElementById('client-user-id'); // Hidden user ID input
 
             // --------------------------------------------------
             // UTILITIES AND HELPERS
@@ -430,7 +464,7 @@
                 }
                 return color;
             };
-            
+
             const showModal = (message) => {
                 document.getElementById('modal-message').textContent = message;
                 errorModal.classList.remove('hidden');
@@ -630,7 +664,7 @@
                             kycReviewMessage.style.display = 'block';
                         } else { // pending or rejected
                             kycTabsContainer.style.display = 'block';
-                            
+
                             // Re-enable identity inputs for potential rejection or new pending status
                             fullNameInput.disabled = false;
                             identityNumberInput.disabled = false;
@@ -692,17 +726,28 @@
             if (kycUploadForm) {
                 kycUploadForm.addEventListener('submit', handleKycUpload);
             }
+            
+            let currentUserId = null; // ⭐ Variable to hold the current user's ID
 
             fetch('/api/user/info', { headers })
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        const username = data.user.username;
+                        const user = data.user;
+                        const username = user.username;
+                        
+                        // ⭐ Store User ID
+                        currentUserId = user._id; 
+                        clientIdInput.value = user._id; 
+                        
                         usernameDisplay.textContent = username;
-                        joinedDateDisplay.textContent = new Date(data.user.createdAt).toLocaleDateString();
+                        joinedDateDisplay.textContent = new Date(user.createdAt).toLocaleDateString();
                         avatarDiv.textContent = username.charAt(0).toUpperCase();
                         avatarDiv.style.backgroundColor = generateColor(username);
-                        balanceDisplay.textContent = `$${data.user.balance.toFixed(2)}`;
+                        balanceDisplay.textContent = `$${user.balance.toFixed(2)}`;
+                        
+                        // ⭐ Fetch chat history after getting user ID
+                        fetchClientConversation(); 
                     }
                 });
 
@@ -838,8 +883,109 @@
             window.addEventListener('resize', () => {
                 winLossChart.resize();
             });
+            
+            // ==========================================
+            // ⭐ NEW: CLIENT-SIDE CHAT LOGIC ⭐
+            // ==========================================
+            
+            // --- UI Handlers ---
+            chatFab.addEventListener('click', () => {
+                chatWindow.classList.toggle('hidden');
+                if (!chatWindow.classList.contains('hidden')) {
+                    clientChatMessages.scrollTop = clientChatMessages.scrollHeight; // Scroll to bottom on open
+                    fetchClientConversation();
+                }
+            });
+
+            closeChatBtn.addEventListener('click', () => {
+                chatWindow.classList.add('hidden');
+            });
+            
+            // --- API Handlers ---
+            async function fetchClientConversation() {
+                const userId = clientIdInput.value;
+                if (!userId || !token) {
+                    clientChatMessages.innerHTML = '<p class="text-center text-red-500 text-sm pt-4">User not logged in or ID missing.</p>';
+                    return; 
+                }
+                
+                clientChatMessages.innerHTML = '<p class="text-center text-gray-500 text-sm pt-4">Loading conversation...</p>';
+
+                try {
+                    const response = await fetch(`${USER_API_BASE_URL}/support/conversation/${userId}`, { headers });
+                    const data = await response.json();
+                    
+                    clientChatMessages.innerHTML = '';
+                    if (data.success && data.messages.length > 0) {
+                        data.messages.forEach(msg => {
+                            const isUser = msg.sender === 'user';
+                            const messageElement = document.createElement('div');
+                            
+                            messageElement.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+                            
+                            messageElement.innerHTML = `
+                                <div class="max-w-[85%] p-2 rounded-xl ${isUser ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-200'}">
+                                    <p class="text-sm">${msg.text}</p>
+                                    <p class="text-xs mt-1 ${isUser ? 'text-blue-200' : 'text-gray-400'} text-right">${new Date(msg.timestamp).toLocaleTimeString()}</p>
+                                </div>
+                            `;
+                            clientChatMessages.appendChild(messageElement);
+                        });
+                    } else {
+                        clientChatMessages.innerHTML = '<p class="text-center text-gray-500 text-sm pt-4">Start your first conversation!</p>';
+                    }
+                    clientChatMessages.scrollTop = clientChatMessages.scrollHeight;
+
+                } catch (error) {
+                    console.error('Error fetching client conversation:', error);
+                    clientChatMessages.innerHTML = '<p class="text-center text-red-500 text-sm pt-4">Failed to load chat history.</p>';
+                }
+            }
+
+            clientChatForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const message = clientChatInput.value.trim();
+                const userId = clientIdInput.value;
+
+                if (!message || !userId || !token) return;
+
+                clientChatInput.value = ''; // Clear input immediately
+                clientChatInput.disabled = true;
+
+                // Optimistically add the message to the window
+                const messageElement = document.createElement('div');
+                messageElement.className = `flex justify-end`;
+                messageElement.innerHTML = `
+                    <div class="max-w-[85%] p-2 rounded-xl bg-blue-600 text-white">
+                        <p class="text-sm">${message}</p>
+                        <p class="text-xs mt-1 text-blue-200 text-right">${new Date().toLocaleTimeString()}</p>
+                    </div>
+                `;
+                clientChatMessages.appendChild(messageElement);
+                clientChatMessages.scrollTop = clientChatMessages.scrollHeight;
+
+                try {
+                    const response = await fetch(`${USER_API_BASE_URL}/support/send`, {
+                        method: 'POST',
+                        headers: postHeaders,
+                        body: JSON.stringify({ userId, message }) 
+                    });
+                    const data = await response.json();
+                    
+                    if (!data.success) {
+                        alert('Error sending message. Please try refreshing.');
+                        // Note: A more robust solution would remove the optimistically added message
+                    }
+                    
+                } catch (error) {
+                    console.error('Error sending message from client:', error);
+                    alert('Network error. Message may not have been sent.');
+                } finally {
+                    clientChatInput.disabled = false;
+                }
+            });
+            
         });
     </script>
 </body>
 </html>
-
