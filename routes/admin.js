@@ -1,13 +1,11 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const { 
-    // FIX: Keep these necessary imports for objects and clients
     BlobSASPermissions,
     StorageSharedKeyCredential, 
     ContainerClient,
-    BlobClient // Import BlobClient for the stable generateSasUrl method
+    BlobClient
 } = require('@azure/storage-blob');
-// Removed: const { generateBlobSas } = require('@azure/storage-blob'); to avoid TypeError
 
 const User = require('../models/User');
 const Trade = require('../models/Trade');
@@ -31,7 +29,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     router.use(adminAuth);
 
     // ----------------------------------------------------------------------
-    // [GET] /api/admin/data - General Admin Dashboard Data
+    // [GET] /api/admin/data - General Admin Dashboard Data (Unchanged)
     // ----------------------------------------------------------------------
     router.get('/data', async (req, res) => {
         const { search } = req.query;
@@ -92,7 +90,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // KYC MANAGEMENT ENDPOINTS
+    // KYC MANAGEMENT ENDPOINTS (Unchanged)
     // ----------------------------------------------------------------------
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
@@ -154,19 +152,19 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
                 const frontUrl = await getSignedUrl(user.kycDocuments?.front);
                 const backUrl = await getSignedUrl(user.kycDocuments?.back);
-                const selfieUrl = await getSignedUrl(user.kycDocuments?.selfie); // ⭐ FIX 2: Generate URL for selfie
+                const selfieUrl = await getSignedUrl(user.kycDocuments?.selfie);
 
                 return {
                     _id: user._id,
                     username: user.username,
                     kycStatus: user.kycStatus,
                     joined: user.createdAt,
-                    fullName: user.fullName, // ⭐ FIX 3: Include Full Name
-                    identityNumber: user.identityNumber, // ⭐ FIX 4: Include Identity Number
+                    fullName: user.fullName,
+                    identityNumber: user.identityNumber,
                     documents: {
                         front: frontUrl, 
                         back: backUrl,
-                        selfie: selfieUrl, // ⭐ FIX 5: Include Selfie URL
+                        selfie: selfieUrl,
                     }
                 };
             }));
@@ -213,9 +211,10 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
     
     // ----------------------------------------------------------------------
-    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS (Omitted)
+    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS
     // ----------------------------------------------------------------------
 
+    // [POST] /api/admin/approve-deposit - *** UPDATED FOR REFERRAL COMMISSION ***
     router.post('/approve-deposit', async (req, res) => {
         const { userId, txid, amount } = req.body;
         if (!userId || !txid || typeof amount !== 'number' || amount <= 0) {
@@ -226,7 +225,11 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         session.startTransaction();
 
         try {
-            const user = await User.findById(userId).session(session);
+            // Find user and include referredBy field for commission check
+            const user = await User.findById(userId)
+                .select('username balance totalDeposits transactions referredBy') // Select necessary fields
+                .session(session);
+
             if (!user) {
                 await session.abortTransaction();
                 session.endSession();
@@ -247,27 +250,59 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                     message: "Invalid or already processed deposit transaction." 
                 });
             }
+            
+            // --- 1. REFERRAL COMMISSION CHECK ---
+            // Determine if the deposit makes totalDeposits non-zero, indicating it's the first deposit.
+            const isFirstDeposit = (user.totalDeposits || 0) === 0; 
+            const depositAmount = amount;
 
-            // Update user's balance and totalDeposits
-            user.balance += amount;
-            user.totalDeposits += amount;
+            // --- 2. UPDATE USER AND TRANSACTION ---
+            user.balance += depositAmount;
+            user.totalDeposits += depositAmount;
 
-            // Update transaction status
             transaction.status = 'completed';
             transaction.processedAt = new Date();
-            transaction.amount = amount;
+            transaction.amount = depositAmount;
 
-            await user.save({ session });
+            await user.save({ session }); // Save user's deposit update
+
+            // --- 3. AWARD COMMISSION (If conditions met) ---
+            if (isFirstDeposit && user.referredBy) {
+                const commissionRate = 0.07; // 7% commission
+                const commissionAmount = depositAmount * commissionRate;
+                const referrerId = user.referredBy;
+
+                // Atomically update referrer's account within the same transaction session
+                await User.findByIdAndUpdate(referrerId, {
+                    $inc: { 
+                        balance: commissionAmount,
+                        referralCommissions: commissionAmount 
+                    },
+                    $push: { // Add a transaction record to the referrer's account
+                        transactions: {
+                            txid: `REFCOMM-${txid}`, // Unique ID based on original transaction
+                            type: 'commission',
+                            amount: commissionAmount,
+                            status: 'completed',
+                            date: new Date(),
+                            note: `Referral commission for ${user.username}'s first deposit.`
+                        }
+                    }
+                }, { session, new: true }); // Pass the session and return the updated doc (though not used here)
+
+                console.log(`AWARDED: $${commissionAmount.toFixed(2)} (7%) commission to referrer ID: ${referrerId} for a $${depositAmount.toFixed(2)} deposit.`);
+            }
+
             await session.commitTransaction();
             session.endSession();
 
-            res.json({ success: true, message: `Deposit of $${amount.toFixed(2)} approved for ${user.username}.` });
+            res.json({ success: true, message: `Deposit of $${amount.toFixed(2)} approved for ${user.username}. Commission awarded to referrer if applicable.` });
 
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
-            console.error('Deposit Approval Error:', error);
-            res.status(500).json({ success: false, message: "Deposit approval failed due to a server error." });
+            console.error('Deposit Approval Error (Referral Commission Failed):', error);
+            res.status(500).json({ success: false, message: "Deposit approval failed due to a server error. Funds rolled back." });
         }
     });
 
@@ -396,7 +431,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // MANUAL USER CREDIT (Omitted)
+    // MANUAL USER CREDIT (Unchanged)
     // ----------------------------------------------------------------------
 
     router.post('/credit-user', async (req, res) => {
@@ -440,7 +475,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // REFERRAL COMMISSION (Omitted)
+    // REFERRAL COMMISSION (Manual) - UNCHANGED
     // ----------------------------------------------------------------------
 
     router.post('/give-commission', async (req, res) => {
@@ -485,7 +520,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // MARKET CONTROL (Omitted)
+    // MARKET CONTROL (Unchanged)
     // ----------------------------------------------------------------------
 
     router.post('/market-control', (req, res) => {
@@ -519,7 +554,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
     
     // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES (Omitted)
+    // COPY TRADE MANAGEMENT ROUTES (Unchanged)
     // ----------------------------------------------------------------------
 
     router.post('/copy-trade/create', async (req, res) => {
