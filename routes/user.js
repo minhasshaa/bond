@@ -3,7 +3,8 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
-const AdminCopyTrade = require('../models/AdminCopyTrade'); // NEW: Import AdminCopyTrade model
+const AdminCopyTrade = require('../models/AdminCopyTrade');
+const Message = require('../models/Message'); // ⭐ NEW: Import Message model
 const authMiddleware = require('../middleware/auth');
 
 // This route provides all data for the dashboard.html
@@ -152,7 +153,7 @@ router.get('/volume-data', authMiddleware, async (req, res) => {
 });
 
 // ----------------------------------------------------------------------
-// NEW: COPY TRADE ROUTES FOR USERS
+// NEW: COPY TRADE ROUTES FOR USERS (Unchanged)
 // ----------------------------------------------------------------------
 
 // [GET] /api/user/copy-trades/available - Get available copy trades for users with balance > $100
@@ -239,6 +240,74 @@ router.get('/copy-trades/my-copies', authMiddleware, async (req, res) => {
             success: false, 
             message: "Failed to fetch copy trade history" 
         });
+    }
+});
+
+
+// ----------------------------------------------------------------------
+// ⭐ NEW: SUPPORT CHAT ROUTES (USER FACING) ⭐
+// ----------------------------------------------------------------------
+
+// [GET] /api/user/support/conversation/:userId - Fetch the user's chat history
+router.get('/support/conversation/:userId', authMiddleware, async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Ensure the logged-in user is only viewing their own chat
+        if (req.user.id !== userId) {
+            return res.status(403).json({ success: false, message: "Forbidden: Cannot view another user's chat." });
+        }
+
+        const messages = await Message.find({ userId: userId })
+            .select('sender text createdAt')
+            .sort('createdAt');
+
+        // Mark admin replies as read by user
+        await Message.updateMany(
+            { userId: userId, sender: 'admin', readByUser: false },
+            { $set: { readByUser: true } }
+        );
+
+        res.json({
+            success: true,
+            messages: messages.map(msg => ({
+                sender: msg.sender,
+                text: msg.text,
+                timestamp: msg.createdAt,
+            }))
+        });
+
+    } catch (error) {
+        console.error('User Chat Fetch Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to load conversation.' });
+    }
+});
+
+// [POST] /api/user/support/send - Send a new message from the user
+router.post('/support/send', authMiddleware, async (req, res) => {
+    const { message } = req.body;
+    const userId = req.user.id;
+
+    if (!message || message.trim().length === 0) {
+        return res.status(400).json({ success: false, message: 'Message cannot be empty.' });
+    }
+    
+    try {
+        const newMessage = new Message({
+            userId: userId,
+            sender: 'user',
+            text: message.trim(),
+            readByAdmin: false, // Mark as UNREAD for admin
+            readByUser: true,
+        });
+
+        await newMessage.save();
+
+        res.json({ success: true, message: 'Message sent successfully.' });
+
+    } catch (error) {
+        console.error('User Message Send Error:', error);
+        res.status(500).json({ success: false, message: 'Failed to send message.' });
     }
 });
 
