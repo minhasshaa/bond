@@ -60,6 +60,7 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
+const Message = require('./models/Message');
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
