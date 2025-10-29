@@ -10,7 +10,7 @@ const {
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
-const Message = require('../models/Message'); // ⭐ NEW: Import Message model
+const Message = require('../models/Message'); // ⭐ FIX: Moved Message import here
 
 // Rely on index.js to provide these global constants
 const { candleOverride, TRADE_PAIRS } = require('../index'); 
@@ -92,17 +92,17 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     });
 
     // ----------------------------------------------------------------------
-    // KYC MANAGEMENT ENDPOINTS (Unchanged)
+    // KYC MANAGEMENT ENDPOINTS 
     // ----------------------------------------------------------------------
 
     // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
+        // ⭐ FIX: This logic relies on the injected Azure dependencies
         if (!blobServiceClient || !KYC_CONTAINER_NAME || !azureEnabled) {
             return res.status(200).json({ success: false, message: 'Azure Storage not configured for KYC review. Cannot fetch documents.' });
         }
 
         try {
-            // ⭐ FIX 1: Select new identity fields and the selfie document path
             const usersToReview = await User.find({ 
                 $or: [
                     { kycStatus: 'review' },
@@ -143,7 +143,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                             expiresOn: expiresOn,
                         });
                         
-                        // FIX: generateSasUrl returns the full URL with the SAS token appended
                         return sasToken; 
 
                     } catch (error) {
@@ -216,7 +215,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS (Unchanged)
     // ----------------------------------------------------------------------
 
-    // [POST] /api/admin/approve-deposit - *** UPDATED FOR REFERRAL COMMISSION ***
     router.post('/approve-deposit', async (req, res) => {
         const { userId, txid, amount } = req.body;
         if (!userId || !txid || typeof amount !== 'number' || amount <= 0) {
