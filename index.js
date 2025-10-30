@@ -1,4 +1,4 @@
-// index.js - REST API VERSION (STABLE & RELIABLE)
+// index.js - WITH BINANCE RATE LIMIT PROTECTION
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -26,13 +26,13 @@ const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
 
-// >>> START RATE LIMIT PROTECTION <<<
+// >>> START BINANCE RATE LIMIT PROTECTION <<<
 let binanceRateLimited = false;
 let lastBinanceError = null;
 const RATE_LIMIT_DELAY = 60000; // 1 minute delay when rate limited
-// >>> END RATE LIMIT PROTECTION <<<
+// >>> END BINANCE RATE LIMIT PROTECTION <<<
 
-// >>> START AZURE CONFIGURATION <<<
+// >>> START AZURE CONFIGURATION (CLEANED) <<<
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
@@ -119,7 +119,7 @@ app.use("/api/withdraw", withdrawRoutes);
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ FETCH 24H TICKER DATA
+// ⭐ ENHANCED FUNCTION: Fetch and store 24h Ticker Data with Rate Limit Protection
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
     if (binanceRateLimited) {
@@ -145,8 +145,11 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
-        if (err.response && err.response.status === 418 || err.response.status === 429) {
-            console.error("❌ Rate limited on 24h ticker data");
+        if (err.response && err.response.status === 418) {
+            console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): RATE LIMITED");
+            handleBinanceRateLimit();
+        } else if (err.response && err.response.status === 429) {
+            console.error("❌ Failed to fetch 24h ticker data (HTTP 429 - Too Many Requests)");
             handleBinanceRateLimit();
         } else {
             console.error("❌ Failed to fetch 24h ticker data:", err.message);
@@ -155,13 +158,14 @@ async function fetchAndStore24hTicker() {
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ RATE LIMIT HANDLER
+// ⭐ NEW FUNCTION: Handle Binance Rate Limiting
 // --------------------------------------------------------------------------------------------------
 function handleBinanceRateLimit() {
     if (!binanceRateLimited) {
         binanceRateLimited = true;
         console.log(`🚨 BINANCE RATE LIMIT DETECTED! Pausing API calls for ${RATE_LIMIT_DELAY/1000} seconds`);
         
+        // Auto-recover after delay
         setTimeout(() => {
             binanceRateLimited = false;
             console.log("✅ Binance rate limit cooldown complete. Resuming API calls.");
@@ -170,13 +174,16 @@ function handleBinanceRateLimit() {
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ INITIALIZE MARKET DATA (WITH PROPER ERROR HANDLING)
+// ⭐ ENHANCED FUNCTION: Initialize Market Data with Rate Limit Protection
 // --------------------------------------------------------------------------------------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     await fetchAndStore24hTicker(); 
     
     for (const pair of TRADE_PAIRS) {
+        // Add delay between requests to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
         if (binanceRateLimited) {
             console.log(`⏳ Skipping ${pair} initialization - Binance rate limited`);
             marketData[pair].candles = [];
@@ -187,7 +194,6 @@ async function initializeMarketData() {
         try {
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
             
-            // ✅ PROPER ARRAY VALIDATION
             if (!Array.isArray(klines)) {
                 console.error(`❌ Binance returned non-array response for ${pair}:`, typeof klines);
                 if (klines && klines.code === -1003) {
@@ -199,7 +205,6 @@ async function initializeMarketData() {
                 continue;
             }
             
-            // ✅ PROPER KLINE STRUCTURE VALIDATION
             if (klines.length > 0 && (!Array.isArray(klines[0]) || klines[0].length < 5)) {
                 console.error(`❌ Invalid kline structure for ${pair}`);
                 marketData[pair].candles = [];
@@ -228,16 +233,14 @@ async function initializeMarketData() {
             marketData[pair].candles = [];
             marketData[pair].currentPrice = getFallbackPrice(pair);
         }
-        
-        // Small delay between pairs to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
     }
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ FALLBACK PRICES (WHEN BINANCE IS UNAVAILABLE)
+// ⭐ NEW FUNCTION: Get Fallback Price (When Binance is unavailable)
 // --------------------------------------------------------------------------------------------------
 function getFallbackPrice(pair) {
+    // Provide reasonable fallback prices to keep the app running
     const fallbackPrices = {
         'BTCUSDT': 35000,
         'ETHUSDT': 1800,
@@ -254,12 +257,57 @@ function getFallbackPrice(pair) {
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ UPDATE MARKET DATA (ORIGINAL RELIABLE VERSION)
+// ⭐ ENHANCED FUNCTION: Update Market Data with Rate Limit Protection
 // --------------------------------------------------------------------------------------------------
 async function updateMarketData() {
     if (binanceRateLimited) {
         // Use fallback data when rate limited
-        updateMarketDataWithFallback();
+        const now = new Date();
+        const currentMinuteStart = new Date(now);
+        currentMinuteStart.setSeconds(0, 0);
+        currentMinuteStart.setMilliseconds(0);
+
+        for (const pair of TRADE_PAIRS) {
+            const md = marketData[pair];
+            const currentPrice = md.currentPrice || getFallbackPrice(pair);
+            
+            // Continue candle generation with existing data
+            const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
+
+            if (isNewMinute) {
+                if (md.currentCandle) {
+                    const completed = { ...md.currentCandle, close: currentPrice };
+                    const override = candleOverride[pair];
+                    if (override) {
+                        const openP = completed.open;
+                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                        if (override === 'up') {
+                            completed.close = openP + priceChange;
+                            completed.high = Math.max(completed.high, completed.close);
+                        } else {
+                            completed.close = openP - priceChange;
+                            completed.low = Math.min(completed.low, completed.close);
+                        }
+                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
+                        candleOverride[pair] = null;
+                    }
+                    md.candles.push(completed);
+                    if (md.candles.length > 200) md.candles.shift();
+                    try {
+                        await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
+                    } catch (dbError) {
+                        console.error(`❌ Database error saving candle for ${pair}:`, dbError.message);
+                    }
+                }
+                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
+            } else {
+                md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
+                md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
+                md.currentCandle.close = currentPrice;
+            }
+            const allCandles = [...md.candles, md.currentCandle];
+            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
+        }
         return;
     }
 
@@ -283,7 +331,6 @@ async function updateMarketData() {
             const currentPrice = md.currentPrice || 0;
             if (!currentPrice) continue;
 
-            // ✅ Ensure candles array exists
             if (!Array.isArray(md.candles)) {
                 md.candles = [];
             }
@@ -332,74 +379,15 @@ async function updateMarketData() {
     }
 }
 
-// --------------------------------------------------------------------------------------------------
-// ⭐ FALLBACK MARKET DATA UPDATE
-// --------------------------------------------------------------------------------------------------
-function updateMarketDataWithFallback() {
-    const now = new Date();
-    const currentMinuteStart = new Date(now);
-    currentMinuteStart.setSeconds(0, 0);
-    currentMinuteStart.setMilliseconds(0);
-
-    for (const pair of TRADE_PAIRS) {
-        const md = marketData[pair];
-        let currentPrice = md.currentPrice || getFallbackPrice(pair);
-        
-        // Small random price movement for fallback mode
-        currentPrice = currentPrice * (1 + (Math.random() - 0.5) * 0.001);
-        md.currentPrice = currentPrice;
-
-        if (!Array.isArray(md.candles)) {
-            md.candles = [];
-        }
-
-        const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-        if (isNewMinute) {
-            if (md.currentCandle) {
-                const completed = { ...md.currentCandle, close: currentPrice };
-                const override = candleOverride[pair];
-                if (override) {
-                    const openP = completed.open;
-                    const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                    if (override === 'up') {
-                        completed.close = openP + priceChange;
-                        completed.high = Math.max(completed.high, completed.close);
-                    } else {
-                        completed.close = openP - priceChange;
-                        completed.low = Math.min(completed.low, completed.close);
-                    }
-                    console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                    candleOverride[pair] = null;
-                }
-                md.candles.push(completed);
-                if (md.candles.length > 200) md.candles.shift();
-            }
-            md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
-        } else {
-            md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
-            md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
-            md.currentCandle.close = currentPrice;
-        }
-        const allCandles = [...md.candles, md.currentCandle];
-        io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
-    }
-}
-
-// --------------------------------------------------------------------------------------------------
-// ⭐ START POLLING (ORIGINAL TIMINGS)
-// --------------------------------------------------------------------------------------------------
 function startMarketDataPolling() {
-    console.log("✅ Starting market data polling every 2 seconds...");
-    // Update every 2 seconds for real-time price updates (less aggressive)
-    setInterval(updateMarketData, 2000); 
-    // Fetch 24h ticker data every 2 minutes
-    setInterval(fetchAndStore24hTicker, 120000); 
+    console.log("✅ Starting market data polling every second...");
+    setInterval(updateMarketData, 2000); // Reduced to 2 seconds to be gentler
+    setInterval(fetchAndStore24hTicker, 120000); // Reduced to every 2 minutes
 }
 
-// [REST OF THE CODE REMAINS EXACTLY THE SAME AS YOUR WORKING VERSION]
+// [REST OF THE CODE REMAINS THE SAME - DASHBOARD FUNCTIONS, SOCKET.IO, ETC.]
 
-// ----- DASHBOARD DATA FUNCTIONS -----
+// ----- DASHBOARD DATA FUNCTIONS START -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
@@ -479,6 +467,7 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
+// ----- DASHBOARD DATA FUNCTIONS END -----
 
 // ------------------ PRICE UPDATE BROADCAST ------------------
 setInterval(() => {
@@ -499,7 +488,7 @@ setInterval(() => {
             countdown: secondsUntilNextMinute
         };
 
-        // Trading format
+        // Trading format (unchanged, still uses current price)
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
