@@ -23,6 +23,10 @@
         #volume-table-body tr { cursor: pointer; }
         #volume-table-body tr:hover { background-color: #2D3748; }
         .market-btn-lg { transition: all 0.2s ease-in-out; }
+        /* Custom scrollbar for chat window */
+        #chat-messages::-webkit-scrollbar { width: 6px; }
+        #chat-messages::-webkit-scrollbar-track { background: #1f2937; }
+        #chat-messages::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 3px; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200">
@@ -92,6 +96,7 @@
                 <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="volume">Live Volume</button>
                 <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="credit">Manual Credit</button>
                 <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="commission">Commission</button>
+                <button class="tab-button font-medium px-3 py-2 rounded-t-lg" data-tab="support-chat">Support Chat</button>
             </nav>
         </div>
 
@@ -257,6 +262,32 @@
                     </form>
                 </div>
             </div>
+            
+            <div id="support-chat-tab" class="tab-content">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-[80vh]">
+                    <div class="md:col-span-1 bg-gray-800 rounded-lg p-4 overflow-y-auto">
+                        <h2 class="text-xl font-bold mb-4">Open Conversations (<span id="open-chats-count">0</span>)</h2>
+                        <div id="open-chats-list" class="space-y-2">
+                            <p class="text-gray-400">Loading chats...</p>
+                        </div>
+                    </div>
+
+                    <div class="md:col-span-2 bg-gray-800 rounded-lg flex flex-col">
+                        <div id="chat-window-header" class="p-4 border-b border-gray-700 bg-gray-700 rounded-t-lg sticky top-0 z-10">
+                            <h3 id="current-chat-user" class="text-lg font-semibold text-white">Select a user to chat</h3>
+                        </div>
+                        <div id="chat-messages" class="flex-grow p-4 overflow-y-auto space-y-3">
+                            <p class="text-center text-gray-500 pt-10">Messages will appear here.</p>
+                        </div>
+                        <div id="chat-input-area" class="p-4 border-t border-gray-700 hidden">
+                            <form id="admin-chat-form" class="flex space-x-3">
+                                <input type="text" id="admin-chat-input" class="flex-grow bg-gray-700 p-3 rounded-lg text-white placeholder-gray-400" placeholder="Type your response...">
+                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">Send</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -300,6 +331,16 @@
             const modalForceUpBtn = document.getElementById('modal-force-up');
             const modalAutoBtn = document.getElementById('modal-auto');
             const modalForceDownBtn = document.getElementById('modal-force-down');
+            
+            // ⭐ ADDED CHAT ELEMENTS
+            const openChatsList = document.getElementById('open-chats-list');
+            const openChatsCount = document.getElementById('open-chats-count');
+            const chatMessages = document.getElementById('chat-messages');
+            const currentChatUser = document.getElementById('current-chat-user');
+            const chatInputArea = document.getElementById('chat-input-area');
+            const adminChatForm = document.getElementById('admin-chat-form');
+            const adminChatInput = document.getElementById('admin-chat-input');
+            let currentOpenChatUserId = null;
 
             const tabs = document.querySelectorAll('.tab-button');
             const tabContents = document.querySelectorAll('.tab-content');
@@ -335,7 +376,7 @@
                 }
             }
             
-            // --- Tab Switching Logic ---
+            // --- Tab Switching Logic (UPDATED for Chat) ---
 
             tabs.forEach(tab => {
                 tab.addEventListener('click', () => {
@@ -356,6 +397,11 @@
 
                     if (tab.dataset.tab === 'volume') {
                          fetchData(); 
+                    }
+                    
+                    // ⭐ ADDED CHAT ACTIVATION
+                    if (tab.dataset.tab === 'support-chat') {
+                        fetchOpenChats();
                     }
                 });
             });
@@ -579,6 +625,155 @@
                     modalForceDownBtn.disabled = false;
                 }
             }
+            
+            // --- ⭐ ADDED CHAT SUPPORT FUNCTIONS ---
+
+            async function fetchOpenChats() {
+                const adminKey = getAdminKey();
+                if (!adminKey) return;
+                
+                openChatsList.innerHTML = '<p class="text-gray-400">Loading chats...</p>';
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/support/open`, {
+                        headers: { 'x-admin-key': adminKey }
+                    });
+                    const data = await response.json();
+
+                    if (!data.success) throw new Error(data.message);
+
+                    openChatsCount.textContent = data.openChats.length;
+                    if (data.openChats.length === 0) {
+                        openChatsList.innerHTML = '<p class="text-green-400">No open support tickets. ✅</p>';
+                        return;
+                    }
+
+                    openChatsList.innerHTML = '';
+                    data.openChats.forEach(chat => {
+                        const chatItem = document.createElement('div');
+                        const isActive = chat.userId === currentOpenChatUserId ? 'bg-gray-600' : 'bg-gray-700 hover:bg-gray-600';
+                        
+                        chatItem.className = `p-3 rounded-lg ${isActive} cursor-pointer transition-colors`;
+                        chatItem.dataset.userId = chat.userId;
+                        chatItem.innerHTML = `
+                            <p class="font-bold text-white">${chat.username}</p>
+                            <p class="text-sm text-gray-400 truncate">${chat.lastMessage}</p>
+                            <span class="text-xs ${chat.unreadCount > 0 ? 'text-red-400' : 'text-gray-500'}">${chat.unreadCount > 0 ? `${chat.unreadCount} New` : 'Replied'}</span>
+                        `;
+                        openChatsList.appendChild(chatItem);
+                    });
+
+                    openChatsList.querySelectorAll('div[data-user-id]').forEach(item => {
+                        item.addEventListener('click', () => loadConversation(item.dataset.userId, item.querySelector('.font-bold').textContent));
+                    });
+
+                } catch (error) {
+                    console.error('Error fetching open chats:', error);
+                    openChatsList.innerHTML = '<p class="text-red-400">Error loading chats.</p>';
+                }
+            }
+
+            async function loadConversation(userId, username) {
+                const adminKey = getAdminKey();
+                if (!adminKey) return;
+                
+                currentOpenChatUserId = userId;
+                currentChatUser.textContent = `Chat with: ${username} (ID: ${userId})`;
+                chatMessages.innerHTML = '<p class="text-center text-blue-400 pt-10">Loading conversation...</p>';
+                chatInputArea.classList.add('hidden');
+
+                // Re-highlight the active user in the list
+                document.querySelectorAll('#open-chats-list div[data-user-id]').forEach(item => {
+                    item.classList.remove('bg-gray-600');
+                    item.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                });
+                const activeChatItem = document.querySelector(`#open-chats-list div[data-user-id="${userId}"]`);
+                if (activeChatItem) {
+                    activeChatItem.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                    activeChatItem.classList.add('bg-gray-600');
+                }
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/support/messages/${userId}`, {
+                        headers: { 'x-admin-key': adminKey }
+                    });
+                    const data = await response.json();
+
+                    if (!data.success) throw new Error(data.message);
+
+                    chatMessages.innerHTML = '';
+                    data.messages.forEach(msg => {
+                        const isUser = msg.sender === 'user';
+                        const messageElement = document.createElement('div');
+                        
+                        messageElement.className = `flex ${isUser ? 'justify-start' : 'justify-end'}`;
+                        
+                        messageElement.innerHTML = `
+                            <div class="max-w-xs md:max-w-md p-3 rounded-xl ${isUser ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-200'}">
+                                <p class="text-sm font-medium">${msg.text}</p>
+                                <p class="text-xs mt-1 ${isUser ? 'text-blue-200' : 'text-gray-400'}">${new Date(msg.timestamp).toLocaleTimeString()}</p>
+                            </div>
+                        `;
+                        chatMessages.appendChild(messageElement);
+                    });
+
+                    chatInputArea.classList.remove('hidden');
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                } catch (error) {
+                    console.error('Error loading conversation:', error);
+                    chatMessages.innerHTML = '<p class="text-center text-red-400 pt-10">Error loading messages.</p>';
+                    chatInputArea.classList.add('hidden');
+                }
+            }
+
+            adminChatForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const message = adminChatInput.value.trim();
+                if (!message || !currentOpenChatUserId) return;
+
+                const adminKey = getAdminKey();
+                const originalValue = adminChatInput.value;
+                adminChatInput.value = 'Sending...';
+                adminChatInput.disabled = true;
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/support/send`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
+                        body: JSON.stringify({ 
+                            userId: currentOpenChatUserId, 
+                            message: message 
+                        })
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        const messageElement = document.createElement('div');
+                        messageElement.className = `flex justify-end`;
+                        messageElement.innerHTML = `
+                            <div class="max-w-xs md:max-w-md p-3 rounded-xl bg-gray-700 text-gray-200">
+                                <p class="text-sm font-medium">${message}</p>
+                                <p class="text-xs mt-1 text-gray-400">${new Date().toLocaleTimeString()}</p>
+                            </div>
+                        `;
+                        chatMessages.appendChild(messageElement);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                        
+                        adminChatInput.value = ''; 
+                        fetchOpenChats(); 
+                    } else {
+                        alert(`Failed to send message: ${data.message}`);
+                        adminChatInput.value = originalValue; 
+                    }
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    alert('Network error while sending message.');
+                    adminChatInput.value = originalValue; 
+                } finally {
+                    adminChatInput.disabled = false;
+                }
+            });
 
 
             // --- Remaining Handlers (Omitted for brevity, logic remains the same) ---
