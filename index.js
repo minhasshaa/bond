@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION TO FIX 418 RATE LIMITING ERROR
+// index.js - COMPLETE CODE WITH WEBSOCKET FIX AND ALL FUNCTIONS INCLUDED
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -25,6 +25,9 @@ module.exports.TRADE_PAIRS = TRADE_PAIRS;
 const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
+
+// Utility function to introduce a delay for rate limiting sensitive calls
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms)); 
 
 // >>> START AZURE CONFIGURATION (CLEANED) <<<
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
@@ -114,10 +117,9 @@ app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnab
 
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 418 Rate Limit Issue)
+// ⭐ 24h Ticker Data Function (REST API - Run every 60s)
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    // Using the spot API's 24hr ticker endpoint
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
@@ -127,7 +129,6 @@ async function fetchAndStore24hTicker() {
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
-            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
                     changePercent: parseFloat(ticker.priceChangePercent) 
@@ -137,19 +138,17 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
-        // --- RATE LIMITING (418) FIX ---
         if (err.response && err.response.status === 418) {
              console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
         } else {
              console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
         }
-        // -------------------------------
     }
 }
 // --------------------------------------------------------------------------------------------------
 
 
-// ----- DASHBOARD DATA FUNCTIONS START (MODIFIED) -----
+// ----- DASHBOARD DATA FUNCTIONS START (RE-INCLUDED) -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
@@ -232,15 +231,135 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (MINOR CHANGES) ------------------
+// --------------------------------------------------------------------------------------------------
+// ⭐ NEW FUNCTION: Process real-time price update from WebSocket (Replaces updateMarketData polling)
+// --------------------------------------------------------------------------------------------------
+async function processPriceUpdate(priceData) {
+    const now = new Date();
+    const currentMinuteStart = new Date(now);
+    currentMinuteStart.setSeconds(0, 0);
+    currentMinuteStart.setMilliseconds(0);
+
+    const secondsUntilNextMinute = 60 - now.getSeconds();
+    const payloadDashboard = {};
+    const payloadTrading = {};
+    let shouldBroadcast = false;
+
+    // Process price updates for all traded pairs
+    for (const pair of TRADE_PAIRS) {
+        // Find the price in the incoming Mini Ticker stream data
+        const priceItem = priceData.find(item => item.s === pair);
+        if (!priceItem) continue;
+
+        const currentPrice = parseFloat(priceItem.c);
+        if (isNaN(currentPrice)) continue;
+
+        marketData[pair].currentPrice = currentPrice;
+        const md = marketData[pair];
+        shouldBroadcast = true; // Flag to broadcast once any price changes
+
+        const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
+
+        if (isNewMinute) {
+            if (md.currentCandle) {
+                const completed = { ...md.currentCandle, close: currentPrice };
+                const override = candleOverride[pair];
+                if (override) {
+                    const openP = completed.open;
+                    const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                    if (override === 'up') {
+                        completed.close = openP + priceChange;
+                        completed.high = Math.max(completed.high, completed.close);
+                    } else {
+                        completed.close = openP - priceChange;
+                        completed.low = Math.min(completed.low, completed.currentPrice);
+                    }
+                    console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
+                    candleOverride[pair] = null;
+                }
+                md.candles.push(completed);
+                if (md.candles.length > 200) md.candles.shift();
+                await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
+            }
+            md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
+        } else {
+            // Update current candle's high/low/close
+            md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
+            md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
+            md.currentCandle.close = currentPrice;
+        }
+
+        // Prepare data for broadcast
+        const allCandles = [...md.candles, md.currentCandle];
+        io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
+        
+        // Prepare dashboard/trading payloads (now happening inside the websocket handler)
+        const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
+        const tickerForClient = `${pair.replace('USDT', '')}/USD`;
+        
+        payloadDashboard[tickerForClient] = {
+            price: md.currentPrice,
+            change: parseFloat(changeValue.toFixed(2)), 
+            countdown: secondsUntilNextMinute
+        };
+
+        payloadTrading[pair] = {
+            price: md.currentPrice,
+            countdown: secondsUntilNextMinute,
+            timestamp: now.getTime()
+        };
+    }
+    
+    // Broadcast the collected price updates once per websocket event
+    if (shouldBroadcast) {
+        io.emit("price_update", payloadTrading);         
+        io.emit("dashboard_price_update", payloadDashboard);
+    }
+}
+
+// --------------------------------------------------------------------------------------------------
+// ⭐ NEW FUNCTION: Start WebSocket Connection (Replaces 1-second REST polling)
+// --------------------------------------------------------------------------------------------------
+function startWebSocketStream() {
+    console.log("📡 Starting Binance Futures Mini Ticker WebSocket Stream...");
+
+    // The '!miniTicker@arr' stream provides fast, consolidated price updates for ALL pairs.
+    binance.futuresSubscribe('!miniTicker@arr', (data) => {
+        try {
+            // data is an array of mini-ticker objects
+            if (data && Array.isArray(data)) {
+                processPriceUpdate(data);
+            }
+        } catch (error) {
+            console.error('Error processing WebSocket data:', error);
+        }
+    });
+
+    // Start 24h ticker update interval (this one still uses REST, but only once per minute)
+    setInterval(fetchAndStore24hTicker, 60000); 
+}
+
+
+// ------------------ CANDLE / MARKET DATA LOGIC (FIXED) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
+    
+    // Fetch 24hr data once on startup
     await fetchAndStore24hTicker(); 
     
     for (const pair of TRADE_PAIRS) {
         try {
-            // Using futuresCandles since the logic below requires the future prices endpoint
+            // Use a delay to prevent rate-limiting during the initial historical data fetch
+            await delay(500); 
+            
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+            
+            // Check for API failure (rate limit/malformed response)
+            if (!Array.isArray(klines) || klines.length === 0) {
+                 console.error(`❌ Failed to load initial candles for ${pair}: Received invalid or empty data from API (Likely Rate Limit).`);
+                 continue; 
+            }
+            
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
@@ -253,102 +372,16 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err);
+            console.error(`❌ Failed to load initial candles for ${pair} (API/Network Error):`, (err && err.body) || err);
         }
     }
 }
 
-async function updateMarketData() {
-    try {
-        // Fetching prices via futuresPrices to match futuresCandles and for consistency
-        const prices = await binance.futuresPrices();
-        const now = new Date();
-        const currentMinuteStart = new Date(now);
-        currentMinuteStart.setSeconds(0, 0);
-        currentMinuteStart.setMilliseconds(0);
-
-        for (const pair of TRADE_PAIRS) {
-            if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
-
-            const md = marketData[pair];
-            const currentPrice = md.currentPrice || 0;
-            if (!currentPrice) continue;
-
-            const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-            if (isNewMinute) {
-                if (md.currentCandle) {
-                    const completed = { ...md.currentCandle, close: currentPrice };
-                    const override = candleOverride[pair];
-                    if (override) {
-                        const openP = completed.open;
-                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                        if (override === 'up') {
-                            completed.close = openP + priceChange;
-                            completed.high = Math.max(completed.high, completed.close);
-                        } else {
-                            completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
-                        }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                        candleOverride[pair] = null;
-                    }
-                    md.candles.push(completed);
-                    if (md.candles.length > 200) md.candles.shift();
-                    await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
-                }
-                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
-            } else {
-                md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
-                md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
-                md.currentCandle.close = currentPrice;
-            }
-            const allCandles = [...md.candles, md.currentCandle];
-            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
-        }
-    } catch (err) {
-        console.error("Error in updateMarketData:", (err && err.body) || err);
-    }
+function startMarketData() {
+    // ONLY WebSocket and the 24h ticker interval are now started here
+    console.log("✅ Starting market data streaming and polling...");
+    startWebSocketStream(); 
 }
-
-function startMarketDataPolling() {
-    console.log("✅ Starting market data polling every second...");
-    // Update every second for real-time price updates
-    setInterval(updateMarketData, 1000); 
-    // Fetch 24h ticker data every 60 seconds
-    setInterval(fetchAndStore24hTicker, 60000); 
-}
-
-// ------------------ PRICE UPDATE BROADCAST ------------------
-setInterval(() => {
-    const now = new Date();
-    const secondsUntilNextMinute = 60 - now.getSeconds();
-    const payloadDashboard = {};
-    const payloadTrading = {};
-
-    for (const pair of TRADE_PAIRS) {
-        const md = marketData[pair];
-        const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
-        
-        // Dashboard format
-        const tickerForClient = `${pair.replace('USDT', '')}/USD`;
-        payloadDashboard[tickerForClient] = {
-            price: md.currentPrice,
-            change: parseFloat(changeValue.toFixed(2)), 
-            countdown: secondsUntilNextMinute
-        };
-
-        // Trading format (unchanged, still uses current price)
-        payloadTrading[pair] = {
-            price: md.currentPrice,
-            countdown: secondsUntilNextMinute,
-            timestamp: now.getTime()
-        };
-    }
-
-    io.emit("price_update", payloadTrading);         
-    io.emit("dashboard_price_update", payloadDashboard);
-}, 1000);
 
 // ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
@@ -392,7 +425,7 @@ db.once("open", async () => {
     }
 
     await initializeMarketData();
-    startMarketDataPolling();
+    startMarketData(); // Start WebSocket streaming
 
     const tradeModule = require("./trade");
     if (typeof tradeModule.initialize === "function") {
