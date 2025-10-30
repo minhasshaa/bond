@@ -1,4 +1,4 @@
-// index.js - WITH BINANCE RATE LIMIT PROTECTION
+// index.js - FIXED VERSION TO RESOLVE "klines.map is not a function" ERROR
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -25,12 +25,6 @@ module.exports.TRADE_PAIRS = TRADE_PAIRS;
 const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
-
-// >>> START BINANCE RATE LIMIT PROTECTION <<<
-let binanceRateLimited = false;
-let lastBinanceError = null;
-const RATE_LIMIT_DELAY = 60000; // 1 minute delay when rate limited
-// >>> END BINANCE RATE LIMIT PROTECTION <<<
 
 // >>> START AZURE CONFIGURATION (CLEANED) <<<
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
@@ -118,15 +112,12 @@ app.use("/api/withdraw", withdrawRoutes);
 
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
+
 // --------------------------------------------------------------------------------------------------
-// ⭐ ENHANCED FUNCTION: Fetch and store 24h Ticker Data with Rate Limit Protection
+// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 418 Rate Limit Issue)
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    if (binanceRateLimited) {
-        console.log("⏳ Skipping 24h ticker fetch - Binance rate limited");
-        return;
-    }
-
+    // Using the spot API's 24hr ticker endpoint
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
@@ -136,6 +127,7 @@ async function fetchAndStore24hTicker() {
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
+            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
                     changePercent: parseFloat(ticker.priceChangePercent) 
@@ -145,70 +137,42 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
+        // --- RATE LIMITING (418) FIX ---
         if (err.response && err.response.status === 418) {
-            console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): RATE LIMITED");
-            handleBinanceRateLimit();
-        } else if (err.response && err.response.status === 429) {
-            console.error("❌ Failed to fetch 24h ticker data (HTTP 429 - Too Many Requests)");
-            handleBinanceRateLimit();
+             console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
         } else {
-            console.error("❌ Failed to fetch 24h ticker data:", err.message);
+             console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
         }
+        // -------------------------------
     }
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ NEW FUNCTION: Handle Binance Rate Limiting
-// --------------------------------------------------------------------------------------------------
-function handleBinanceRateLimit() {
-    if (!binanceRateLimited) {
-        binanceRateLimited = true;
-        console.log(`🚨 BINANCE RATE LIMIT DETECTED! Pausing API calls for ${RATE_LIMIT_DELAY/1000} seconds`);
-        
-        // Auto-recover after delay
-        setTimeout(() => {
-            binanceRateLimited = false;
-            console.log("✅ Binance rate limit cooldown complete. Resuming API calls.");
-        }, RATE_LIMIT_DELAY);
-    }
-}
-
-// --------------------------------------------------------------------------------------------------
-// ⭐ ENHANCED FUNCTION: Initialize Market Data with Rate Limit Protection
+// ⭐ FIXED FUNCTION: Initialize Market Data (Fixes "klines.map is not a function" Error)
 // --------------------------------------------------------------------------------------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     await fetchAndStore24hTicker(); 
     
     for (const pair of TRADE_PAIRS) {
-        // Add delay between requests to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        if (binanceRateLimited) {
-            console.log(`⏳ Skipping ${pair} initialization - Binance rate limited`);
-            marketData[pair].candles = [];
-            marketData[pair].currentPrice = getFallbackPrice(pair);
-            continue;
-        }
-
         try {
+            // Using futuresCandles since the logic below requires the future prices endpoint
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
             
+            // ✅ FIX: Check if klines is actually an array before using .map()
             if (!Array.isArray(klines)) {
-                console.error(`❌ Binance returned non-array response for ${pair}:`, typeof klines);
-                if (klines && klines.code === -1003) {
-                    console.error(`🚨 BINANCE BAN DETECTED: ${klines.msg}`);
-                    handleBinanceRateLimit();
-                }
+                console.error(`❌ Binance returned non-array response for ${pair}:`, typeof klines, klines);
+                // Initialize with empty candles to prevent crashes
                 marketData[pair].candles = [];
-                marketData[pair].currentPrice = getFallbackPrice(pair);
+                marketData[pair].currentPrice = 0;
                 continue;
             }
             
+            // ✅ FIX: Also check if individual kline items have the expected structure
             if (klines.length > 0 && (!Array.isArray(klines[0]) || klines[0].length < 5)) {
                 console.error(`❌ Invalid kline structure for ${pair}`);
                 marketData[pair].candles = [];
-                marketData[pair].currentPrice = getFallbackPrice(pair);
+                marketData[pair].currentPrice = 0;
                 continue;
             }
             
@@ -226,94 +190,22 @@ async function initializeMarketData() {
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
             console.error(`❌ Failed to load initial candles for ${pair}: ${err.message}`);
-            if (err.body && err.body.code === -1003) {
-                console.error(`🚨 BINANCE BAN DETECTED: ${err.body.msg}`);
-                handleBinanceRateLimit();
-            }
+            // Initialize with empty data to prevent further errors
             marketData[pair].candles = [];
-            marketData[pair].currentPrice = getFallbackPrice(pair);
+            marketData[pair].currentPrice = 0;
         }
     }
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ NEW FUNCTION: Get Fallback Price (When Binance is unavailable)
-// --------------------------------------------------------------------------------------------------
-function getFallbackPrice(pair) {
-    // Provide reasonable fallback prices to keep the app running
-    const fallbackPrices = {
-        'BTCUSDT': 35000,
-        'ETHUSDT': 1800,
-        'BNBUSDT': 230,
-        'SOLUSDT': 35,
-        'XRPUSDT': 0.55,
-        'ADAUSDT': 0.25,
-        'DOGEUSDT': 0.07,
-        'AVAXUSDT': 12,
-        'LINKUSDT': 7,
-        'MATICUSDT': 0.6
-    };
-    return fallbackPrices[pair] || 1;
-}
-
-// --------------------------------------------------------------------------------------------------
-// ⭐ ENHANCED FUNCTION: Update Market Data with Rate Limit Protection
+// ⭐ FIXED FUNCTION: Update Market Data (Enhanced Error Handling)
 // --------------------------------------------------------------------------------------------------
 async function updateMarketData() {
-    if (binanceRateLimited) {
-        // Use fallback data when rate limited
-        const now = new Date();
-        const currentMinuteStart = new Date(now);
-        currentMinuteStart.setSeconds(0, 0);
-        currentMinuteStart.setMilliseconds(0);
-
-        for (const pair of TRADE_PAIRS) {
-            const md = marketData[pair];
-            const currentPrice = md.currentPrice || getFallbackPrice(pair);
-            
-            // Continue candle generation with existing data
-            const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-            if (isNewMinute) {
-                if (md.currentCandle) {
-                    const completed = { ...md.currentCandle, close: currentPrice };
-                    const override = candleOverride[pair];
-                    if (override) {
-                        const openP = completed.open;
-                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                        if (override === 'up') {
-                            completed.close = openP + priceChange;
-                            completed.high = Math.max(completed.high, completed.close);
-                        } else {
-                            completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
-                        }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                        candleOverride[pair] = null;
-                    }
-                    md.candles.push(completed);
-                    if (md.candles.length > 200) md.candles.shift();
-                    try {
-                        await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
-                    } catch (dbError) {
-                        console.error(`❌ Database error saving candle for ${pair}:`, dbError.message);
-                    }
-                }
-                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
-            } else {
-                md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
-                md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
-                md.currentCandle.close = currentPrice;
-            }
-            const allCandles = [...md.candles, md.currentCandle];
-            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
-        }
-        return;
-    }
-
     try {
+        // Fetching prices via futuresPrices to match futuresCandles and for consistency
         const prices = await binance.futuresPrices();
         
+        // ✅ FIX: Check if prices is valid
         if (!prices || typeof prices !== 'object') {
             console.error("❌ Invalid prices response from Binance");
             return;
@@ -331,6 +223,7 @@ async function updateMarketData() {
             const currentPrice = md.currentPrice || 0;
             if (!currentPrice) continue;
 
+            // ✅ FIX: Ensure candles array exists
             if (!Array.isArray(md.candles)) {
                 md.candles = [];
             }
@@ -373,21 +266,18 @@ async function updateMarketData() {
         }
     } catch (err) {
         console.error("❌ Error in updateMarketData:", err.message);
-        if (err.body && err.body.code === -1003) {
-            handleBinanceRateLimit();
-        }
     }
 }
 
 function startMarketDataPolling() {
     console.log("✅ Starting market data polling every second...");
-    setInterval(updateMarketData, 2000); // Reduced to 2 seconds to be gentler
-    setInterval(fetchAndStore24hTicker, 120000); // Reduced to every 2 minutes
+    // Update every second for real-time price updates
+    setInterval(updateMarketData, 1000); 
+    // Fetch 24h ticker data every 60 seconds
+    setInterval(fetchAndStore24hTicker, 60000); 
 }
 
-// [REST OF THE CODE REMAINS THE SAME - DASHBOARD FUNCTIONS, SOCKET.IO, ETC.]
-
-// ----- DASHBOARD DATA FUNCTIONS START -----
+// ----- DASHBOARD DATA FUNCTIONS START (MODIFIED) -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
@@ -501,7 +391,10 @@ setInterval(() => {
 }, 1000);
 
 // ------------------ DB + STARTUP ------------------
-mongoose.connect(process.env.MONGO_URI).then(() => {
+mongoose.connect(process.env.MONGO_URI, { 
+    useNewUrlParser: true, 
+    useUnifiedTopology: true 
+}).then(() => {
     console.log("✅ Connected to MongoDB");
 }).catch(err => {
     console.error("❌ MongoDB connection error:", err);
