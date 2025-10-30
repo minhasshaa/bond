@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION TO FIX 418 RATE LIMITING ERROR
+// index.js - FINAL CORRECTED VERSION WITH RATE LIMITING FIXES
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -13,6 +13,9 @@ const axios = require('axios');
 // >>> START KYC ADDITIONS <<<
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
 // >>> END KYC ADDITIONS <<<
+
+// ⭐ FIX: Added sleep helper function to prevent rate-limiting during initialization
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ------------------ CONFIG & CONSTANTS ------------------
 const TRADE_PAIRS = [
@@ -239,8 +242,18 @@ async function initializeMarketData() {
     
     for (const pair of TRADE_PAIRS) {
         try {
+            // ⭐ FIX: ADDED DELAY AND DATA VALIDATION
+            await sleep(150); // Add a small pause to prevent hitting rate limits
+            
             // Using futuresCandles since the logic below requires the future prices endpoint
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+
+            // ⭐ FIX: CHECK IF DATA IS AN ARRAY BEFORE MAPPING (PREVENTS TypeError)
+            if (!Array.isArray(klines)) {
+                 console.error(`⚠️ Data check failed for ${pair}: API did not return an array. Skipping pair.`);
+                 continue; 
+            }
+            
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
@@ -253,7 +266,7 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err);
+            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err.message || err);
         }
     }
 }
