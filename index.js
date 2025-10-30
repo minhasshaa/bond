@@ -1,4 +1,4 @@
-// index.js - WITH BINANCE WEBSOCKET INSTEAD OF REST API
+// index.js - CORRECTED WEBSOCKET IMPLEMENTATION
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -100,7 +100,8 @@ const binance = new Binance().options({
     APIKEY: process.env.BINANCE_API_KEY,
     APISECRET: process.env.BINANCE_API_SECRET,
     reconnect: true,
-    verbose: true
+    verbose: false, // Set to true for debugging
+    test: false
 });
 
 // ------------------ MIDDLEWARE ------------------
@@ -120,76 +121,63 @@ app.use("/api/withdraw", withdrawRoutes);
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ WEBSOCKET FUNCTIONS - REAL-TIME DATA WITHOUT RATE LIMITING
+// ⭐ CORRECTED WEBSOCKET FUNCTIONS - USING PROPER node-binance-api METHODS
 // --------------------------------------------------------------------------------------------------
 
 // Initialize WebSocket connections for all trading pairs
 function initializeBinanceWebSockets() {
     console.log("🔌 Initializing Binance WebSocket connections...");
     
+    // ✅ CORRECTED: Use proper method names from node-binance-api
     TRADE_PAIRS.forEach(pair => {
         try {
-            // WebSocket for real-time ticker data
-            binance.websockets.ticker(pair, (ticker) => {
-                if (ticker && ticker.curDayClose !== undefined) {
-                    const currentPrice = parseFloat(ticker.curDayClose);
-                    marketData[pair].currentPrice = currentPrice;
-                    
-                    // Update candle data in real-time
-                    updateCandleWithWebSocketData(pair, currentPrice);
-                    
-                    // Emit real-time updates to clients
-                    io.emit("price_update", {
-                        [pair]: {
-                            price: currentPrice,
-                            timestamp: Date.now()
-                        }
-                    });
-                }
-            });
-            
-            // WebSocket for kline/candle data (optional - for candle sticks)
-            binance.websockets.candlesticks(pair, '1m', (candlesticks) => {
-                const { k: kline } = candlesticks;
-                if (kline && kline.x) { // kline.x is true when candle is closed
-                    const newCandle = {
-                        asset: pair,
-                        timestamp: new Date(kline.t),
-                        open: parseFloat(kline.o),
-                        high: parseFloat(kline.h),
-                        low: parseFloat(kline.l),
-                        close: parseFloat(kline.c)
-                    };
-                    
-                    // Add to candles array
-                    marketData[pair].candles.push(newCandle);
-                    if (marketData[pair].candles.length > 200) {
-                        marketData[pair].candles.shift();
+            // Method 1: Use miniTicker for lightweight price updates
+            binance.websockets.miniTicker((markets) => {
+                for (let market in markets) {
+                    if (TRADE_PAIRS.includes(market)) {
+                        const currentPrice = parseFloat(markets[market].close);
+                        marketData[market].currentPrice = currentPrice;
+                        
+                        // Update candle data in real-time
+                        updateCandleWithWebSocketData(market, currentPrice);
+                        
+                        // Emit real-time updates to clients
+                        io.emit("price_update", {
+                            [market]: {
+                                price: currentPrice,
+                                timestamp: Date.now()
+                            }
+                        });
                     }
-                    
-                    // Save to database
-                    Candle.updateOne(
-                        { asset: pair, timestamp: newCandle.timestamp },
-                        { $set: newCandle },
-                        { upsert: true }
-                    ).catch(err => console.error(`Database error for ${pair}:`, err.message));
-                    
-                    // Emit updated candles to clients
-                    io.emit("market_data", {
-                        asset: pair,
-                        candles: marketData[pair].candles,
-                        currentPrice: marketData[pair].currentPrice
-                    });
                 }
             });
-            
-            console.log(`✅ WebSocket connected for ${pair}`);
+
+            // Method 2: Individual pair WebSocket (alternative approach)
+            // binance.websockets.prevDay(`${pair.toLowerCase()}@ticker`, (prevDay) => {
+            //     if (prevDay && prevDay.curDayClose) {
+            //         const currentPrice = parseFloat(prevDay.curDayClose);
+            //         marketData[pair].currentPrice = currentPrice;
+            //         updateCandleWithWebSocketData(pair, currentPrice);
+            //     }
+            // }, pair);
+
+            console.log(`✅ WebSocket subscribed for ${pair}`);
             
         } catch (error) {
-            console.error(`❌ WebSocket connection failed for ${pair}:`, error.message);
+            console.error(`❌ WebSocket subscription failed for ${pair}:`, error.message);
         }
     });
-    
+
+    // ✅ ADDITIONAL: Set up trades WebSocket for real-time execution data
+    binance.websockets.trades(TRADE_PAIRS, (trades) => {
+        const { symbol: pair, price } = trades;
+        if (TRADE_PAIRS.includes(pair) && price) {
+            const currentPrice = parseFloat(price);
+            marketData[pair].currentPrice = currentPrice;
+            updateCandleWithWebSocketData(pair, currentPrice);
+        }
+    });
+
     isWebSocketConnected = true;
     console.log("🎯 All WebSocket connections established - Real-time data streaming active");
 }
@@ -224,6 +212,13 @@ function updateCandleWithWebSocketData(pair, currentPrice) {
             
             md.candles.push(completed);
             if (md.candles.length > 200) md.candles.shift();
+            
+            // Save completed candle to database
+            Candle.updateOne(
+                { asset: pair, timestamp: completed.timestamp },
+                { $set: completed },
+                { upsert: true }
+            ).catch(err => console.error(`Database error for ${pair}:`, err.message));
         }
         
         // Start new candle
@@ -241,21 +236,53 @@ function updateCandleWithWebSocketData(pair, currentPrice) {
         md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
         md.currentCandle.close = currentPrice;
     }
+
+    // Emit updated market data
+    const allCandles = [...md.candles, md.currentCandle].filter(Boolean);
+    io.emit("market_data", {
+        asset: pair,
+        candles: allCandles,
+        currentPrice: currentPrice
+    });
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ UPDATED: Initialize Market Data (Minimal REST calls for initial setup)
+// ⭐ FALLBACK: Keep REST API polling as backup (but less frequent)
+// --------------------------------------------------------------------------------------------------
+async function updateMarketDataFallback() {
+    try {
+        const prices = await binance.futuresPrices();
+        
+        if (!prices || typeof prices !== 'object') {
+            console.error("❌ Invalid prices response from Binance");
+            return;
+        }
+        
+        for (const pair of TRADE_PAIRS) {
+            if (prices[pair]) {
+                const currentPrice = parseFloat(prices[pair]);
+                marketData[pair].currentPrice = currentPrice;
+                updateCandleWithWebSocketData(pair, currentPrice);
+            }
+        }
+    } catch (err) {
+        console.error("❌ Error in fallback market data:", err.message);
+    }
+}
+
+// --------------------------------------------------------------------------------------------------
+// ⭐ UPDATED: Initialize Market Data
 // --------------------------------------------------------------------------------------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data...");
     
-    // Only use REST API for initial historical data (once)
+    // Use REST API for initial historical data
     await fetchInitialHistoricalData();
     
     // Start WebSocket connections for real-time data
     initializeBinanceWebSockets();
     
-    // Fetch 24h data once (this can stay as it's less frequent)
+    // Fetch 24h data once
     await fetchAndStore24hTicker();
 }
 
@@ -283,7 +310,6 @@ async function fetchInitialHistoricalData() {
             }
         } catch (err) {
             console.error(`❌ Failed initial load for ${pair}:`, err.message);
-            // Continue with empty data - WebSocket will populate real-time data
         }
         
         // Small delay to avoid rate limiting during initial setup
@@ -292,7 +318,7 @@ async function fetchInitialHistoricalData() {
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ KEEP: 24h Ticker Data (Less frequent - okay to keep as REST)
+// ⭐ 24h Ticker Data
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
@@ -318,16 +344,19 @@ async function fetchAndStore24hTicker() {
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ REMOVED: No more polling intervals for market data!
+// ⭐ HYBRID APPROACH: Use WebSocket primarily, REST as fallback
 // --------------------------------------------------------------------------------------------------
 function startMarketDataPolling() {
-    console.log("✅ WebSocket real-time data streaming active - No polling needed");
+    console.log("✅ Starting hybrid market data system...");
     
-    // Only keep the 24h data update (less frequent)
-    setInterval(fetchAndStore24hTicker, 300000); // Every 5 minutes
+    // Fallback polling (less frequent - every 30 seconds)
+    setInterval(updateMarketDataFallback, 30000);
+    
+    // 24h data update (every 5 minutes)
+    setInterval(fetchAndStore24hTicker, 300000);
 }
 
-// [REST OF THE CODE REMAINS LARGELY THE SAME - DASHBOARD FUNCTIONS, SOCKET.IO, ETC.]
+// [REST OF THE CODE REMAINS THE SAME - DASHBOARD FUNCTIONS, SOCKET.IO, ETC.]
 
 // ----- DASHBOARD DATA FUNCTIONS START -----
 async function getDashboardData(userId) {
@@ -410,12 +439,12 @@ io.on('connection', (socket) => {
     });
 });
 
-// ------------------ PRICE UPDATE BROADCAST (SIMPLIFIED) ------------------
-// WebSocket handles real-time updates, this is just for countdown
+// ------------------ PRICE UPDATE BROADCAST ------------------
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
     const payloadDashboard = {};
+    const payloadTrading = {};
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
@@ -427,8 +456,15 @@ setInterval(() => {
             change: parseFloat(changeValue.toFixed(2)), 
             countdown: secondsUntilNextMinute
         };
+
+        payloadTrading[pair] = {
+            price: md.currentPrice,
+            countdown: secondsUntilNextMinute,
+            timestamp: now.getTime()
+        };
     }
 
+    io.emit("price_update", payloadTrading);         
     io.emit("dashboard_price_update", payloadDashboard);
 }, 1000);
 
