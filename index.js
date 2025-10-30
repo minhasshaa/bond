@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION TO FIX 410 ERROR AND KYC DEPENDENCY
+// index.js - FINAL CORRECTED VERSION TO FIX 410 ERROR
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -60,7 +60,7 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
-const Message = require('./models/Message'); // Message model confirmed
+const Message = require('./models/Message'); 
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
@@ -110,7 +110,6 @@ app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORA
 
 app.use("/api/withdraw", withdrawRoutes);
 
-// ⭐ CRITICAL FIX: Ensure the KYC route is defined after all models are loaded
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
 
@@ -118,7 +117,7 @@ app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnab
 // ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 410 error)
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    // CRITICAL FIX: Changing from fapi (Futures API) to the stable public spot api/v3/ 
+    // ⭐ THE CRITICAL FIX: Changing from fapi (Futures API) to the stable public spot api/v3/ 
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
@@ -128,6 +127,7 @@ async function fetchAndStore24hTicker() {
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
+            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
                     changePercent: parseFloat(ticker.priceChangePercent) 
