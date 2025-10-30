@@ -235,23 +235,24 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (MINOR CHANGES) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (CRITICAL FIXES) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     await fetchAndStore24hTicker(); 
     
     for (const pair of TRADE_PAIRS) {
         try {
-            // ⭐ FIX: ADDED DELAY AND DATA VALIDATION
-            await sleep(150); // Add a small pause to prevent hitting rate limits
+            // ⭐ FIX 1: ADDED DELAY TO AVOID RATE LIMITING
+            await sleep(250); // Pause for 250ms to respect Binance API limits
             
             // Using futuresCandles since the logic below requires the future prices endpoint
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
 
-            // ⭐ FIX: CHECK IF DATA IS AN ARRAY BEFORE MAPPING (PREVENTS TypeError)
+            // ⭐ FIX 2: CHECK IF DATA IS AN ARRAY BEFORE MAPPING (PREVENTS TypeError)
             if (!Array.isArray(klines)) {
+                 // The 'klines' is likely a Binance error object due to rate limiting.
                  console.error(`⚠️ Data check failed for ${pair}: API did not return an array. Skipping pair.`);
-                 continue; 
+                 continue; // Skip processing and continue to the next pair
             }
             
             marketData[pair].candles = klines.map(k => ({
@@ -266,6 +267,7 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
+            // Logs the error thrown by node-binance-api (e.g., network error)
             console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err.message || err);
         }
     }
