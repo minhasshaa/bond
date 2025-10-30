@@ -108,6 +108,7 @@
                         <span class="text-gray-400">Today's P&L: </span>
                         <span class="value">...</span>
                     </div>
+                    <!-- ⭐ FIX: Connection status indicator -->
                     <div id="connection-status" class="text-xs mt-1">
                         <span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-1"></span>
                         <span class="text-gray-400">Connecting...</span>
@@ -131,7 +132,7 @@
                 </a>
                 <a href="withdraw.html" class="flex flex-col items-center space-y-2">
                     <div class="w-14 h-14 rounded-full bg-gray-800/50 flex items-center justify-center text-blue-400">
-                           <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                         <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     </div>
                     <span class="text-xs font-medium text-gray-300">Withdraw</span>
                 </a>
@@ -214,9 +215,11 @@
             const assetsContent = document.getElementById('assets-content');
             const assetsSkeleton = document.getElementById('assets-skeleton');
 
+            // --- NEW: Get references for search and tabs ---
             const searchBox = document.getElementById('search-box');
             const tabContainer = document.getElementById('tab-container');
 
+            // ⭐ FIX: Connection status functions
             function updateConnectionStatus(status, message) {
                 const statusElem = document.getElementById('connection-status');
                 if (!statusElem) return;
@@ -230,7 +233,7 @@
                 }`;
                 text.textContent = message;
                 text.className = `text-xs ${status === 'connected' ? 'text-green-400' : 
-                                     status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
+                                 status === 'disconnected' ? 'text-red-400' : 'text-yellow-400'}`;
             }
 
             const savePnlToStorage = (pnlValue) => {
@@ -251,7 +254,8 @@
                 }
             };
 
-            // --- *** CORRECTED: Function to render the list with proper symbol fallback *** ---
+            // --- *** NEW: Function to render the list from an array *** ---
+            // This allows us to re-render the list after sorting
             const renderAssetList = (assets) => {
                 assetsContent.innerHTML = ''; // Clear the list
                 if (assets && assets.length > 0) {
@@ -273,11 +277,7 @@
                         assetRow.innerHTML = `
                             <div class="flex items-center space-x-4">
                                 <img src="${iconUrl}" alt="${asset.name} logo" class="w-9 h-9" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-                                
-                                <div class="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center font-bold text-xs hidden">
-                                    ${tickerBase}
-                                </div>
-                                
+                                <div class="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center font-bold hidden">${tickerBase.charAt(0)}</div>
                                 <div>
                                     <p class="font-bold text-base text-white">${tickerBase}</p>
                                     <p class="text-sm text-gray-400">${asset.name}</p>
@@ -296,8 +296,7 @@
                     assetsContent.innerHTML = `<p class="text-center text-gray-500 py-4 col-span-full">No assets found.</p>`;
                 }
             };
-            // --- End of corrected function ---
-
+            // --- End of new function ---
 
             const renderData = (data) => {
                 console.log('Rendering dashboard data:', data);
@@ -310,8 +309,10 @@
                 updatePnlDisplay(serverPnl);
                 savePnlToStorage(serverPnl);
 
+                // --- Store the original list and render it ---
                 allAssets = data.assets || [];
                 renderAssetList(allAssets);
+                // ---
 
                 headerSkeleton.style.display = 'none';
                 headerContent.style.display = 'block';
@@ -339,6 +340,7 @@
                 pnlDisplay.classList.add('pnl-update');
             };
 
+            // ⭐ FIX: Updated Socket.IO connection with auth fix
             const socket = io({ 
                 auth: { token },
                 transports: ['websocket', 'polling'],
@@ -348,6 +350,7 @@
                 reconnectionDelayMax: 10000 
             });
 
+            // ⭐ FIX: Connection status handlers
             socket.on('connect', () => {
                 console.log('✅ Dashboard connected to server');
                 updateConnectionStatus('connected', 'Connected');
@@ -363,6 +366,7 @@
                 console.error('❌ Dashboard connection error:', error.message);
                 updateConnectionStatus('disconnected', 'Connection failed');
                 
+                // If auth error, redirect to login
                 if (error.message.includes('auth') || error.message.includes('Authentication') || error.message.includes('token')) {
                     setTimeout(() => window.location.href = '/login.html', 2000);
                 }
@@ -377,6 +381,7 @@
             });
 
             socket.on('dashboard_price_update', (updates) => {
+                // Update the master list
                 let listChanged = false;
                 allAssets.forEach(asset => {
                     if (updates[asset.ticker]) {
@@ -386,6 +391,7 @@
                     }
                 });
 
+                // Update the visible rows
                 for (const ticker in updates) {
                     const cardId = `asset-card-${ticker.replace('/', '-')}`;
                     const assetRow = document.getElementById(cardId);
@@ -396,7 +402,7 @@
                         const priceElem = assetRow.querySelector('.asset-price');
                         const changeElem = assetRow.querySelector('.asset-change');
 
-                        assetRow.setAttribute('data-change', newChange);
+                        assetRow.setAttribute('data-change', newChange); // Update data-change for sorting
 
                         if (lastPrices[ticker] && newPrice !== lastPrices[ticker]) {
                             assetRow.classList.remove('price-up', 'price-down');
