@@ -319,7 +319,7 @@
             const cleanupCopyTradesBtn = document.getElementById('cleanup-copy-trades');
             const copyTradeTimeScroller = document.getElementById('copy-trade-time-scroller');
 
-            // ⭐ NEW MODAL ELEMENTS
+            // Market Control Modal Elements
             const marketControlModal = document.getElementById('market-control-modal');
             const modalPairTitle = document.getElementById('modal-pair-title');
             const modalUpVolume = document.getElementById('modal-up-volume');
@@ -332,7 +332,7 @@
             const modalAutoBtn = document.getElementById('modal-auto');
             const modalForceDownBtn = document.getElementById('modal-force-down');
             
-            // ⭐ ADDED CHAT ELEMENTS
+            // Chat Elements
             const openChatsList = document.getElementById('open-chats-list');
             const openChatsCount = document.getElementById('open-chats-count');
             const chatMessages = document.getElementById('chat-messages');
@@ -399,7 +399,7 @@
                          fetchData(); 
                     }
                     
-                    // ⭐ ADDED CHAT ACTIVATION
+                    // ADDED CHAT ACTIVATION
                     if (tab.dataset.tab === 'support-chat') {
                         fetchOpenChats();
                     }
@@ -510,7 +510,7 @@
 
             // --- Market Control Modal Handlers ---
 
-            // ⭐ NEW: Show Modal on Row Click
+            // Show Modal on Row Click
             volumeTableBody.addEventListener('click', (e) => {
                 let targetRow = e.target.closest('tr');
                 if (!targetRow || !targetRow.dataset.pair) return;
@@ -519,7 +519,7 @@
                 showMarketControlModal(pair);
             });
 
-            // ⭐ NEW: Function to display the modal
+            // Function to display the modal
             function showMarketControlModal(pair) {
                 const { upVolume, downVolume, netExposure } = pairVolumeData[pair];
                 const status = currentMarketStatus[pair] || 'auto';
@@ -549,25 +549,24 @@
                 marketControlModal.classList.remove('hidden');
             }
 
-            // ⭐ NEW: Update Modal Status
+            // Update Modal Status
             function updateModalStatusDisplay(status) {
                 const statusText = status.toUpperCase();
                 let statusColor = 'text-yellow-400';
                 
+                // Reset button shadows
+                modalForceUpBtn.classList.remove('shadow-xl', 'shadow-green-500/50');
+                modalForceDownBtn.classList.remove('shadow-xl', 'shadow-red-500/50');
+                modalAutoBtn.classList.remove('shadow-xl', 'shadow-gray-500/50');
+
                 if (status === 'up') {
                     statusColor = 'text-green-400';
                     modalForceUpBtn.classList.add('shadow-xl', 'shadow-green-500/50');
-                    modalForceDownBtn.classList.remove('shadow-xl', 'shadow-red-500/50');
-                    modalAutoBtn.classList.remove('shadow-xl', 'shadow-gray-500/50');
                 } else if (status === 'down') {
                     statusColor = 'text-red-400';
-                    modalForceUpBtn.classList.remove('shadow-xl', 'shadow-green-500/50');
                     modalForceDownBtn.classList.add('shadow-xl', 'shadow-red-500/50');
-                    modalAutoBtn.classList.remove('shadow-xl', 'shadow-gray-500/50');
                 } else {
                     statusColor = 'text-yellow-400';
-                    modalForceUpBtn.classList.remove('shadow-xl', 'shadow-green-500/50');
-                    modalForceDownBtn.classList.remove('shadow-xl', 'shadow-red-500/50');
                     modalAutoBtn.classList.add('shadow-xl', 'shadow-gray-500/50');
                 }
 
@@ -575,7 +574,7 @@
                 modalCurrentStatus.className = `text-4xl font-extrabold mt-2 ${statusColor}`;
             }
 
-            // ⭐ NEW: Modal Button Handlers
+            // Modal Button Handlers
             closeMarketModalBtn.addEventListener('click', () => {
                 marketControlModal.classList.add('hidden');
             });
@@ -585,7 +584,7 @@
             modalForceDownBtn.addEventListener('click', () => handleModalMarketAction(modalForceDownBtn.dataset.pair, 'down'));
 
 
-            // ⭐ NEW: Modal Market Control API Action
+            // Modal Market Control API Action
             async function handleModalMarketAction(pair, direction) {
                 if (!pair) return;
                 
@@ -626,7 +625,7 @@
                 }
             }
             
-            // --- ⭐ ADDED CHAT SUPPORT FUNCTIONS ---
+            // --- CHAT SUPPORT FUNCTIONS ---
 
             async function fetchOpenChats() {
                 const adminKey = getAdminKey();
@@ -776,7 +775,70 @@
             });
 
 
-            // --- Remaining Handlers (Omitted for brevity, logic remains the same) ---
+            // --- COPY TRADE HANDLER (THE FIX) ---
+            
+            copyTradeForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const tradingPair = document.getElementById('copy-trade-pair').value;
+                const direction = document.getElementById('copy-trade-direction').value;
+                const percentage = document.getElementById('copy-trade-percentage').value;
+                
+                const selectedTimeBtn = copyTradeTimeScroller.querySelector('.time-option.active');
+                
+                if (!selectedTimeBtn || !tradingPair || !direction || !percentage) {
+                    showCopyTradeStatus('Error: All fields must be selected/filled.', 'red');
+                    return;
+                }
+                
+                const minutes = parseInt(selectedTimeBtn.dataset.minutes);
+                // Calculate the execution time Date object and format it as ISO string
+                const executionTime = new Date(new Date().getTime() + minutes * 60 * 1000).toISOString();
+
+                const adminKey = getAdminKey();
+                if (!adminKey) {
+                    showCopyTradeStatus('Error: Admin key is missing. Logging out.', 'red');
+                    showLogin();
+                    return;
+                }
+
+                showCopyTradeStatus('Creating copy trade...', 'blue');
+
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/create`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json', 
+                            // ⭐ THE FIX: Sending the required admin key
+                            'x-admin-key': adminKey 
+                        },
+                        body: JSON.stringify({ 
+                            tradingPair, 
+                            direction, 
+                            percentage: parseFloat(percentage), 
+                            executionTime 
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        showCopyTradeStatus('Copy trade created successfully!', 'green');
+                        copyTradeForm.reset();
+                        // Keep the time scroller populated and selected after reset
+                        populateCopyTradeTimeSelector(); 
+                        fetchActiveCopyTrades(); 
+                    } else {
+                        showCopyTradeStatus(`Failed to create trade: ${data.message}`, 'red');
+                    }
+
+                } catch (error) {
+                    console.error('Copy Trade Form Submission Error:', error);
+                    showCopyTradeStatus('A network error occurred during submission.', 'red');
+                }
+            });
+            
+            // --- Remaining Handlers ---
             
             const handleApiAction = async (url, body) => {
                 const adminKey = getAdminKey();
@@ -847,7 +909,7 @@
                 commissionForm.reset();
             });
 
-            // Re-adding KYC and Copy Trade functions for completeness
+            // KYC and Copy Trade functions
             async function fetchPendingKycUsers() {
                 const adminKey = getAdminKey();
                 kycReviewList.innerHTML = '<p class="text-gray-400">Loading pending users...</p>';
@@ -939,41 +1001,41 @@
                                     <span class="ml-2 px-2 py-1 text-xs rounded-full ${trade.direction === 'CALL' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
                                         ${trade.direction}
                                     </span>
-                                </div>
-                                <button onclick="deleteCopyTrade('${trade._id}')" class="text-red-400 hover:text-red-300 text-sm">Delete</button>
                             </div>
-                            <div class="grid grid-cols-2 gap-2 text-sm mb-3">
-                                <div>
-                                    <span class="text-gray-300">Percentage:</span>
-                                    <span class="text-yellow-400 font-semibold">${trade.percentage}%</span>
-                                </div>
-                                <div>
-                                    <span class="text-gray-300">Copied by:</span>
-                                    <span class="text-blue-400 font-semibold">${trade.userCopies.length} users</span>
-                                </div>
-                                <div class="col-span-2">
-                                    <span class="text-gray-300">Executes in:</span>
-                                    <span class="${isExpiringSoon ? 'text-orange-400' : 'text-blue-400'} font-semibold">${timeDisplay}</span>
-                                </div>
-                                <div class="col-span-2">
-                                    <span class="text-gray-300">Execution Time:</span>
-                                    <span class="text-gray-200 text-xs">${executionTime.toLocaleString()}</span>
+                            <button onclick="deleteCopyTrade('${trade._id}')" class="text-red-400 hover:text-red-300 text-sm">Delete</button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+                            <div>
+                                <span class="text-gray-300">Percentage:</span>
+                                <span class="text-yellow-400 font-semibold">${trade.percentage}%</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-300">Copied by:</span>
+                                <span class="text-blue-400 font-semibold">${trade.userCopies.length} users</span>
+                            </div>
+                            <div class="col-span-2">
+                                <span class="text-gray-300">Executes in:</span>
+                                <span class="${isExpiringSoon ? 'text-orange-400' : 'text-blue-400'} font-semibold">${timeDisplay}</span>
+                            </div>
+                            <div class="col-span-2">
+                                <span class="text-gray-300">Execution Time:</span>
+                                <span class="text-gray-200 text-xs">${executionTime.toLocaleString()}</span>
+                            </div>
+                        </div>
+                        ${trade.userCopies.length > 0 ? `
+                            <div class="mt-2">
+                                <p class="text-xs text-gray-400 mb-1">Copied by:</p>
+                                <div class="flex flex-wrap gap-1">
+                                    ${trade.userCopies.map(copy => 
+                                        `<span class="text-xs bg-gray-600 px-2 py-1 rounded">${copy.userId?.username || 'Unknown'}</span>`
+                                    ).join('')}
                                 </div>
                             </div>
-                            ${trade.userCopies.length > 0 ? `
-                                <div class="mt-2">
-                                    <p class="text-xs text-gray-400 mb-1">Copied by:</p>
-                                    <div class="flex flex-wrap gap-1">
-                                        ${trade.userCopies.map(copy => 
-                                            `<span class="text-xs bg-gray-600 px-2 py-1 rounded">${copy.userId?.username || 'Unknown'}</span>`
-                                        ).join('')}
-                                    </div>
-                                </div>
-                            ` : ''}
-                        `;
-                        activeCopyTrades.appendChild(tradeCard);
-                    });
-                } catch (error) { console.error('Error fetching copy trades:', error); activeCopyTrades.innerHTML = '<p class="text-red-400 text-center">Error loading copy trades</p>'; }
+                        ` : ''}
+                    `;
+                    activeCopyTrades.appendChild(tradeCard);
+                });
+            } catch (error) { console.error('Error fetching copy trades:', error); activeCopyTrades.innerHTML = '<p class="text-red-400 text-center">Error loading copy trades</p>'; }
             }
             function showCopyTradeStatus(message, color) {
                 const colorMap = { red: 'text-red-400', green: 'text-green-400', blue: 'text-blue-400' };
@@ -985,11 +1047,44 @@
                 if (!confirm('Are you sure you want to delete this copy trade?')) return;
                 const adminKey = getAdminKey();
                 try {
-                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/${copyTradeId}`, { method: 'DELETE', headers: { 'x-admin-key': adminKey } });
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/${copyTradeId}`, { 
+                        method: 'DELETE', 
+                        // Ensure delete is authenticated too
+                        headers: { 'x-admin-key': adminKey } 
+                    });
                     const data = await response.json();
                     if (data.success) { showCopyTradeStatus('Copy trade deleted successfully', 'green'); fetchActiveCopyTrades(); } else { showCopyTradeStatus(`Error: ${data.message}`, 'red'); }
                 } catch (error) { console.error('Error deleting copy trade:', error); showCopyTradeStatus('Error deleting copy trade', 'red'); }
             };
+            
+            cleanupCopyTradesBtn.addEventListener('click', async () => {
+                const adminKey = getAdminKey();
+                if (!adminKey) return;
+                if (!confirm('Are you sure you want to cleanup expired copy trades?')) return;
+                try {
+                    const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/cleanup`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey }
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        showCopyTradeStatus(data.message, 'green');
+                    } else {
+                        showCopyTradeStatus(`Cleanup failed: ${data.message}`, 'red');
+                    }
+                } catch (error) {
+                    showCopyTradeStatus('Network error during cleanup.', 'red');
+                }
+            });
+            
+            refreshCopyTradesBtn.addEventListener('click', fetchActiveCopyTrades);
+            
+            // Initial check and fetch
+            if (getAdminKey()) {
+                fetchData();
+            } else {
+                showLogin();
+            }
         });
     </script>
 </body>
