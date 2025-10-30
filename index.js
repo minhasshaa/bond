@@ -1,4 +1,4 @@
-// index.js - FIXED VERSION TO RESOLVE "klines.map is not a function" ERROR
+// index.js - WITH BINANCE WEBSOCKET INSTEAD OF REST API
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -25,6 +25,11 @@ module.exports.TRADE_PAIRS = TRADE_PAIRS;
 const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
+
+// >>> START WEBSOCKET STATE MANAGEMENT <<<
+const wsConnections = {};
+let isWebSocketConnected = false;
+// >>> END WEBSOCKET STATE MANAGEMENT <<<
 
 // >>> START AZURE CONFIGURATION (CLEANED) <<<
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
@@ -93,7 +98,9 @@ app.set('marketData', marketData);
 // ------------------ BINANCE CLIENT ------------------
 const binance = new Binance().options({
     APIKEY: process.env.BINANCE_API_KEY,
-    APISECRET: process.env.BINANCE_API_SECRET
+    APISECRET: process.env.BINANCE_API_SECRET,
+    reconnect: true,
+    verbose: true
 });
 
 // ------------------ MIDDLEWARE ------------------
@@ -112,12 +119,182 @@ app.use("/api/withdraw", withdrawRoutes);
 
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
+// --------------------------------------------------------------------------------------------------
+// ⭐ WEBSOCKET FUNCTIONS - REAL-TIME DATA WITHOUT RATE LIMITING
+// --------------------------------------------------------------------------------------------------
+
+// Initialize WebSocket connections for all trading pairs
+function initializeBinanceWebSockets() {
+    console.log("🔌 Initializing Binance WebSocket connections...");
+    
+    TRADE_PAIRS.forEach(pair => {
+        try {
+            // WebSocket for real-time ticker data
+            binance.websockets.ticker(pair, (ticker) => {
+                if (ticker && ticker.curDayClose !== undefined) {
+                    const currentPrice = parseFloat(ticker.curDayClose);
+                    marketData[pair].currentPrice = currentPrice;
+                    
+                    // Update candle data in real-time
+                    updateCandleWithWebSocketData(pair, currentPrice);
+                    
+                    // Emit real-time updates to clients
+                    io.emit("price_update", {
+                        [pair]: {
+                            price: currentPrice,
+                            timestamp: Date.now()
+                        }
+                    });
+                }
+            });
+            
+            // WebSocket for kline/candle data (optional - for candle sticks)
+            binance.websockets.candlesticks(pair, '1m', (candlesticks) => {
+                const { k: kline } = candlesticks;
+                if (kline && kline.x) { // kline.x is true when candle is closed
+                    const newCandle = {
+                        asset: pair,
+                        timestamp: new Date(kline.t),
+                        open: parseFloat(kline.o),
+                        high: parseFloat(kline.h),
+                        low: parseFloat(kline.l),
+                        close: parseFloat(kline.c)
+                    };
+                    
+                    // Add to candles array
+                    marketData[pair].candles.push(newCandle);
+                    if (marketData[pair].candles.length > 200) {
+                        marketData[pair].candles.shift();
+                    }
+                    
+                    // Save to database
+                    Candle.updateOne(
+                        { asset: pair, timestamp: newCandle.timestamp },
+                        { $set: newCandle },
+                        { upsert: true }
+                    ).catch(err => console.error(`Database error for ${pair}:`, err.message));
+                    
+                    // Emit updated candles to clients
+                    io.emit("market_data", {
+                        asset: pair,
+                        candles: marketData[pair].candles,
+                        currentPrice: marketData[pair].currentPrice
+                    });
+                }
+            });
+            
+            console.log(`✅ WebSocket connected for ${pair}`);
+            
+        } catch (error) {
+            console.error(`❌ WebSocket connection failed for ${pair}:`, error.message);
+        }
+    });
+    
+    isWebSocketConnected = true;
+    console.log("🎯 All WebSocket connections established - Real-time data streaming active");
+}
+
+// Update candle data with WebSocket price updates
+function updateCandleWithWebSocketData(pair, currentPrice) {
+    const md = marketData[pair];
+    const now = new Date();
+    const currentMinuteStart = new Date(now);
+    currentMinuteStart.setSeconds(0, 0);
+    currentMinuteStart.setMilliseconds(0);
+
+    if (!md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime()) {
+        // New minute - close previous candle and start new one
+        if (md.currentCandle) {
+            const completed = { ...md.currentCandle, close: currentPrice };
+            const override = candleOverride[pair];
+            
+            if (override) {
+                const openP = completed.open;
+                const priceChange = openP * 0.00015 * (Math.random() + 0.5);
+                if (override === 'up') {
+                    completed.close = openP + priceChange;
+                    completed.high = Math.max(completed.high, completed.close);
+                } else {
+                    completed.close = openP - priceChange;
+                    completed.low = Math.min(completed.low, completed.close);
+                }
+                console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
+                candleOverride[pair] = null;
+            }
+            
+            md.candles.push(completed);
+            if (md.candles.length > 200) md.candles.shift();
+        }
+        
+        // Start new candle
+        md.currentCandle = {
+            asset: pair,
+            timestamp: currentMinuteStart,
+            open: currentPrice,
+            high: currentPrice,
+            low: currentPrice,
+            close: currentPrice
+        };
+    } else {
+        // Update current candle with new price
+        md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
+        md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
+        md.currentCandle.close = currentPrice;
+    }
+}
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 418 Rate Limit Issue)
+// ⭐ UPDATED: Initialize Market Data (Minimal REST calls for initial setup)
+// --------------------------------------------------------------------------------------------------
+async function initializeMarketData() {
+    console.log("📈 Initializing market data...");
+    
+    // Only use REST API for initial historical data (once)
+    await fetchInitialHistoricalData();
+    
+    // Start WebSocket connections for real-time data
+    initializeBinanceWebSockets();
+    
+    // Fetch 24h data once (this can stay as it's less frequent)
+    await fetchAndStore24hTicker();
+}
+
+// Fetch initial historical data (only once during startup)
+async function fetchInitialHistoricalData() {
+    console.log("📊 Fetching initial historical data...");
+    
+    for (const pair of TRADE_PAIRS) {
+        try {
+            const klines = await binance.futuresCandles(pair, '1m', { limit: 100 });
+            
+            if (Array.isArray(klines) && klines.length > 0) {
+                marketData[pair].candles = klines.map(k => ({
+                    asset: pair,
+                    timestamp: new Date(k[0]),
+                    open: parseFloat(k[1]),
+                    high: parseFloat(k[2]),
+                    low: parseFloat(k[3]),
+                    close: parseFloat(k[4]),
+                }));
+                
+                const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
+                marketData[pair].currentPrice = lastCandle.close;
+                console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
+            }
+        } catch (err) {
+            console.error(`❌ Failed initial load for ${pair}:`, err.message);
+            // Continue with empty data - WebSocket will populate real-time data
+        }
+        
+        // Small delay to avoid rate limiting during initial setup
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+}
+
+// --------------------------------------------------------------------------------------------------
+// ⭐ KEEP: 24h Ticker Data (Less frequent - okay to keep as REST)
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    // Using the spot API's 24hr ticker endpoint
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
@@ -127,7 +304,6 @@ async function fetchAndStore24hTicker() {
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
-            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
                     changePercent: parseFloat(ticker.priceChangePercent) 
@@ -137,147 +313,23 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
-        // --- RATE LIMITING (418) FIX ---
-        if (err.response && err.response.status === 418) {
-             console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
-        } else {
-             console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
-        }
-        // -------------------------------
+        console.error("❌ Failed to fetch 24h ticker data:", err.message);
     }
 }
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ FIXED FUNCTION: Initialize Market Data (Fixes "klines.map is not a function" Error)
+// ⭐ REMOVED: No more polling intervals for market data!
 // --------------------------------------------------------------------------------------------------
-async function initializeMarketData() {
-    console.log("📈 Initializing market data from Binance...");
-    await fetchAndStore24hTicker(); 
-    
-    for (const pair of TRADE_PAIRS) {
-        try {
-            // Using futuresCandles since the logic below requires the future prices endpoint
-            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
-            
-            // ✅ FIX: Check if klines is actually an array before using .map()
-            if (!Array.isArray(klines)) {
-                console.error(`❌ Binance returned non-array response for ${pair}:`, typeof klines, klines);
-                // Initialize with empty candles to prevent crashes
-                marketData[pair].candles = [];
-                marketData[pair].currentPrice = 0;
-                continue;
-            }
-            
-            // ✅ FIX: Also check if individual kline items have the expected structure
-            if (klines.length > 0 && (!Array.isArray(klines[0]) || klines[0].length < 5)) {
-                console.error(`❌ Invalid kline structure for ${pair}`);
-                marketData[pair].candles = [];
-                marketData[pair].currentPrice = 0;
-                continue;
-            }
-            
-            marketData[pair].candles = klines.map(k => ({
-                asset: pair,
-                timestamp: new Date(k[0]),
-                open: parseFloat(k[1]),
-                high: parseFloat(k[2]),
-                low: parseFloat(k[3]),
-                close: parseFloat(k[4]),
-            }));
-            
-            const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
-            marketData[pair].currentPrice = lastCandle.close;
-            console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
-        } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}: ${err.message}`);
-            // Initialize with empty data to prevent further errors
-            marketData[pair].candles = [];
-            marketData[pair].currentPrice = 0;
-        }
-    }
-}
-
-// --------------------------------------------------------------------------------------------------
-// ⭐ FIXED FUNCTION: Update Market Data (Enhanced Error Handling)
-// --------------------------------------------------------------------------------------------------
-async function updateMarketData() {
-    try {
-        // Fetching prices via futuresPrices to match futuresCandles and for consistency
-        const prices = await binance.futuresPrices();
-        
-        // ✅ FIX: Check if prices is valid
-        if (!prices || typeof prices !== 'object') {
-            console.error("❌ Invalid prices response from Binance");
-            return;
-        }
-        
-        const now = new Date();
-        const currentMinuteStart = new Date(now);
-        currentMinuteStart.setSeconds(0, 0);
-        currentMinuteStart.setMilliseconds(0);
-
-        for (const pair of TRADE_PAIRS) {
-            if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
-
-            const md = marketData[pair];
-            const currentPrice = md.currentPrice || 0;
-            if (!currentPrice) continue;
-
-            // ✅ FIX: Ensure candles array exists
-            if (!Array.isArray(md.candles)) {
-                md.candles = [];
-            }
-
-            const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
-
-            if (isNewMinute) {
-                if (md.currentCandle) {
-                    const completed = { ...md.currentCandle, close: currentPrice };
-                    const override = candleOverride[pair];
-                    if (override) {
-                        const openP = completed.open;
-                        const priceChange = openP * 0.00015 * (Math.random() + 0.5);
-                        if (override === 'up') {
-                            completed.close = openP + priceChange;
-                            completed.high = Math.max(completed.high, completed.close);
-                        } else {
-                            completed.close = openP - priceChange;
-                            completed.low = Math.min(completed.low, completed.close);
-                        }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
-                        candleOverride[pair] = null;
-                    }
-                    md.candles.push(completed);
-                    if (md.candles.length > 200) md.candles.shift();
-                    try {
-                        await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
-                    } catch (dbError) {
-                        console.error(`❌ Database error saving candle for ${pair}:`, dbError.message);
-                    }
-                }
-                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
-            } else {
-                md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
-                md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
-                md.currentCandle.close = currentPrice;
-            }
-            const allCandles = [...md.candles, md.currentCandle];
-            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
-        }
-    } catch (err) {
-        console.error("❌ Error in updateMarketData:", err.message);
-    }
-}
-
 function startMarketDataPolling() {
-    console.log("✅ Starting market data polling every second...");
-    // Update every second for real-time price updates
-    setInterval(updateMarketData, 1000); 
-    // Fetch 24h ticker data every 60 seconds
-    setInterval(fetchAndStore24hTicker, 60000); 
+    console.log("✅ WebSocket real-time data streaming active - No polling needed");
+    
+    // Only keep the 24h data update (less frequent)
+    setInterval(fetchAndStore24hTicker, 300000); // Every 5 minutes
 }
 
-// ----- DASHBOARD DATA FUNCTIONS START (MODIFIED) -----
+// [REST OF THE CODE REMAINS LARGELY THE SAME - DASHBOARD FUNCTIONS, SOCKET.IO, ETC.]
+
+// ----- DASHBOARD DATA FUNCTIONS START -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
@@ -357,44 +409,31 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
-// ----- DASHBOARD DATA FUNCTIONS END -----
 
-// ------------------ PRICE UPDATE BROADCAST ------------------
+// ------------------ PRICE UPDATE BROADCAST (SIMPLIFIED) ------------------
+// WebSocket handles real-time updates, this is just for countdown
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
     const payloadDashboard = {};
-    const payloadTrading = {};
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
         
-        // Dashboard format
         const tickerForClient = `${pair.replace('USDT', '')}/USD`;
         payloadDashboard[tickerForClient] = {
             price: md.currentPrice,
             change: parseFloat(changeValue.toFixed(2)), 
             countdown: secondsUntilNextMinute
         };
-
-        // Trading format (unchanged, still uses current price)
-        payloadTrading[pair] = {
-            price: md.currentPrice,
-            countdown: secondsUntilNextMinute,
-            timestamp: now.getTime()
-        };
     }
 
-    io.emit("price_update", payloadTrading);         
     io.emit("dashboard_price_update", payloadDashboard);
 }, 1000);
 
 // ------------------ DB + STARTUP ------------------
-mongoose.connect(process.env.MONGO_URI, { 
-    useNewUrlParser: true, 
-    useUnifiedTopology: true 
-}).then(() => {
+mongoose.connect(process.env.MONGO_URI).then(() => {
     console.log("✅ Connected to MongoDB");
 }).catch(err => {
     console.error("❌ MongoDB connection error:", err);
