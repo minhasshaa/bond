@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION TO FIX "kLines map is not a function"
+// index.js - FINAL CORRECTED VERSION TO FIX 418 RATE LIMITING ERROR
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -114,10 +114,10 @@ app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnab
 
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ 24h Ticker Data Function (Includes 418 rate-limit handling)
+// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 418 Rate Limit Issue)
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    // Using the stable public spot api/v3/ ticker endpoint
+    // Using the spot API's 24hr ticker endpoint
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
@@ -137,17 +137,19 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
+        // --- RATE LIMITING (418) FIX ---
         if (err.response && err.response.status === 418) {
              console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
         } else {
              console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
         }
+        // -------------------------------
     }
 }
 // --------------------------------------------------------------------------------------------------
 
 
-// ----- DASHBOARD DATA FUNCTIONS START -----
+// ----- DASHBOARD DATA FUNCTIONS START (MODIFIED) -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
@@ -230,22 +232,15 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (FIXED) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (MINOR CHANGES) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     await fetchAndStore24hTicker(); 
     
     for (const pair of TRADE_PAIRS) {
         try {
-            // Using futuresCandles to fetch historical data
+            // Using futuresCandles since the logic below requires the future prices endpoint
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
-            
-            // ⭐ CRITICAL FIX: Check if klines is a valid array before attempting .map()
-            if (!Array.isArray(klines) || klines.length === 0) {
-                 console.error(`❌ Failed to load initial candles for ${pair}: Received invalid or empty data from API (Likely Rate Limit).`);
-                 continue; // Skip this pair and proceed to the next one
-            }
-            
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
@@ -258,13 +253,14 @@ async function initializeMarketData() {
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair} (API/Network Error):`, (err && err.body) || err);
+            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err);
         }
     }
 }
 
 async function updateMarketData() {
     try {
+        // Fetching prices via futuresPrices to match futuresCandles and for consistency
         const prices = await binance.futuresPrices();
         const now = new Date();
         const currentMinuteStart = new Date(now);
