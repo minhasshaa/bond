@@ -1,4 +1,4 @@
-// index.js - FINAL FIXED VERSION
+// index.js - FINAL CORRECTED VERSION TO FIX 410 ERROR
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -9,14 +9,15 @@ const cors = require("cors");
 const path = require("path");
 const Binance = require("node-binance-api");
 const jwt = require('jsonwebtoken'); 
+const axios = require('axios');
 // >>> START KYC ADDITIONS <<<
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
 // >>> END KYC ADDITIONS <<<
 
 // ------------------ CONFIG & CONSTANTS ------------------
 const TRADE_PAIRS = [
-  'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
-  'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
+    'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
+    'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
 ];
 module.exports.TRADE_PAIRS = TRADE_PAIRS;
 
@@ -31,7 +32,6 @@ const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
 
 let blobServiceClient = null;
-// Flag used to indicate if the service client was successfully initialized AND tested
 let azureEnabled = false; 
 
 if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
@@ -44,10 +44,6 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
             `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net`,
             sharedKeyCredential
         );
-
-        // OPTIONAL CRITICAL TEST (Removed for stable deployment): 
-        // We will trust the client was created and let kyc.js handle failure.
-        
         azureEnabled = true;
         console.log("✅ Azure Blob Storage Client Initialized (Enabled).");
     } catch (e) {
@@ -64,39 +60,40 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
-const Message = require('./models/Message');
+const Message = require('./models/Message'); 
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const depositRoutes = require("./routes/deposit");
 const adminRoutes = require("./routes/admin");
 const withdrawRoutes = require("./routes/withdraw");
-// >>> START KYC ADDITION <<<
-// NOTE: Require the router file here
 const kycRoutes = require("./routes/kyc"); 
-// >>> END KYC ADDITION <<<
 
 // ------------------ APP + SERVER + IO ------------------
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
 });
 
 const marketData = {};
+const ticker24hData = {}; 
+
 TRADE_PAIRS.forEach(pair => {
-  marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
+    marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
+    ticker24hData[pair] = { changePercent: 0 };
 });
+
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
 // ------------------ BINANCE CLIENT ------------------
 const binance = new Binance().options({
-  APIKEY: process.env.BINANCE_API_KEY,
-  APISECRET: process.env.BINANCE_API_SECRET
+    APIKEY: process.env.BINANCE_API_KEY,
+    APISECRET: process.env.BINANCE_API_SECRET
 });
 
 // ------------------ MIDDLEWARE ------------------
@@ -109,36 +106,58 @@ app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
 
-// --------------------------------------------------------------------------------------------------
-// ⭐ Admin Route: Passes Azure credentials to routes/admin.js
-// --------------------------------------------------------------------------------------------------
 app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY, azureEnabled }));
 
 app.use("/api/withdraw", withdrawRoutes);
 
-// >>> START KYC ROUTE REGISTRATION <<<
-// ⭐ User Route: Passes the initialized Azure client and flag to the router
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
-// >>> END KYC ROUTE REGISTRATION <<<
 
-// ----- DASHBOARD DATA FUNCTIONS START (UNCHANGED) -----
+
+// --------------------------------------------------------------------------------------------------
+// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 410 error)
+// --------------------------------------------------------------------------------------------------
+async function fetchAndStore24hTicker() {
+    // ⭐ THE CRITICAL FIX: Changing from fapi (Futures API) to the stable public spot api/v3/ 
+    const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
+    
+    try {
+        const response = await axios.get(API_URL); 
+        const tickers = response.data;
+
+        if (!tickers || !Array.isArray(tickers)) return;
+
+        for (const ticker of tickers) {
+            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
+            if (TRADE_PAIRS.includes(ticker.symbol)) {
+                ticker24hData[ticker.symbol] = {
+                    changePercent: parseFloat(ticker.priceChangePercent) 
+                };
+            }
+        }
+        console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
+
+    } catch (err) {
+        console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
+    }
+}
+// --------------------------------------------------------------------------------------------------
+
+
+// ----- DASHBOARD DATA FUNCTIONS START (MODIFIED) -----
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
     if (!user) {
         throw new Error('User not found.');
     }
 
-    // --- FIX TO GET CORRECT PNL ---
-    // Calculate PNL from trades closed *today*
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const recentTrades = await Trade.find({ 
         userId: userId, 
         status: 'closed',
-        closeTime: { $gte: startOfToday } // Only get trades that closed today
+        closeTime: { $gte: startOfToday } 
     });
-    // --- END PNL FIX ---
 
     const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
 
@@ -147,18 +166,13 @@ async function getDashboardData(userId) {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
 
-        const lastCandle = (Array.isArray(data.candles) && data.candles[data.candles.length - 1]) || data.currentCandle;
-        if (!lastCandle || typeof lastCandle.open !== 'number' || lastCandle.open === 0) {
-            return { name: pair.replace('USDT', ''), ticker: `${pair.replace('USDT', '')}/USD`, price: data.currentPrice || 0, change: 0, candles: data.candles };
-        }
-
-        const change = ((data.currentPrice - lastCandle.open) / lastCandle.open) * 100;
+        const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
 
         return {
             name: pair.replace('USDT', ''),
             ticker: `${pair.replace('USDT', '')}/USD`,
             price: data.currentPrice,
-            change: parseFloat(change.toFixed(2)),
+            change: parseFloat(changeValue.toFixed(2)),
             candles: data.candles
         };
     }).filter(Boolean);
@@ -189,14 +203,10 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    // --- THIS IS THE FIX ---
-    // Add the socket to the user's room, so it receives broadcasts
-    // like 'trade_result' which are sent from trade.js.
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
         console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
     }
-    // --- END OF FIX ---
 
     socket.on('request_dashboard_data', async () => {
         try {
@@ -216,9 +226,11 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (UNCHANGED) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (MINOR CHANGES) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
+    await fetchAndStore24hTicker(); 
+    
     for (const pair of TRADE_PAIRS) {
         try {
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
@@ -292,11 +304,14 @@ async function updateMarketData() {
 }
 
 function startMarketDataPolling() {
-  console.log("✅ Starting market data polling every second...");
-  setInterval(updateMarketData, 1000);
+    console.log("✅ Starting market data polling every second...");
+    // Update every second for real-time price updates
+    setInterval(updateMarketData, 1000); 
+    // Fetch 24h ticker data every 60 seconds
+    setInterval(fetchAndStore24hTicker, 60000); 
 }
 
-// ------------------ FIX: SUPPORT BOTH DASHBOARD + TRADING PRICE UPDATES (UNCHANGED) ------------------
+// ------------------ PRICE UPDATE BROADCAST ------------------
 setInterval(() => {
     const now = new Date();
     const secondsUntilNextMinute = 60 - now.getSeconds();
@@ -305,21 +320,17 @@ setInterval(() => {
 
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
-        const lastCandle = (md.candles && md.candles.length > 0) ? md.candles[md.candles.length - 1] : md.currentCandle;
-        let change = 0;
-        if (lastCandle && lastCandle.open !== 0) {
-            change = ((md.currentPrice - lastCandle.open) / lastCandle.open) * 100;
-        }
-
+        const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
+        
         // Dashboard format
         const tickerForClient = `${pair.replace('USDT', '')}/USD`;
         payloadDashboard[tickerForClient] = {
             price: md.currentPrice,
-            change: parseFloat(change.toFixed(2)),
+            change: parseFloat(changeValue.toFixed(2)), 
             countdown: secondsUntilNextMinute
         };
 
-        // Trading format (old)
+        // Trading format (unchanged, still uses current price)
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
@@ -327,7 +338,7 @@ setInterval(() => {
         };
     }
 
-    io.emit("price_update", payloadTrading);           
+    io.emit("price_update", payloadTrading);         
     io.emit("dashboard_price_update", payloadDashboard);
 }, 1000);
 
@@ -337,67 +348,62 @@ const db = mongoose.connection;
 db.on("error", console.error.bind(console, "MongoDB connection error:"));
 
 db.once("open", async () => {
-  console.log("✅ Connected to MongoDB");
+    console.log("✅ Connected to MongoDB");
 
-  // >>> START CRASH PREVENTION/CLEANUP <<<
-  // This non-destructive query runs ONCE at startup to fix any corrupted documents
-  // that could cause the server to crash (CastError) later.
-  try {
-    const TradeModel = mongoose.model('Trade');
-    const UserModel = mongoose.model('User');
+    try {
+        const TradeModel = mongoose.model('Trade');
+        const UserModel = mongoose.model('User');
+        
+        const tradeUpdateResult = await TradeModel.updateMany(
+            { 
+                status: { $ne: 'closed' },
+                $or: [
+                    { activationTimestamp: { $not: { $type: 9 } } },
+                    { activationTimestamp: { $exists: false } }, 
+                    { activationTimestamp: null } 
+                ]
+            },
+            { 
+                $set: { 
+                    status: 'closed', 
+                    closeTime: new Date(),
+                    pnl: 0 
+                } 
+            }
+        );
+        console.log(`🧹 Safely closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
 
-    const tradeUpdateResult = await TradeModel.updateMany(
-      { 
-        status: { $ne: 'closed' },
-        $or: [
-          { activationTimestamp: { $not: { $type: 9 } } }, // Not a valid BSON Date
-          { activationTimestamp: { $exists: false } }, 
-          { activationTimestamp: null } 
-        ]
-      },
-      { 
-        $set: { 
-          status: 'closed', 
-          closeTime: new Date(),
-          pnl: 0 
-        } 
-      }
-    );
-    console.log(`🧹 Safely closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
+        const userUpdateResult = await UserModel.updateMany(
+            { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
+            { $set: { createdAt: new Date() } }
+        );
+        console.log(`🧹 Safely fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
 
-    const userUpdateResult = await UserModel.updateMany(
-      { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
-      { $set: { createdAt: new Date() } }
-    );
-    console.log(`🧹 Safely fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
+    } catch (error) {
+        console.error("Warning: Pre-boot database cleanup failed. Proceeding with trade initialization.", error.message);
+    }
 
-  } catch (error) {
-    console.error("Warning: Pre-boot database cleanup failed. Proceeding with trade initialization.", error.message);
-  }
-  // >>> END CRASH PREVENTION/CLEANUP <<<
+    await initializeMarketData();
+    startMarketDataPolling();
 
-
-  await initializeMarketData();
-  startMarketDataPolling();
-
-  const tradeModule = require("./trade");
-  if (typeof tradeModule.initialize === "function") {
-    tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
-  } else if (typeof tradeModule === "function") {
-    tradeModule(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
-  } else {
-    console.error("Trade module export not recognized. Expected function or object with initialize()");
-  }
+    const tradeModule = require("./trade");
+    if (typeof tradeModule.initialize === "function") {
+        tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
+    } else if (typeof tradeModule === "function") {
+        tradeModule(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
+    } else {
+        console.error("Trade module export not recognized. Expected function or object with initialize()");
+    }
 });
 
 // ------------------ CATCH-ALL / STATIC SERVE ------------------
 app.get('*', (req, res) => {
-  if (req.path.startsWith('/api/')) return res.status(404).json({ message: 'API endpoint not found.' });
-  const filePath = path.join(__dirname, 'public', req.path);
-  if (req.path.includes('..')) return res.status(403).send('Forbidden');
-  res.sendFile(filePath, (err) => {
-    if (err) res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
-  });
+    if (req.path.startsWith('/api/')) return res.status(404).json({ message: 'API endpoint not found.' });
+    const filePath = path.join(__dirname, 'public', req.path);
+    if (req.path.includes('..')) return res.status(403).send('Forbidden');
+    res.sendFile(filePath, (err) => {
+        if (err) res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+    });
 });
 
 // ------------------ START SERVER ------------------
