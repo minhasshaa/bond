@@ -1,8 +1,3 @@
-I'm getting this isssue in my trading project ...
-
-
-
-
 // index.js - FINAL CORRECTED VERSION TO FIX 418 RATE LIMITING ERROR
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
