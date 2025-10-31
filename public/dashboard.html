@@ -108,7 +108,6 @@
                         <span class="text-gray-400">Today's P&L: </span>
                         <span class="value">...</span>
                     </div>
-                    <!-- ⭐ FIX: Connection status indicator -->
                     <div id="connection-status" class="text-xs mt-1">
                         <span class="inline-block w-2 h-2 rounded-full bg-red-500 mr-1"></span>
                         <span class="text-gray-400">Connecting...</span>
@@ -254,8 +253,7 @@
                 }
             };
 
-            // --- *** NEW: Function to render the list from an array *** ---
-            // This allows us to re-render the list after sorting
+            // --- *** NEW: Function to render the list from an array (WITH ICON FIX) *** ---
             const renderAssetList = (assets) => {
                 assetsContent.innerHTML = ''; // Clear the list
                 if (assets && assets.length > 0) {
@@ -263,8 +261,11 @@
                         const changeSign = asset.change >= 0 ? '+' : '';
                         const changeColor = asset.change >= 0 ? 'text-green-400' : 'text-red-400';
                         const tickerBase = asset.ticker.split('/')[0];
-                        const iconUrl = `/icons/${tickerBase.toLowerCase()}.svg`;
-
+                        
+                        // ⭐ FIX: Use the external CDN URL for the logo
+                        // Converts symbol (e.g., BTC) to lowercase (e.g., btc) for the URL
+                        const iconUrl = `https://cryptoicons.org/api/icon/${tickerBase.toLowerCase()}/40`; 
+                        
                         const assetRow = document.createElement('div');
                         const cardId = `asset-card-${asset.ticker.replace('/', '-')}`;
                         assetRow.id = cardId;
@@ -276,8 +277,9 @@
 
                         assetRow.innerHTML = `
                             <div class="flex items-center space-x-4">
-                                <img src="${iconUrl}" alt="${asset.name} logo" class="w-9 h-9" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-                                <div class="w-9 h-9 rounded-full bg-gray-700 flex items-center justify-center font-bold hidden">${tickerBase.charAt(0)}</div>
+                                <img src="${iconUrl}" 
+                                     alt="${asset.name} logo" 
+                                     class="w-9 h-9 rounded-full object-cover">
                                 <div>
                                     <p class="font-bold text-base text-white">${tickerBase}</p>
                                     <p class="text-sm text-gray-400">${asset.name}</p>
@@ -296,7 +298,7 @@
                     assetsContent.innerHTML = `<p class="text-center text-gray-500 py-4 col-span-full">No assets found.</p>`;
                 }
             };
-            // --- End of new function ---
+            // --- End of fixed function ---
 
             const renderData = (data) => {
                 console.log('Rendering dashboard data:', data);
