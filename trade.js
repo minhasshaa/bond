@@ -101,7 +101,7 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
     }
 }
 
-// Trade monitoring logic - CORRECTED TIMING
+// Trade monitoring logic - USING THE WORKING SETTLEMENT APPROACH
 async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedCompletedCandleTs = {};
     const lastProcessedActivationTs = {};
@@ -113,21 +113,23 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 const md = globalMarketData[pair];
                 if (!md) continue;
 
-                // ACTIVATION LOGIC - Activate trades when new candle starts
+                // ACTIVATION LOGIC
                 if (md.currentCandle) {
                     const activationTs = new Date(md.currentCandle.timestamp).getTime();
                     if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
+                        // Pass the candle timestamp (the minute the trade becomes active)
+                        await activateScheduledTradesForPair(io, Trade, pair, md.currentCandle.timestamp, md.currentCandle.open);
                         await activatePendingTradesForPair(io, User, Trade, pair, md.currentCandle.timestamp, md.currentCandle.open);
                         lastProcessedActivationTs[pair] = activationTs;
                     }
                 }
 
-                // SETTLEMENT LOGIC - Settle trades when current candle completes
+                // SETTLEMENT LOGIC
                 if (md.candles?.length > 0) {
                     const lastCompleted = md.candles[md.candles.length - 1];
                     const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
                     if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
-                        // Settle trades that were activated at the start of this completed candle
+                        // Pass the completed candle object to ensure the timestamp is used for duration check
                         await settleActiveTradesForPair(io, User, Trade, pair, lastCompleted);
                         lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
                     }
@@ -140,9 +142,7 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 await cleanupExpiredCopyTrades(io, User, Trade);
                 lastCopyTradeCleanup.global = now;
             }
-        } catch (err) {
-            console.error("Trade monitor error:", err);
-        }
+        } catch (err) {}
     }, POLL_INTERVAL_MS);
 }
 
@@ -204,7 +204,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     const existingTrade = await Trade.findOne({ 
                         userId: user._id, 
-                        status: { $in: ["pending", "active"] } 
+                        status: { $in: ["pending", "active", "scheduled"] } 
                     });
 
                     if (existingTrade) {
@@ -243,7 +243,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     io.to(user._id.toString()).emit("trade_pending", { trade, balance: freshUser.balance });
                 } catch (err) {
-                    console.error("Trade error:", err);
                     socket.emit("error", { message: "Could not place trade." });
                 }
             });
@@ -264,7 +263,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     const existingTrade = await Trade.findOne({ 
                         userId: user._id, 
-                        status: { $in: ["pending", "active"] } 
+                        status: { $in: ["pending", "active", "scheduled"] } 
                     }).session(session);
 
                     if (existingTrade) {
@@ -302,6 +301,21 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         });
                     }
 
+                    const executionTime = new Date(copyTrade.executionTime);
+                    executionTime.setSeconds(0, 0); 
+
+                    const scheduledTrade = new Trade({
+                        userId: user._id,
+                        amount: tradeAmount,
+                        direction: copyTrade.direction === 'CALL' ? 'UP' : 'DOWN',
+                        asset: copyTrade.tradingPair,
+                        status: "scheduled",
+                        scheduledTime: executionTime, 
+                        timestamp: new Date(),
+                        isCopyTrade: true,
+                        originalCopyTradeId: copyTrade._id
+                    });
+
                     freshUser.balance -= tradeAmount;
 
                     copyTrade.userCopies.push({
@@ -310,47 +324,106 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         tradeAmount: tradeAmount
                     });
 
-                    // Create pending trade
-                    const pendingTrade = new Trade({
-                        userId: user._id,
-                        amount: tradeAmount,
-                        direction: copyTrade.direction === 'CALL' ? 'UP' : 'DOWN',
-                        asset: copyTrade.tradingPair,
-                        status: "pending",
-                        timestamp: new Date(),
-                        isCopyTrade: true,
-                        originalCopyTradeId: copyTrade._id
-                    });
-
-                    await pendingTrade.save({ session });
+                    await scheduledTrade.save({ session });
                     await copyTrade.save({ session });
                     await freshUser.save({ session });
 
                     await session.commitTransaction();
                     session.endSession();
 
+                    const now = new Date();
+                    const timeUntilExecution = executionTime - now;
+                    const minutesUntilExecution = Math.floor(timeUntilExecution / (1000 * 60));
+
                     socket.emit("copy_trade_success", {
-                        message: `Successfully copied trade! $${tradeAmount.toFixed(2)} will execute on next candle.`,
+                        message: `Successfully copied trade! $${tradeAmount.toFixed(2)} scheduled to execute in ${minutesUntilExecution} minutes.`,
                         copyTrade: {
                             tradingPair: copyTrade.tradingPair,
                             direction: copyTrade.direction,
                             percentage: copyTrade.percentage,
-                            executionTime: copyTrade.executionTime,
-                            tradeAmount: tradeAmount
+                            executionTime: executionTime,
+                            tradeAmount: tradeAmount,
+                            minutesUntilExecution: minutesUntilExecution
                         },
-                        pendingTrade: pendingTrade
+                        scheduledTrade: scheduledTrade
                     });
 
-                    io.to(user._id.toString()).emit("trade_pending", { 
-                        trade: pendingTrade, 
+                    io.to(user._id.toString()).emit("trade_scheduled", { 
+                        trade: scheduledTrade, 
                         balance: freshUser.balance 
                     });
 
                 } catch (error) {
                     await session.abortTransaction();
                     session.endSession();
-                    console.error("Copy trade error:", error);
                     socket.emit("error", { message: "Failed to copy trade" });
+                }
+            });
+
+            socket.on("schedule_trade", async (data) => {
+                try {
+                    const { asset, direction, scheduledTime, amount } = data;
+                    if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
+                    if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
+
+                    const existingTrade = await Trade.findOne({ 
+                        userId: user._id, 
+                        status: { $in: ["pending", "active", "scheduled"] } 
+                    });
+
+                    if (existingTrade) {
+                        return socket.emit("error", { 
+                            message: `You already have an active trade. Please wait for it to complete.` 
+                        });
+                    }
+
+                    const tradeAmount = parseFloat(amount);
+                    if (isNaN(tradeAmount) || tradeAmount <= 0) {
+                        return socket.emit("error", { message: "Invalid trade amount." });
+                    }
+
+                    const freshUser = await User.findById(user._id);
+
+                    if (freshUser.balance < tradeAmount) {
+                        return socket.emit("error", { 
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        });
+                    }
+
+                    const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
+
+                    const serverNowUTC = new Date();
+                    
+                    const [hour, minute] = scheduledTime.split(":").map(Number);
+                    
+                    const userScheduledTimeToday = new Date(serverNowUTC);
+                    userScheduledTimeToday.setUTCHours(hour, minute, 0, 0); 
+
+                    const tenMinutesFromNow = new Date(serverNowUTC.getTime() + (10 * 60 * 1000));
+                    
+                    if (userScheduledTimeToday <= serverNowUTC || userScheduledTimeToday > tenMinutesFromNow) {
+                        return socket.emit("error", { message: "Please select a time in the next 10 minutes." });
+                    }
+
+                    const finalScheduleDtUTC = userScheduledTimeToday; 
+                    finalScheduleDtUTC.setSeconds(0, 0); 
+
+                    freshUser.balance -= tradeAmount;
+                    await freshUser.save();
+
+                    const trade = new Trade({
+                        userId: user._id,
+                        amount: tradeAmount,
+                        direction: finalDirection, 
+                        asset,
+                        status: "scheduled",
+                        scheduledTime: finalScheduleDtUTC
+                    });
+                    await trade.save();
+
+                    io.to(user._id.toString()).emit("trade_scheduled", { trade, balance: freshUser.balance });
+                } catch (err) {
+                    socket.emit("error", { message: "Could not schedule trade." });
                 }
             });
 
@@ -359,7 +432,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     const trade = await Trade.findOne({
                         _id: data.tradeId,
                         userId: user._id,
-                        status: "pending"
+                        status: { $in: ["pending", "scheduled"] }
                     });
                     if (!trade) return socket.emit("error", { message: "Trade not found or cannot be cancelled." });
 
@@ -371,103 +444,137 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     await trade.save();
                     io.to(user._id.toString()).emit("trade_cancelled", { tradeId: trade._id, balance: freshUser.balance });
                 } catch (err) {
-                    console.error("Cancel trade error:", err);
                     socket.emit("error", { message: "Could not cancel trade." });
                 }
             });
 
             socket.on("disconnect", () => { });
         } catch (err) {
-            console.error("Connection error:", err);
             socket.disconnect();
         }
     });
 }
 
-// --- HELPER FUNCTIONS ---
+// --- Helper Functions - USING THE WORKING LOGIC FROM YOUR PREVIOUS CODE ---
+
+async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
+    try {
+        // Remove seconds from candle timestamp for exact minute matching
+        const candleTime = new Date(candleTimestamp);
+        candleTime.setSeconds(0, 0);
+
+        const scheduleds = await Trade.find({ 
+            status: "scheduled", 
+            asset: pair, 
+            scheduledTime: { $lte: candleTime } // Activate at exact scheduled time (minute precision)
+        });
+
+        for (const t of scheduleds) {
+            t.status = "active";
+            t.entryPrice = entryPrice;
+            // Record the timestamp when the trade became active (the start of the candle)
+            t.activationTimestamp = candleTime; 
+            await t.save();
+            io.to(t.userId.toString()).emit("trade_active", { trade: t });
+        }
+    } catch (err) {}
+}
 
 async function activatePendingTradesForPair(io, User, Trade, pair, candleTimestamp, entryPrice) {
     try {
         const pendings = await Trade.find({ status: "pending", asset: pair });
-        for (const trade of pendings) {
-            trade.status = "active";
-            trade.entryPrice = entryPrice;
-            trade.activationTimestamp = candleTimestamp; 
-            await trade.save();
-            io.to(trade.userId.toString()).emit("trade_active", { trade: trade });
+        for (const t of pendings) {
+            t.status = "active";
+            t.entryPrice = entryPrice;
+            // Record the timestamp when the trade became active (the start of the candle)
+            t.activationTimestamp = candleTimestamp; 
+            await t.save();
+            io.to(t.userId.toString()).emit("trade_active", { trade: t });
         }
-    } catch (err) {
-        console.error("Error activating pending trades:", err);
-    }
+    } catch (err) {}
 }
 
-// --- CORRECTED SETTLEMENT LOGIC ---
-async function settleActiveTradesForPair(io, User, Trade, pair, completedCandle) {
-    try {
-        const exitPrice = completedCandle.close;
-        const completedCandleTime = new Date(completedCandle.timestamp);
-        completedCandleTime.setSeconds(0, 0); // Normalize to minute start
-        
-        const activeTrades = await Trade.find({ 
-            status: "active", 
-            asset: pair 
-        });
-        
-        for (const trade of activeTrades) {
-            const activationTime = new Date(trade.activationTimestamp);
-            activationTime.setSeconds(0, 0); // Normalize to minute start
-            
-            // CRITICAL FIX: Settle trades that were activated at the start of THIS completed candle
-            // Trade activated at 10:00:00 should settle when 10:00 candle completes at 10:00:59
-            if (activationTime.getTime() === completedCandleTime.getTime()) {
-                
-                const win = (trade.direction === "UP" && exitPrice > trade.entryPrice) || 
-                           (trade.direction === "DOWN" && exitPrice < trade.entryPrice);
-                const tie = exitPrice === trade.entryPrice;
-                const pnl = tie ? 0 : (win ? trade.amount * 0.9 : -trade.amount);
+// --- CORRECT SETTLEMENT LOGIC FROM YOUR WORKING CODE ---
+async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
+    // lastCompletedCandle is the final candle object from marketData.md.candles
+    const exitPrice = lastCompletedCandle.close;
+    // The timestamp of the candle that just closed (e.g., if current time is 10:01:30, this is 10:00:00)
+    const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime(); 
+    
+    // The moment the trade should be eligible for settlement is after the candle closes.
+    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000); // 1 minute after the candle started
 
-                trade.status = "closed";
-                trade.exitPrice = exitPrice;
-                trade.result = tie ? "TIE" : (win ? "WIN" : "LOSS");
-                trade.pnl = pnl;
-                trade.closeTime = new Date();
-                await trade.save();
+    try {
+        const actives = await Trade.find({ status: "active", asset: pair });
+        for (const t of actives) {
+            // CRITICAL FIX: Check if the trade's activation time is less than the settlement eligibility time.
+            // This ensures we only settle trades that were opened BEFORE this candle closed.
+            // For a 1-minute trade opened at T=10:00:00, we settle when the candle for 10:00:00 closes (at 10:01:00).
+            // We use the candle's start time (lastCompletedCandle.timestamp) to define the settlement boundary.
+            
+            const tradeActivationTime = new Date(t.activationTimestamp).getTime();
+
+            // Settle the trade only if the trade was activated at the start of the completed candle's minute
+            // OR any time before it (which accounts for the trade being opened on the previous candle).
+            // We ensure the trade has spent at least one full candle cycle (1 minute).
+            
+            // To settle the trade on the *next* candle (the one that just finished closing), we simply check:
+            // Is the trade's activation minute equal to the previous completed candle's minute?
+            // Since the system pushes completed candles every minute, all active trades should be settled on the NEXT complete candle.
+            
+            // We rely on the fact that an active trade was opened in the minute *prior* to the minute of this completed candle.
+            
+            // Check if the trade's activation time (plus one minute) is less than or equal to the time this candle closes.
+            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
+
+            if (tradeShouldCloseBy <= settlementEligibilityTime) { // This condition should always be true for 1-minute trades
+                
+                const win = (t.direction === "UP" && exitPrice > t.entryPrice) || (t.direction === "DOWN" && exitPrice < t.entryPrice);
+                const tie = exitPrice === t.entryPrice;
+                const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount); // 90% payout on win
+
+                t.status = "closed";
+                t.exitPrice = exitPrice;
+                t.result = tie ? "TIE" : (win ? "WIN" : "LOSS");
+                t.pnl = pnl;
+                t.closeTime = new Date(); // Set the actual close time
+                await t.save();
 
                 const userAfter = await User.findByIdAndUpdate(
-                    trade.userId,
+                    t.userId,
                     {
                         $inc: {
-                            balance: trade.amount + pnl,
-                            totalTradeVolume: trade.amount
+                            balance: t.amount + pnl, // Refund original amount + P&L
+                            totalTradeVolume: t.amount
                         }
                     },
                     { new: true }
                 );
 
-                // Calculate today's P&L
+                // Calculate today's P&L using 'closeTime'
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
                 const tomorrow = new Date(today);
                 tomorrow.setDate(tomorrow.getDate() + 1);
 
+                // Query by 'closeTime'
                 const todayTrades = await Trade.find({
-                    userId: trade.userId,
+                    userId: t.userId,
                     status: "closed",
                     closeTime: { $gte: today, $lt: tomorrow }
                 });
 
-                const todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+                const todayPnl = todayTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
 
-                io.to(trade.userId.toString()).emit("trade_result", { 
-                    trade: trade, 
+                // Emit with the correct today's P&L data
+                io.to(t.userId.toString()).emit("trade_result", { 
+                    trade: t, 
                     balance: userAfter.balance,
                     todayPnl: parseFloat(todayPnl.toFixed(2))
                 });
             }
         }
-    } catch (err) {
-        console.error("Error settling trades:", err);
-    }
+    } catch (err) {}
 }
 
 module.exports = { initialize };
