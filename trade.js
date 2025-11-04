@@ -196,6 +196,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 marketData: globalMarketData
             });
 
+            // --- Instant Trade remains ---
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
@@ -247,6 +248,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
+            // --- Copy Trade remains ---
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
@@ -360,85 +362,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
-            // --- ROBUST SCHEDULE_TRADE HANDLER START ---
-            socket.on("schedule_trade", async (data) => {
-                try {
-                    const { asset, direction, scheduledTime, amount } = data;
-                    if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
-                    if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
-
-                    const existingTrade = await Trade.findOne({ 
-                        userId: user._id, 
-                        status: { $in: ["pending", "active", "scheduled"] } 
-                    });
-
-                    if (existingTrade) {
-                        return socket.emit("error", { 
-                            message: `You already have an active trade. Please wait for it to complete.` 
-                        });
-                    }
-
-                    const tradeAmount = parseFloat(amount);
-                    if (isNaN(tradeAmount) || tradeAmount <= 0) {
-                        return socket.emit("error", { message: "Invalid trade amount." });
-                    }
-
-                    const freshUser = await User.findById(user._id);
-
-                    if (freshUser.balance < tradeAmount) {
-                        return socket.emit("error", { 
-                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
-                        });
-                    }
-
-                    const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
-
-                    // --- ROBUST VALIDATION LOGIC ---
-                    const serverNow = new Date();
-                    const finalScheduleDt = getValidScheduledTime(scheduledTime, serverNow); // Use helper function
-
-                    // NOTE: 10 minutes from now, plus a small buffer (e.g., 5 seconds) to prevent edge-case rejection
-                    const tenMinutesFromNow = new Date(serverNow.getTime() + (10 * 60 * 1000) + 5000); 
-                    
-                    if (finalScheduleDt.getTime() > tenMinutesFromNow.getTime()) {
-                        // The time check is strictly enforced here
-                        return socket.emit("error", { 
-                            message: "Please select a time in the next 10 minutes." 
-                        });
-                    }
-                    
-                    // Convert the final valid schedule time to UTC for MongoDB storage
-                    const finalScheduleDtUTC = new Date(
-                        Date.UTC(
-                            finalScheduleDt.getFullYear(),
-                            finalScheduleDt.getMonth(),
-                            finalScheduleDt.getDate(),
-                            finalScheduleDt.getHours(),
-                            finalScheduleDt.getMinutes(),
-                            0, 0
-                        )
-                    );
-                    // --- END OF ROBUST VALIDATION LOGIC ---
-
-                    freshUser.balance -= tradeAmount;
-                    await freshUser.save();
-
-                    const trade = new Trade({
-                        userId: user._id,
-                        amount: tradeAmount,
-                        direction: finalDirection, 
-                        asset,
-                        status: "scheduled",
-                        scheduledTime: finalScheduleDtUTC // Guaranteed UTC and within 10 minutes
-                    });
-                    await trade.save();
-
-                    io.to(user._id.toString()).emit("trade_scheduled", { trade, balance: freshUser.balance });
-                } catch (err) {
-                    socket.emit("error", { message: "Could not schedule trade." });
-                }
-            });
-            // --- ROBUST SCHEDULE_TRADE HANDLER END ---
+            // *** The "schedule_trade" handler has been REMOVED here. ***
 
             socket.on("cancel_trade", async (data) => {
                 try {
@@ -470,31 +394,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
 // --- Helper Functions ---
 
-/**
- * Safely calculates the scheduled trade time, handling next-day rollover 
- * in the server's local timezone for validation.
- * @param {string} scheduledTimeStr - The time string from the client (e.g., "00:52").
- * @param {Date} serverNow - The current server time (Date object).
- * @returns {Date} The calculated Date object for the scheduled time.
- */
-function getValidScheduledTime(scheduledTimeStr, serverNow) {
-    const [hour, minute] = scheduledTimeStr.split(":").map(Number);
-    
-    // 1. Create a Date object for the scheduled time *today* in the server's local timezone
-    const scheduledTimeToday = new Date(serverNow);
-    scheduledTimeToday.setHours(hour, minute, 0, 0); 
-
-    let finalScheduleDt = scheduledTimeToday;
-
-    // 2. If the scheduled time is already in the past today, set it for tomorrow
-    if (scheduledTimeToday.getTime() <= serverNow.getTime()) {
-        finalScheduleDt = new Date(scheduledTimeToday);
-        finalScheduleDt.setDate(finalScheduleDt.getDate() + 1); // Increment to the next day
-    }
-    
-    // 3. Return the calculated Date object
-    return finalScheduleDt;
-}
+// The getValidScheduledTime function has been REMOVED here, as it is no longer needed.
 
 
 async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
@@ -503,6 +403,7 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
         const candleTime = new Date(candleTimestamp);
         candleTime.setSeconds(0, 0);
 
+        // This remains for Copy Trades which use the "scheduled" status
         const scheduleds = await Trade.find({ 
             status: "scheduled", 
             asset: pair, 
@@ -534,7 +435,7 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
     } catch (err) {}
 }
 
-// --- CORRECT SETTLEMENT LOGIC FROM YOUR WORKING CODE ---
+// --- SETTLEMENT LOGIC REMAINS ---
 async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
     // lastCompletedCandle is the final candle object from marketData.md.candles
     const exitPrice = lastCompletedCandle.close;
@@ -547,11 +448,8 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
     try {
         const actives = await Trade.find({ status: "active", asset: pair });
         for (const t of actives) {
-            // CRITICAL FIX: Check if the trade's activation time is less than the settlement eligibility time.
             
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
-
-            // Check if the trade's activation time (plus one minute) is less than or equal to the time this candle closes.
             const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
 
             if (tradeShouldCloseBy <= settlementEligibilityTime) { // This condition should always be true for 1-minute trades
