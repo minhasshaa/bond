@@ -397,20 +397,19 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     const [hour, minute] = scheduledTime.split(":").map(Number);
                     
                     const targetTime = new Date(serverNowUTC);
-                    // Set the hours and minutes based on user input (assumed local HH:MM format)
-                    targetTime.setHours(hour, minute, 0, 0); 
                     
-                    // 🚨 FIX 1: Ensure the time is in the future. If the selected time is in the past *today*, 
-                    // schedule it for the same time *tomorrow*.
+                    // 🚨 CRITICAL FIX: Use setUTCHours to set the time based on the input HH:MM,
+                    // ensuring the final time is aligned with UTC/Binance candles.
+                    targetTime.setUTCHours(hour, minute, 0, 0); 
+                    
+                    // If the input time (now interpreted as UTC) is in the past, push it forward one day.
                     if (targetTime <= serverNowUTC) {
                         targetTime.setDate(targetTime.getDate() + 1);
                     }
-                    // Ensure it's perfectly aligned to the minute start (important for activation matching)
+                    // Ensure it's perfectly aligned to the minute start
                     targetTime.setSeconds(0, 0);
 
 
-                    // ----------------------------------------------------------------------
-                    // FIX 2: Simplified Validation Logic - Only check for a future minute
                     // ----------------------------------------------------------------------
                     if (targetTime <= serverNowUTC) {
                         return socket.emit("error", { message: "The scheduled time must be a future minute." });
@@ -418,6 +417,14 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     // ----------------------------------------------------------------------
 
                     const finalScheduleDtUTC = targetTime; 
+
+                    // --- Debugging logs (KEEP THESE TEMPORARILY while testing) ---
+                    console.log(`*** SCHEDULE DEBUG ***`);
+                    console.log(`Input HH:MM: ${scheduledTime}`);
+                    console.log(`Server Now: ${serverNowUTC.toISOString()}`);
+                    console.log(`Scheduled DB Time: ${finalScheduleDtUTC.toISOString()}`); 
+                    console.log(`**********************`);
+
 
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
@@ -428,7 +435,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         direction: finalDirection, 
                         asset,
                         status: "scheduled",
-                        scheduledTime: finalScheduleDtUTC // Use the guaranteed future minute-aligned time
+                        scheduledTime: finalScheduleDtUTC
                     });
                     await trade.save();
 
@@ -467,7 +474,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     });
 }
 
-// --- Helper Functions - USING THE WORKING LOGIC FROM YOUR PREVIOUS CODE ---
+// --- Helper Functions ---
 
 async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
     try {
@@ -475,8 +482,7 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
         const candleTime = new Date(candleTimestamp);
         candleTime.setSeconds(0, 0);
 
-        // 🚨 FIX: Use $eq to precisely match the activation minute. 
-        // This guarantees activation only at the start of the scheduled minute's candle.
+        // 🚨 FIX: Use $eq to precisely match the activation minute saved in the DB. 
         const scheduleds = await Trade.find({ 
             status: "scheduled", 
             asset: pair, 
@@ -508,14 +514,14 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
     } catch (err) {}
 }
 
-// --- CORRECT SETTLEMENT LOGIC FROM YOUR WORKING CODE ---
+// --- SETTLEMENT LOGIC ---
 async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
     const exitPrice = lastCompletedCandle.close;
     // The timestamp of the candle that just closed (e.g., if current time is 10:01:30, this is 10:00:00)
     const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime(); 
     
-    // The moment the trade should be eligible for settlement is after the candle closes.
-    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000); // 1 minute after the candle started
+    // The moment the trade should be eligible for settlement (the next minute boundary)
+    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000); 
 
     try {
         const actives = await Trade.find({ status: "active", asset: pair });
@@ -524,10 +530,9 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
 
             // Settle the trade only if the trade was activated at the start of the completed candle's minute.
-            // This ensures the trade runs for one full 1-minute candle cycle.
             const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
 
-            if (tradeShouldCloseBy <= settlementEligibilityTime) { // Condition is correct for 1-minute trades
+            if (tradeShouldCloseBy <= settlementEligibilityTime) { 
                 
                 const win = (t.direction === "UP" && exitPrice > t.entryPrice) || (t.direction === "DOWN" && exitPrice < t.entryPrice);
                 const tie = exitPrice === t.entryPrice;
