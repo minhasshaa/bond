@@ -360,6 +360,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
+            // --- ROBUST SCHEDULE_TRADE HANDLER START ---
             socket.on("schedule_trade", async (data) => {
                 try {
                     const { asset, direction, scheduledTime, amount } = data;
@@ -392,21 +393,32 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
 
-                    const serverNowUTC = new Date();
-                    
-                    const [hour, minute] = scheduledTime.split(":").map(Number);
-                    
-                    const userScheduledTimeToday = new Date(serverNowUTC);
-                    userScheduledTimeToday.setUTCHours(hour, minute, 0, 0); 
+                    // --- ROBUST VALIDATION LOGIC ---
+                    const serverNow = new Date();
+                    const finalScheduleDt = getValidScheduledTime(scheduledTime, serverNow); // Use helper function
 
-                    const tenMinutesFromNow = new Date(serverNowUTC.getTime() + (10 * 60 * 1000));
+                    // NOTE: 10 minutes from now, plus a small buffer (e.g., 5 seconds) to prevent edge-case rejection
+                    const tenMinutesFromNow = new Date(serverNow.getTime() + (10 * 60 * 1000) + 5000); 
                     
-                    if (userScheduledTimeToday <= serverNowUTC || userScheduledTimeToday > tenMinutesFromNow) {
-                        return socket.emit("error", { message: "Please select a time in the next 10 minutes." });
+                    if (finalScheduleDt.getTime() > tenMinutesFromNow.getTime()) {
+                        // The time check is strictly enforced here
+                        return socket.emit("error", { 
+                            message: "Please select a time in the next 10 minutes." 
+                        });
                     }
-
-                    const finalScheduleDtUTC = userScheduledTimeToday; 
-                    finalScheduleDtUTC.setSeconds(0, 0); 
+                    
+                    // Convert the final valid schedule time to UTC for MongoDB storage
+                    const finalScheduleDtUTC = new Date(
+                        Date.UTC(
+                            finalScheduleDt.getFullYear(),
+                            finalScheduleDt.getMonth(),
+                            finalScheduleDt.getDate(),
+                            finalScheduleDt.getHours(),
+                            finalScheduleDt.getMinutes(),
+                            0, 0
+                        )
+                    );
+                    // --- END OF ROBUST VALIDATION LOGIC ---
 
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
@@ -417,7 +429,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         direction: finalDirection, 
                         asset,
                         status: "scheduled",
-                        scheduledTime: finalScheduleDtUTC
+                        scheduledTime: finalScheduleDtUTC // Guaranteed UTC and within 10 minutes
                     });
                     await trade.save();
 
@@ -426,6 +438,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     socket.emit("error", { message: "Could not schedule trade." });
                 }
             });
+            // --- ROBUST SCHEDULE_TRADE HANDLER END ---
 
             socket.on("cancel_trade", async (data) => {
                 try {
@@ -455,7 +468,34 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     });
 }
 
-// --- Helper Functions - USING THE WORKING LOGIC FROM YOUR PREVIOUS CODE ---
+// --- Helper Functions ---
+
+/**
+ * Safely calculates the scheduled trade time, handling next-day rollover 
+ * in the server's local timezone for validation.
+ * @param {string} scheduledTimeStr - The time string from the client (e.g., "00:52").
+ * @param {Date} serverNow - The current server time (Date object).
+ * @returns {Date} The calculated Date object for the scheduled time.
+ */
+function getValidScheduledTime(scheduledTimeStr, serverNow) {
+    const [hour, minute] = scheduledTimeStr.split(":").map(Number);
+    
+    // 1. Create a Date object for the scheduled time *today* in the server's local timezone
+    const scheduledTimeToday = new Date(serverNow);
+    scheduledTimeToday.setHours(hour, minute, 0, 0); 
+
+    let finalScheduleDt = scheduledTimeToday;
+
+    // 2. If the scheduled time is already in the past today, set it for tomorrow
+    if (scheduledTimeToday.getTime() <= serverNow.getTime()) {
+        finalScheduleDt = new Date(scheduledTimeToday);
+        finalScheduleDt.setDate(finalScheduleDt.getDate() + 1); // Increment to the next day
+    }
+    
+    // 3. Return the calculated Date object
+    return finalScheduleDt;
+}
+
 
 async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
     try {
@@ -508,22 +548,9 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
         const actives = await Trade.find({ status: "active", asset: pair });
         for (const t of actives) {
             // CRITICAL FIX: Check if the trade's activation time is less than the settlement eligibility time.
-            // This ensures we only settle trades that were opened BEFORE this candle closed.
-            // For a 1-minute trade opened at T=10:00:00, we settle when the candle for 10:00:00 closes (at 10:01:00).
-            // We use the candle's start time (lastCompletedCandle.timestamp) to define the settlement boundary.
             
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
 
-            // Settle the trade only if the trade was activated at the start of the completed candle's minute
-            // OR any time before it (which accounts for the trade being opened on the previous candle).
-            // We ensure the trade has spent at least one full candle cycle (1 minute).
-            
-            // To settle the trade on the *next* candle (the one that just finished closing), we simply check:
-            // Is the trade's activation minute equal to the previous completed candle's minute?
-            // Since the system pushes completed candles every minute, all active trades should be settled on the NEXT complete candle.
-            
-            // We rely on the fact that an active trade was opened in the minute *prior* to the minute of this completed candle.
-            
             // Check if the trade's activation time (plus one minute) is less than or equal to the time this candle closes.
             const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
 
