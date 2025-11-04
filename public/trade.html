@@ -420,19 +420,10 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
             </div>
 
             <div id="trade-content" class="p-4 sm:p-6 space-y-6">
-
+                
                 <div class="flex justify-center gap-4 bg-gray-900/50 p-2 rounded-xl">
-                    <button id="instantTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all">Instant Trade</button>
-                    <button id="scheduledTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all">Scheduled Trade</button>
-                </div>
-
-                <div id="scheduledContainer" class="hidden">
-                    <label class="text-sm text-gray-300 mb-2 block">Select Time</label>
-                    <div id="time-scroller-container" class="time-scroller-container">
-                        <div id="time-scroller" class="time-scroller"></div>
+                    <button id="instantTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all bg-blue-600">Instant Trade</button>
                     </div>
-                </div>
-
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                     <div>
                         <label for="investmentAmount" class="text-sm font-medium text-gray-300">Amount ($)</label>
@@ -501,11 +492,11 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
         <div class="p-8 text-center">
             <svg class="w-16 h-16 text-blue-500 mx-auto mb-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 id="pending-title" class="text-3xl font-bold mb-2">Trade Scheduled</h2>
+            <h2 id="pending-title" class="text-3xl font-bold mb-2">Trade Pending</h2>
             <p class="text-gray-400 text-lg">
                 Your <span id="pending-amount" class="font-bold text-white">$0.00</span> trade on
                 <span id="pending-asset" class="font-bold text-white">ASSET</span>
-                <span id="pending-time-container">
+                <span id="pending-time-container" style="display: none;">
                     is set for <span id="pending-time" class="font-bold text-white">00:00:00</span>.
                 </span>
             </p>
@@ -651,9 +642,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const investmentInput = document.getElementById('investmentAmount');
     const tradeStatusElem = document.getElementById('tradeStatus');
     const instantBtn = document.getElementById("instantTradeBtn");
-    const scheduledBtn = document.getElementById("scheduledTradeBtn");
-    const scheduledContainer = document.getElementById("scheduledContainer");
-    const timeScroller = document.getElementById("time-scroller");
+    
+    // Elements for Scheduled Trade REMOVED: scheduledBtn, scheduledContainer, timeScroller
+
     const assetDropdownBtn = document.getElementById('assetDropdownBtn');
     const selectedAssetSpan = document.getElementById('selectedAssetSpan');
     const assetDropdownContent = document.getElementById('assetDropdownContent');
@@ -691,7 +682,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const TRADES_PER_PAGE = 5;
 
     // State Variables
-    let marketData = {}, currentAsset = '', lastPrice = 0, isScheduled = false;
+    let marketData = {}, currentAsset = '', lastPrice = 0, isScheduled = false; // isScheduled variable is now redundant but kept as false
     let availableCopyTrades = []; 
     let tradeHistoryData = {};
     let assetPrices = {};
@@ -876,57 +867,10 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedAssetSpan.textContent = asset;
     }
 
-    // --- Time Scroller & Trade Mode (FIXED) ---
-    function populateTimeSelector() {
-        const now = new Date();
-        timeScroller.innerHTML = '';
-        
-        // Calculate the time boundary for the next 10 minutes
-        const tenMinutesFromNow = now.getTime() + (10 * 60 * 1000);
-
-        // Loop through upcoming minutes
-        // We set the loop to check up to 15 minutes ahead, but the validation below is the critical part
-        for (let i = 1; i <= 15; i++) { 
-            const futureTime = new Date(now.getTime() + i * 60 * 1000);
-            
-            // Ensure the time is strictly within the 10-minute limit
-            if (futureTime.getTime() > tenMinutesFromNow) {
-                continue; 
-            }
-
-            // Use getHours() to ensure 24-hour format (00-23) for server consistency
-            const timeString = `${futureTime.getHours().toString().padStart(2, '0')}:${futureTime.getMinutes().toString().padStart(2, '0')}`;
-            
-            const button = document.createElement('button');
-            button.className = 'time-option'; 
-            button.textContent = timeString; 
-            button.dataset.time = timeString;
-            
-            if (i === 1) button.classList.add('active'); // Default select the first available minute
-
-            button.addEventListener('click', () => {
-                timeScroller.querySelectorAll('.time-option').forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
-            });
-            timeScroller.appendChild(button);
-        }
-    }
-
-    function setTradeMode(scheduled) {
-        isScheduled = scheduled;
-        if (isScheduled) {
-            scheduledBtn.classList.add('bg-yellow-600'); scheduledBtn.classList.remove('opacity-60');
-            instantBtn.classList.remove('bg-blue-600'); instantBtn.classList.add('opacity-60');
-            populateTimeSelector();
-            scheduledContainer.classList.remove("hidden");
-        } else {
-            instantBtn.classList.add('bg-blue-600'); instantBtn.classList.remove('opacity-60');
-            scheduledBtn.classList.remove('bg-yellow-600'); scheduledBtn.classList.add('opacity-60');
-            scheduledContainer.classList.add("hidden");
-        }
-    }
-    instantBtn.addEventListener("click", () => setTradeMode(false));
-    scheduledBtn.addEventListener("click", () => setTradeMode(true));
+    // --- Trade Mode Cleanup ---
+    // The previous Scheduled Trade logic is no longer needed. The trade mode is implicitly "Instant".
+    // Keep the initialization of the Instant Trade button for styling purposes.
+    instantBtn.classList.add('bg-blue-600'); // Ensure Instant Trade button is styled as active
 
     // --- SOCKET.IO Event Handlers ---
 
@@ -1045,7 +989,8 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('trade_scheduled', (data) => { 
         updateBalance(data.balance); 
         addTradeToHistory(data.trade);
-        showScheduledPopup(data.trade);
+        // This handler remains for Copy Trades, which are status="scheduled"
+        showScheduledPopup(data.trade); 
     });
 
     socket.on('trade_active', (data) => {
@@ -1127,20 +1072,10 @@ document.addEventListener('DOMContentLoaded', () => {
             openingPrice: currentPrice
         };
 
-        if (isScheduled) {
-            const activeTimeButton = timeScroller.querySelector('.time-option.active');
-            if (!activeTimeButton) { 
-                showStatus('Please select a time.', 'red'); 
-                setTradeButtonsDisabled(false); 
-                return; 
-            }
-            // CRITICAL: Send the HH:MM string to the server
-            tradeData.scheduledTime = activeTimeButton.dataset.time; 
-            socket.emit("schedule_trade", tradeData);
-        } else {
-            socket.emit("trade", tradeData);
-        }
+        // Always emit as a regular "trade" now that "scheduled_trade" is removed
+        socket.emit("trade", tradeData);
     };
+    
     tradeUpBtn.addEventListener("click", () => requestTrade("UP"));
     tradeDownBtn.addEventListener("click", () => requestTrade("DOWN"));
 
@@ -1375,7 +1310,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pending-title').textContent = 'Trade Scheduled';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
         document.getElementById('pending-asset').textContent = trade.asset;
-        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
+        // This is primarily for Copy Trade now.
+        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString(); 
         document.getElementById('pending-time-container').style.display = 'inline';
         showModal(modalPending);
     }
@@ -1478,9 +1414,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Initializations ---
-    setTradeMode(false);
-    populateTimeSelector();
-    setInterval(populateTimeSelector, 60000);
+    // Removed setTradeMode(false) and intervals for populateTimeSelector
+    // Instant trade is now the default and only option.
     setInterval(() => socket.emit('request_copy_trades'), 30000); 
 
 });
