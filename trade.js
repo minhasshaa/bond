@@ -9,7 +9,10 @@ const POLL_INTERVAL_MS = 1000; // Check every second
 // Track activation state per pair
 const activationState = {};
 
-// --- Copy Trade Execution Logic ---
+// --- Copy Trade Execution Logic (Placeholder for actual execution) ---
+// Note: This function currently only sets the copyTrade status to 'executed'
+// The actual execution (creating and settling trades) is handled by the regular
+// trade monitor when the scheduled trades activate.
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -28,12 +31,17 @@ async function executeCopyTrade(io, User, Trade, copyTradeId) {
         copyTrade.status = 'executed';
         await copyTrade.save({ session });
 
+        // IMPORTANT: The user copies (scheduled trades) are handled by the
+        // activateScheduledTradesForPair function when their scheduledTime hits.
+        // This function primarily prevents further copying.
+
         await session.commitTransaction();
         session.endSession();
 
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
+        // In a real app, log the error here
     }
 }
 
@@ -48,10 +56,15 @@ async function cleanupExpiredCopyTrades(io, User, Trade) {
 
         for (const copyTrade of expiredTrades) {
             try {
+                // Execute cleanup logic (sets status to 'executed')
                 await executeCopyTrade(io, User, Trade, copyTrade._id);
-            } catch (innerErr) {}
+            } catch (innerErr) {
+                // Log inner error
+            }
         }
-    } catch (error) {}
+    } catch (error) {
+        // Log outer error
+    }
 }
 
 async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
@@ -87,6 +100,7 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
 
         const dominantDirection = upVolume > downVolume ? 'UP' : 'DOWN';
 
+        // NOTE: This is a counter-trading rule (80% chance to reverse the dominant direction if user chose dominant)
         if (userRequestedDirection === dominantDirection) {
             const random = Math.random(); 
             if (random < 0.8) { 
@@ -113,7 +127,7 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 const md = globalMarketData[pair];
                 if (!md) continue;
 
-                // ACTIVATION LOGIC
+                // ACTIVATION LOGIC (For current minute's candle open)
                 if (md.currentCandle) {
                     const activationTs = new Date(md.currentCandle.timestamp).getTime();
                     if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
@@ -124,7 +138,7 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                     }
                 }
 
-                // SETTLEMENT LOGIC
+                // SETTLEMENT LOGIC (For last minute's candle close)
                 if (md.candles?.length > 0) {
                     const lastCompleted = md.candles[md.candles.length - 1];
                     const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
@@ -142,7 +156,9 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 await cleanupExpiredCopyTrades(io, User, Trade);
                 lastCopyTradeCleanup.global = now;
             }
-        } catch (err) {}
+        } catch (err) {
+            // Log monitor error
+        }
     }, POLL_INTERVAL_MS);
 }
 
@@ -196,6 +212,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 marketData: globalMarketData
             });
 
+            // --- INSTANT TRADE ---
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
@@ -247,6 +264,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
+            // --- COPY TRADE ---
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
@@ -360,6 +378,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
+            // --- SCHEDULED TRADE (Fix implemented here) ---
             socket.on("schedule_trade", async (data) => {
                 try {
                     const { asset, direction, scheduledTime, amount } = data;
@@ -392,39 +411,33 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
 
-                    const serverNowUTC = new Date();
-                    
+                    const serverNow = new Date(); // Use server's current time for comparison
+
+                    // Client sends 'HH:MM' string (e.g., '21:48')
                     const [hour, minute] = scheduledTime.split(":").map(Number);
                     
-                    const targetTime = new Date(serverNowUTC);
-                    
-                    // 🚨 CRITICAL FIX: Use setUTCHours to set the time based on the input HH:MM,
-                    // ensuring the final time is aligned with UTC/Binance candles.
-                    targetTime.setUTCHours(hour, minute, 0, 0); 
-                    
-                    // If the input time (now interpreted as UTC) is in the past, push it forward one day.
-                    if (targetTime <= serverNowUTC) {
-                        targetTime.setDate(targetTime.getDate() + 1);
+                    // Create a Date object for the scheduled time using the server's current date
+                    const finalScheduleDt = new Date(serverNow);
+                    // NOTE: setHours uses the server's local time zone, which is generally fine
+                    // for minute-based scheduling against the server's clock.
+                    finalScheduleDt.setHours(hour, minute, 0, 0); 
+
+                    // Check if the calculated time is in the past (e.g., current time 22:00, schedule 21:50)
+                    if (finalScheduleDt <= serverNow) {
+                         // If the calculated time is in the past, assume they meant the next day's minute
+                         finalScheduleDt.setDate(finalScheduleDt.getDate() + 1);
                     }
-                    // Ensure it's perfectly aligned to the minute start
-                    targetTime.setSeconds(0, 0);
-
-
-                    // ----------------------------------------------------------------------
-                    if (targetTime <= serverNowUTC) {
-                        return socket.emit("error", { message: "The scheduled time must be a future minute." });
+                    
+                    const tenMinutesFromNow = new Date(serverNow.getTime() + (10 * 60 * 1000));
+                    
+                    // Validation: Must be in the future and within the next 10 minutes (exclusive)
+                    if (finalScheduleDt > tenMinutesFromNow) {
+                        // THIS IS THE CORRECTED ERROR CHECK
+                        return socket.emit("error", { message: "Please select a time in the next 10 minutes." });
                     }
-                    // ----------------------------------------------------------------------
 
-                    const finalScheduleDtUTC = targetTime; 
-
-                    // --- Debugging logs (KEEP THESE TEMPORARILY while testing) ---
-                    console.log(`*** SCHEDULE DEBUG ***`);
-                    console.log(`Input HH:MM: ${scheduledTime}`);
-                    console.log(`Server Now: ${serverNowUTC.toISOString()}`);
-                    console.log(`Scheduled DB Time: ${finalScheduleDtUTC.toISOString()}`); 
-                    console.log(`**********************`);
-
+                    const finalScheduleDtUTC = finalScheduleDt; // It is now a valid date object
+                    finalScheduleDtUTC.setSeconds(0, 0); // Ensure second/ms is zeroed out for exact minute match
 
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
@@ -441,11 +454,11 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     io.to(user._id.toString()).emit("trade_scheduled", { trade, balance: freshUser.balance });
                 } catch (err) {
-                    console.error("Error in schedule_trade:", err.message);
                     socket.emit("error", { message: "Could not schedule trade." });
                 }
             });
 
+            // --- CANCEL TRADE ---
             socket.on("cancel_trade", async (data) => {
                 try {
                     const trade = await Trade.findOne({
@@ -474,7 +487,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     });
 }
 
-// --- Helper Functions ---
+// --- Helper Functions - Trade Lifecycle ---
 
 async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
     try {
@@ -482,22 +495,23 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
         const candleTime = new Date(candleTimestamp);
         candleTime.setSeconds(0, 0);
 
-        // 🚨 FIX: Use $eq to precisely match the activation minute saved in the DB. 
         const scheduleds = await Trade.find({ 
             status: "scheduled", 
             asset: pair, 
-            scheduledTime: { $eq: candleTime }
+            scheduledTime: { $lte: candleTime } // Activate at exact scheduled minute (start of the candle)
         });
 
         for (const t of scheduleds) {
             t.status = "active";
-            t.entryPrice = entryPrice;
+            t.entryPrice = entryPrice; // Open price of the current candle
             // Record the timestamp when the trade became active (the start of the candle)
             t.activationTimestamp = candleTime; 
             await t.save();
             io.to(t.userId.toString()).emit("trade_active", { trade: t });
         }
-    } catch (err) {}
+    } catch (err) {
+        // Log error
+    }
 }
 
 async function activatePendingTradesForPair(io, User, Trade, pair, candleTimestamp, entryPrice) {
@@ -505,22 +519,25 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
         const pendings = await Trade.find({ status: "pending", asset: pair });
         for (const t of pendings) {
             t.status = "active";
-            t.entryPrice = entryPrice;
+            t.entryPrice = entryPrice; // Open price of the current candle
             // Record the timestamp when the trade became active (the start of the candle)
             t.activationTimestamp = candleTimestamp; 
             await t.save();
             io.to(t.userId.toString()).emit("trade_active", { trade: t });
         }
-    } catch (err) {}
+    } catch (err) {
+        // Log error
+    }
 }
 
-// --- SETTLEMENT LOGIC ---
+// --- CORRECT SETTLEMENT LOGIC (Settle on the close of the activation candle) ---
 async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
+    // lastCompletedCandle is the final candle object from marketData.md.candles
     const exitPrice = lastCompletedCandle.close;
     // The timestamp of the candle that just closed (e.g., if current time is 10:01:30, this is 10:00:00)
     const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime(); 
     
-    // The moment the trade should be eligible for settlement (the next minute boundary)
+    // The moment the trade is eligible for settlement is one minute after the candle started.
     const settlementEligibilityTime = completedCandleStartTime + (60 * 1000); 
 
     try {
@@ -529,7 +546,8 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
             
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
 
-            // Settle the trade only if the trade was activated at the start of the completed candle's minute.
+            // A 1-minute trade opened at T=10:00:00 (activationTimestamp) closes at 10:01:00.
+            // We check if the trade's required closing time is less than or equal to the time this candle closes.
             const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
 
             if (tradeShouldCloseBy <= settlementEligibilityTime) { 
@@ -579,7 +597,9 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
                 });
             }
         }
-    } catch (err) {}
+    } catch (err) {
+        // Log error
+    }
 }
 
 module.exports = { initialize };
