@@ -360,7 +360,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
-            // --- SCHEDULED TRADE (Final Time Validation Fix) ---
+            // --- SCHEDULED TRADE (Final Time Validation Fix using Minute Index) ---
             socket.on("schedule_trade", async (data) => {
                 try {
                     const { asset, direction, scheduledTime, amount } = data;
@@ -393,36 +393,40 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
 
-                    // --- TIME VALIDATION FIX START ---
+                    // --- TIME VALIDATION FIX START: Use Minute Index ---
                     const serverNow = new Date();
-                    const [hour, minute] = scheduledTime.split(":").map(Number);
+                    const serverHour = serverNow.getHours();
+                    const serverMinute = serverNow.getMinutes();
                     
-                    // 1. Calculate the target time for TODAY using the server's local time zone
-                    let finalScheduleDt = new Date(serverNow);
-                    finalScheduleDt.setHours(hour, minute, 0, 0); 
+                    const [scheduledHour, scheduledMinute] = scheduledTime.split(":").map(Number);
                     
-                    // 2. Adjust for time passing: If the calculated time is in the past, 
-                    // it must be the next day's minute. Add a small buffer (59 seconds) 
-                    // to ensure we are scheduling for the next minute slot.
-                    if (finalScheduleDt.getTime() <= serverNow.getTime() + 59000) {
-                         // Schedule for the next day
-                         finalScheduleDt.setDate(finalScheduleDt.getDate() + 1);
+                    // 1. Calculate the scheduled time in total minutes from the start of the day (00:00).
+                    const totalScheduledMinutes = (scheduledHour * 60) + scheduledMinute;
+                    // 2. Calculate the server's current time in total minutes from the start of the day.
+                    const totalServerMinutes = (serverHour * 60) + serverMinute;
+
+                    let minuteDifference = totalScheduledMinutes - totalServerMinutes;
+
+                    // If difference is negative, the scheduled time is for the next day. 
+                    // Add 24 hours (1440 minutes) to correct.
+                    if (minuteDifference < 0) {
+                        minuteDifference += 1440;
                     }
                     
-                    // 3. Define the 10-minute window (10 minutes from now)
-                    const tenMinutesFromNow = new Date(serverNow.getTime() + (10 * 60 * 1000));
-                    
-                    // 4. Final Validation: Must be within 10 minutes (inclusive of the 10th minute)
-                    if (finalScheduleDt > tenMinutesFromNow) {
+                    // Validation: Must be > 0 and <= 10 minutes.
+                    // The client provides times >= current minute + 1.
+                    if (minuteDifference <= 0 || minuteDifference > 10) {
                         return socket.emit("error", { 
                             message: "Please select a time in the next 10 minutes." 
                         });
                     }
+                    
+                    // Calculate the absolute scheduled time based on the server's clock and the minute difference
+                    let finalScheduleDt = new Date(serverNow.getTime() + (minuteDifference * 60 * 1000));
+                    finalScheduleDt.setSeconds(0, 0); 
                     // --- TIME VALIDATION FIX END ---
 
-
-                    const finalScheduleDtUTC = finalScheduleDt; // The Date object is already adjusted
-                    finalScheduleDtUTC.setSeconds(0, 0); 
+                    const finalScheduleDtUTC = finalScheduleDt;
 
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
