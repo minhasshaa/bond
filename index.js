@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION FOR STABILITY
+// index.js - FINAL CORRECTED VERSION FOR PUBLIC DATA STABILITY
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -7,7 +7,7 @@ const socketIo = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
-const Binance = require("node-binance-api");
+// const Binance = require("node-binance-api"); // Removed as we use direct axios calls for public data
 const jwt = require('jsonwebtoken'); 
 const axios = require('axios');
 // >>> START KYC ADDITIONS <<<
@@ -90,11 +90,8 @@ TRADE_PAIRS.forEach(pair => {
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
 
-// ------------------ BINANCE CLIENT ------------------
-const binance = new Binance().options({
-    APIKEY: process.env.BINANCE_API_KEY,
-    APISECRET: process.env.BINANCE_API_SECRET
-});
+// ------------------ BINANCE CLIENT (REMOVED: Using direct Axios calls instead) ------------------
+// const binance = new Binance().options({...}); 
 
 // ------------------ MIDDLEWARE ------------------
 app.use(cors());
@@ -114,20 +111,19 @@ app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnab
 
 
 // --------------------------------------------------------------------------------------------------
-// ⭐ FIXED FUNCTION: Fetch and store 24h Ticker Data (Fixes 418 Rate Limit Issue)
+// Fetch and store 24h Ticker Data (Uses public REST API)
 // --------------------------------------------------------------------------------------------------
 async function fetchAndStore24hTicker() {
-    // Using the spot API's 24hr ticker endpoint
     const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
     
     try {
+        // Now using public REST endpoint via axios
         const response = await axios.get(API_URL); 
         const tickers = response.data;
 
         if (!tickers || !Array.isArray(tickers)) return;
 
         for (const ticker of tickers) {
-            // NOTE: Spot API uses symbol like BTCUSDT, which matches our TRADE_PAIRS
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
                     changePercent: parseFloat(ticker.priceChangePercent) 
@@ -137,19 +133,12 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
-        // --- RATE LIMITING (418, 429) FIX ---
+        // Improved logging for network issues
         if (err.response) {
-            if (err.response.status === 418) {
-                console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
-            } else if (err.response.status === 429) {
-                console.error("❌ Failed to fetch 24h ticker data (HTTP 429 - Too Many Requests): Rate limit exceeded.");
-            } else if (err.response.status === 403) {
-                console.error("❌ Failed to fetch 24h ticker data (HTTP 403 - Forbidden): Check API keys or IP access.");
-            }
+            console.error(`❌ Failed to fetch 24h ticker data (HTTP ${err.response.status}):`, err.response.data || err.message);
         } else {
              console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
         }
-        // -------------------------------
     }
 }
 // --------------------------------------------------------------------------------------------------
@@ -176,7 +165,6 @@ async function getDashboardData(userId) {
     const assets = TRADE_PAIRS;
     const marketInfo = assets.map(pair => {
         const data = marketData[pair];
-        // Defensive check added: ensure data and price exist before accessing
         if (!data || typeof data.currentPrice !== 'number') return null;
 
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
@@ -186,7 +174,7 @@ async function getDashboardData(userId) {
             ticker: `${pair.replace('USDT', '')}/USD`,
             price: data.currentPrice,
             change: parseFloat(changeValue.toFixed(2)),
-            candles: data.candles // Will be empty if initializeMarketData failed for this pair
+            candles: data.candles
         };
     }).filter(Boolean);
 
@@ -246,13 +234,15 @@ async function initializeMarketData() {
     
     for (const pair of TRADE_PAIRS) {
         try {
-            // Using futuresCandles since the logic below requires the future prices endpoint
-            const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+            // ⭐ FIX 1: Use public REST API for SPOT Candlestick Data (No authentication needed)
+            const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1m&limit=200`);
+            const klines = response.data;
             
-            // ⭐ CRITICAL FIX: Ensure klines is a valid array before attempting to map it.
+            // ⭐ FIX 2: Ensure klines is a valid array before attempting to map it.
             if (!Array.isArray(klines)) {
-                console.error(`❌ Failed to load initial candles for ${pair}: Received non-array data. Skipping pair.`);
-                continue; // Skip processing this pair if data is invalid
+                // Now logs the actual data received to help debug if needed
+                console.error(`❌ Failed to load initial candles for ${pair}: Received non-array data. Skipping pair. Data: ${JSON.stringify(klines).substring(0, 100)}...`);
+                continue; 
             }
 
             marketData[pair].candles = klines.map(k => ({
@@ -268,28 +258,35 @@ async function initializeMarketData() {
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
             
         } catch (err) {
-            // Improved error logging for debugging API issues
-            const errorMessage = (err && err.body) ? `API Error Body: ${err.body}` : err.message || JSON.stringify(err);
-            console.error(`❌ Failed to load initial candles for ${pair}:`, errorMessage);
+            console.error(`❌ Failed to load initial candles for ${pair}:`, err.message);
         }
     }
 }
 
 async function updateMarketData() {
     try {
-        // Fetching prices via futuresPrices to match futuresCandles and for consistency
-        const prices = await binance.futuresPrices();
+        // ⭐ FIX 3: Use public REST API for Ticker Prices (No authentication needed)
+        const response = await axios.get('https://api.binance.com/api/v3/ticker/price');
+        const tickerPrices = response.data;
+        
+        // Convert the array of objects into a simple map for easy lookup
+        const prices = tickerPrices.reduce((acc, curr) => {
+            acc[curr.symbol] = curr.price;
+            return acc;
+        }, {});
+        
         const now = new Date();
         const currentMinuteStart = new Date(now);
         currentMinuteStart.setSeconds(0, 0);
         currentMinuteStart.setMilliseconds(0);
 
         for (const pair of TRADE_PAIRS) {
+            // Look up price from the map
             if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
 
             const md = marketData[pair];
             const currentPrice = md.currentPrice || 0;
-            if (!currentPrice) continue; // Skip if we have no price data
+            if (!currentPrice) continue; 
 
             const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
@@ -324,7 +321,7 @@ async function updateMarketData() {
             io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
         }
     } catch (err) {
-        console.error("Error in updateMarketData:", (err && err.body) || err);
+        console.error("Error in updateMarketData:", err.message);
     }
 }
 
