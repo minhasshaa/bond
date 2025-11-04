@@ -876,16 +876,33 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedAssetSpan.textContent = asset;
     }
 
-    // --- Time Scroller & Trade Mode (No Change) ---
+    // --- Time Scroller & Trade Mode (FIXED) ---
     function populateTimeSelector() {
         const now = new Date();
         timeScroller.innerHTML = '';
-        for (let i = 1; i <= 10; i++) {
+        
+        // Calculate the time boundary for the next 10 minutes
+        const tenMinutesFromNow = now.getTime() + (10 * 60 * 1000);
+
+        // Loop through upcoming minutes
+        // We set the loop to check up to 15 minutes ahead, but the validation below is the critical part
+        for (let i = 1; i <= 15; i++) { 
             const futureTime = new Date(now.getTime() + i * 60 * 1000);
+            
+            // Ensure the time is strictly within the 10-minute limit
+            if (futureTime.getTime() > tenMinutesFromNow) {
+                continue; 
+            }
+
+            // Use getHours() to ensure 24-hour format (00-23) for server consistency
             const timeString = `${futureTime.getHours().toString().padStart(2, '0')}:${futureTime.getMinutes().toString().padStart(2, '0')}`;
+            
             const button = document.createElement('button');
-            button.className = 'time-option'; button.textContent = timeString; button.dataset.time = timeString;
-            if (i === 1) button.classList.add('active');
+            button.className = 'time-option'; 
+            button.textContent = timeString; 
+            button.dataset.time = timeString;
+            
+            if (i === 1) button.classList.add('active'); // Default select the first available minute
 
             button.addEventListener('click', () => {
                 timeScroller.querySelectorAll('.time-option').forEach(btn => btn.classList.remove('active'));
@@ -1117,7 +1134,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTradeButtonsDisabled(false); 
                 return; 
             }
-            tradeData.scheduledTime = activeTimeButton.dataset.time;
+            // CRITICAL: Send the HH:MM string to the server
+            tradeData.scheduledTime = activeTimeButton.dataset.time; 
             socket.emit("schedule_trade", tradeData);
         } else {
             socket.emit("trade", tradeData);
