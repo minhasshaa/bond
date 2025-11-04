@@ -397,13 +397,18 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     const [hour, minute] = scheduledTime.split(":").map(Number);
                     
                     const userScheduledTimeToday = new Date(serverNowUTC);
+                    // This assumes the time input is already in the user's local time, but we convert it to UTC for consistency.
+                    // For a reliable multi-user system, the client should send the desired UTC timestamp or the offset.
                     userScheduledTimeToday.setUTCHours(hour, minute, 0, 0); 
-
-                    const tenMinutesFromNow = new Date(serverNowUTC.getTime() + (10 * 60 * 1000));
                     
-                    if (userScheduledTimeToday <= serverNowUTC || userScheduledTimeToday > tenMinutesFromNow) {
-                        return socket.emit("error", { message: "Please select a time in the next 10 minutes." });
+                    // ----------------------------------------------------------------------
+                    // ✨ FIX: Validation Logic Adjusted to allow any future time
+                    // ----------------------------------------------------------------------
+                    if (userScheduledTimeToday <= serverNowUTC) {
+                        // Check if the scheduled time is the current minute or in the past
+                        return socket.emit("error", { message: "Please select a time in the future." });
                     }
+                    // ----------------------------------------------------------------------
 
                     const finalScheduleDtUTC = userScheduledTimeToday; 
                     finalScheduleDtUTC.setSeconds(0, 0); 
@@ -423,6 +428,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     io.to(user._id.toString()).emit("trade_scheduled", { trade, balance: freshUser.balance });
                 } catch (err) {
+                    console.error("Error in schedule_trade:", err.message);
                     socket.emit("error", { message: "Could not schedule trade." });
                 }
             });
@@ -507,24 +513,11 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
     try {
         const actives = await Trade.find({ status: "active", asset: pair });
         for (const t of actives) {
-            // CRITICAL FIX: Check if the trade's activation time is less than the settlement eligibility time.
-            // This ensures we only settle trades that were opened BEFORE this candle closed.
-            // For a 1-minute trade opened at T=10:00:00, we settle when the candle for 10:00:00 closes (at 10:01:00).
-            // We use the candle's start time (lastCompletedCandle.timestamp) to define the settlement boundary.
             
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
 
             // Settle the trade only if the trade was activated at the start of the completed candle's minute
-            // OR any time before it (which accounts for the trade being opened on the previous candle).
-            // We ensure the trade has spent at least one full candle cycle (1 minute).
-            
-            // To settle the trade on the *next* candle (the one that just finished closing), we simply check:
-            // Is the trade's activation minute equal to the previous completed candle's minute?
-            // Since the system pushes completed candles every minute, all active trades should be settled on the NEXT complete candle.
-            
-            // We rely on the fact that an active trade was opened in the minute *prior* to the minute of this completed candle.
-            
-            // Check if the trade's activation time (plus one minute) is less than or equal to the time this candle closes.
+            // This ensures the trade runs for one full 1-minute candle cycle.
             const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
 
             if (tradeShouldCloseBy <= settlementEligibilityTime) { // This condition should always be true for 1-minute trades
