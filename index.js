@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION TO FIX 418 RATE LIMITING ERROR
+// index.js - FINAL CORRECTED VERSION FOR STABILITY
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -137,9 +137,15 @@ async function fetchAndStore24hTicker() {
         console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
 
     } catch (err) {
-        // --- RATE LIMITING (418) FIX ---
-        if (err.response && err.response.status === 418) {
-             console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
+        // --- RATE LIMITING (418, 429) FIX ---
+        if (err.response) {
+            if (err.response.status === 418) {
+                console.error("❌ Failed to fetch 24h ticker data (HTTP 418 - I'm a teapot): LIKELY RATE LIMITED by Binance. Consider reducing frequency.");
+            } else if (err.response.status === 429) {
+                console.error("❌ Failed to fetch 24h ticker data (HTTP 429 - Too Many Requests): Rate limit exceeded.");
+            } else if (err.response.status === 403) {
+                console.error("❌ Failed to fetch 24h ticker data (HTTP 403 - Forbidden): Check API keys or IP access.");
+            }
         } else {
              console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
         }
@@ -170,6 +176,7 @@ async function getDashboardData(userId) {
     const assets = TRADE_PAIRS;
     const marketInfo = assets.map(pair => {
         const data = marketData[pair];
+        // Defensive check added: ensure data and price exist before accessing
         if (!data || typeof data.currentPrice !== 'number') return null;
 
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
@@ -179,7 +186,7 @@ async function getDashboardData(userId) {
             ticker: `${pair.replace('USDT', '')}/USD`,
             price: data.currentPrice,
             change: parseFloat(changeValue.toFixed(2)),
-            candles: data.candles
+            candles: data.candles // Will be empty if initializeMarketData failed for this pair
         };
     }).filter(Boolean);
 
@@ -232,7 +239,7 @@ io.on('connection', (socket) => {
 // ----- DASHBOARD DATA FUNCTIONS END -----
 
 
-// ------------------ CANDLE / MARKET DATA LOGIC (MINOR CHANGES) ------------------
+// ------------------ CANDLE / MARKET DATA LOGIC (CRITICAL FIX APPLIED) ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
     await fetchAndStore24hTicker(); 
@@ -241,6 +248,13 @@ async function initializeMarketData() {
         try {
             // Using futuresCandles since the logic below requires the future prices endpoint
             const klines = await binance.futuresCandles(pair, '1m', { limit: 200 });
+            
+            // ⭐ CRITICAL FIX: Ensure klines is a valid array before attempting to map it.
+            if (!Array.isArray(klines)) {
+                console.error(`❌ Failed to load initial candles for ${pair}: Received non-array data. Skipping pair.`);
+                continue; // Skip processing this pair if data is invalid
+            }
+
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
                 timestamp: new Date(k[0]),
@@ -252,8 +266,11 @@ async function initializeMarketData() {
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
             console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
+            
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}:`, (err && err.body) || err);
+            // Improved error logging for debugging API issues
+            const errorMessage = (err && err.body) ? `API Error Body: ${err.body}` : err.message || JSON.stringify(err);
+            console.error(`❌ Failed to load initial candles for ${pair}:`, errorMessage);
         }
     }
 }
@@ -272,7 +289,7 @@ async function updateMarketData() {
 
             const md = marketData[pair];
             const currentPrice = md.currentPrice || 0;
-            if (!currentPrice) continue;
+            if (!currentPrice) continue; // Skip if we have no price data
 
             const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
