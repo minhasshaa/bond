@@ -82,6 +82,14 @@
     @keyframes price-flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.3); } }
     .price-up { animation: price-flash-up 0.5s ease-out; }
     .price-down { animation: price-flash-down 0.5s ease-out; }
+    .time-scroller-container { overflow-x: auto; white-space: nowrap; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937; }
+    .time-scroller-container::-webkit-scrollbar { height: 6px; }
+    .time-scroller-container::-webkit-scrollbar-track { background: #1f2937; }
+    .time-scroller-container::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 3px; }
+    .time-scroller { display: inline-flex; gap: 10px; }
+    .time-option { padding: 8px 16px; background-color: #374151; color: #d1d5db; border: 1px solid transparent; border-radius: 9999px; cursor: pointer; font-weight: 500; transition: all 0.2s ease-in-out; }
+    .time-option:hover { background-color: #4b5563; }
+    .time-option.active { background-color: #3b82f6; color: white; font-weight: 700; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
     .asset-dropdown { position: relative; display: inline-block; }
     .asset-dropdown-btn { background-color: #374151; color: white; padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; border: 1px solid #4b5563; }
     .asset-dropdown-content { display: none; position: absolute; background-color: #1f2937; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5); z-index: 1; border-radius: 8px; border: 1px solid #4b5563; margin-top: 4px; padding: 4px; }
@@ -412,7 +420,18 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
             </div>
 
             <div id="trade-content" class="p-4 sm:p-6 space-y-6">
-                <!-- REMOVED: Schedule trade buttons and time selector -->
+
+                <div class="flex justify-center gap-4 bg-gray-900/50 p-2 rounded-xl">
+                    <button id="instantTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all">Instant Trade</button>
+                    <button id="scheduledTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all">Scheduled Trade</button>
+                </div>
+
+                <div id="scheduledContainer" class="hidden">
+                    <label class="text-sm text-gray-300 mb-2 block">Select Time</label>
+                    <div id="time-scroller-container" class="time-scroller-container">
+                        <div id="time-scroller" class="time-scroller"></div>
+                    </div>
+                </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                     <div>
@@ -482,11 +501,13 @@ if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
         <div class="p-8 text-center">
             <svg class="w-16 h-16 text-blue-500 mx-auto mb-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 id="pending-title" class="text-3xl font-bold mb-2">Trade Placed</h2>
+            <h2 id="pending-title" class="text-3xl font-bold mb-2">Trade Scheduled</h2>
             <p class="text-gray-400 text-lg">
                 Your <span id="pending-amount" class="font-bold text-white">$0.00</span> trade on
                 <span id="pending-asset" class="font-bold text-white">ASSET</span>
-                is pending execution.
+                <span id="pending-time-container">
+                    is set for <span id="pending-time" class="font-bold text-white">00:00:00</span>.
+                </span>
             </p>
             <button class="btn-close mt-8 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-10 rounded-lg w-full transition-all">
                 Got it
@@ -629,6 +650,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const tradeDownBtn = document.getElementById('tradeDown');
     const investmentInput = document.getElementById('investmentAmount');
     const tradeStatusElem = document.getElementById('tradeStatus');
+    const instantBtn = document.getElementById("instantTradeBtn");
+    const scheduledBtn = document.getElementById("scheduledTradeBtn");
+    const scheduledContainer = document.getElementById("scheduledContainer");
+    const timeScroller = document.getElementById("time-scroller");
     const assetDropdownBtn = document.getElementById('assetDropdownBtn');
     const selectedAssetSpan = document.getElementById('selectedAssetSpan');
     const assetDropdownContent = document.getElementById('assetDropdownContent');
@@ -666,7 +691,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const TRADES_PER_PAGE = 5;
 
     // State Variables
-    let marketData = {}, currentAsset = '', lastPrice = 0;
+    let marketData = {}, currentAsset = '', lastPrice = 0, isScheduled = false;
     let availableCopyTrades = []; 
     let tradeHistoryData = {};
     let assetPrices = {};
@@ -821,7 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- Asset Dropdown Logic ---
+    // --- Asset Dropdown Logic (No Change) ---
     assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
 
     window.onclick = (event) => {
@@ -850,6 +875,41 @@ document.addEventListener('DOMContentLoaded', () => {
     function setActiveAsset(asset) { 
         selectedAssetSpan.textContent = asset;
     }
+
+    // --- Time Scroller & Trade Mode (No Change) ---
+    function populateTimeSelector() {
+        const now = new Date();
+        timeScroller.innerHTML = '';
+        for (let i = 1; i <= 10; i++) {
+            const futureTime = new Date(now.getTime() + i * 60 * 1000);
+            const timeString = `${futureTime.getHours().toString().padStart(2, '0')}:${futureTime.getMinutes().toString().padStart(2, '0')}`;
+            const button = document.createElement('button');
+            button.className = 'time-option'; button.textContent = timeString; button.dataset.time = timeString;
+            if (i === 1) button.classList.add('active');
+
+            button.addEventListener('click', () => {
+                timeScroller.querySelectorAll('.time-option').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+            });
+            timeScroller.appendChild(button);
+        }
+    }
+
+    function setTradeMode(scheduled) {
+        isScheduled = scheduled;
+        if (isScheduled) {
+            scheduledBtn.classList.add('bg-yellow-600'); scheduledBtn.classList.remove('opacity-60');
+            instantBtn.classList.remove('bg-blue-600'); instantBtn.classList.add('opacity-60');
+            populateTimeSelector();
+            scheduledContainer.classList.remove("hidden");
+        } else {
+            instantBtn.classList.add('bg-blue-600'); instantBtn.classList.remove('opacity-60');
+            scheduledBtn.classList.remove('bg-yellow-600'); scheduledBtn.classList.add('opacity-60');
+            scheduledContainer.classList.add("hidden");
+        }
+    }
+    instantBtn.addEventListener("click", () => setTradeMode(false));
+    scheduledBtn.addEventListener("click", () => setTradeMode(true));
 
     // --- SOCKET.IO Event Handlers ---
 
@@ -965,6 +1025,12 @@ document.addEventListener('DOMContentLoaded', () => {
         showPendingPopup(data.trade);
     });
 
+    socket.on('trade_scheduled', (data) => { 
+        updateBalance(data.balance); 
+        addTradeToHistory(data.trade);
+        showScheduledPopup(data.trade);
+    });
+
     socket.on('trade_active', (data) => {
         tradeHistoryData[data.trade._id] = data.trade;
         const tradeRow = document.getElementById(`trade-${data.trade._id}`);
@@ -1044,8 +1110,18 @@ document.addEventListener('DOMContentLoaded', () => {
             openingPrice: currentPrice
         };
 
-        // REMOVED: Schedule trade logic - only instant trades now
-        socket.emit("trade", tradeData);
+        if (isScheduled) {
+            const activeTimeButton = timeScroller.querySelector('.time-option.active');
+            if (!activeTimeButton) { 
+                showStatus('Please select a time.', 'red'); 
+                setTradeButtonsDisabled(false); 
+                return; 
+            }
+            tradeData.scheduledTime = activeTimeButton.dataset.time;
+            socket.emit("schedule_trade", tradeData);
+        } else {
+            socket.emit("trade", tradeData);
+        }
     };
     tradeUpBtn.addEventListener("click", () => requestTrade("UP"));
     tradeDownBtn.addEventListener("click", () => requestTrade("DOWN"));
@@ -1127,10 +1203,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result === 'WIN') statusClass = 'status-win';
         else if (result === 'LOSS') statusClass = 'status-loss';
         else if (status.toLowerCase() === 'active') statusClass = 'status-active';
-        else if (status.toLowerCase() === 'pending') statusClass = 'status-pending';
+        else if (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled') statusClass = 'status-pending';
 
         let statusContent = `<span class="status-badge ${statusClass}">${statusText}</span>`;
-        if (status.toLowerCase() === 'pending') {
+        if (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled') {
             statusContent += ` <button onclick="event.stopPropagation(); cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
         }
         statusContainer.innerHTML = statusContent;
@@ -1270,9 +1346,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Popup Content Setters ---
 
     function showPendingPopup(trade) {
-        document.getElementById('pending-title').textContent = 'Trade Placed';
+        document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
         document.getElementById('pending-asset').textContent = trade.asset;
+        document.getElementById('pending-time-container').style.display = 'none';
+        showModal(modalPending);
+    }
+
+    function showScheduledPopup(trade) {
+        document.getElementById('pending-title').textContent = 'Trade Scheduled';
+        document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
+        document.getElementById('pending-asset').textContent = trade.asset;
+        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
+        document.getElementById('pending-time-container').style.display = 'inline';
         showModal(modalPending);
     }
 
@@ -1374,6 +1460,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Initializations ---
+    setTradeMode(false);
+    populateTimeSelector();
+    setInterval(populateTimeSelector, 60000);
     setInterval(() => socket.emit('request_copy_trades'), 30000); 
 
 });
