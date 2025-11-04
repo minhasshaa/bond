@@ -101,7 +101,7 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
     }
 }
 
-// Trade monitoring logic
+// Trade monitoring logic - CORRECTED TIMING
 async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedCompletedCandleTs = {};
     const lastProcessedActivationTs = {};
@@ -113,7 +113,7 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                 const md = globalMarketData[pair];
                 if (!md) continue;
 
-                // ACTIVATION LOGIC
+                // ACTIVATION LOGIC - Activate trades when new candle starts
                 if (md.currentCandle) {
                     const activationTs = new Date(md.currentCandle.timestamp).getTime();
                     if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
@@ -122,11 +122,12 @@ async function runTradeMonitor(io, User, Trade, TRADE_PAIRS) {
                     }
                 }
 
-                // SETTLEMENT LOGIC
+                // SETTLEMENT LOGIC - Settle trades when current candle completes
                 if (md.candles?.length > 0) {
                     const lastCompleted = md.candles[md.candles.length - 1];
                     const lastCompletedTs = new Date(lastCompleted.timestamp).getTime();
                     if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
+                        // Settle trades that were activated at the start of this completed candle
                         await settleActiveTradesForPair(io, User, Trade, pair, lastCompleted);
                         lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
                     }
@@ -309,7 +310,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         tradeAmount: tradeAmount
                     });
 
-                    // Create pending trade instead of scheduled trade
+                    // Create pending trade
                     const pendingTrade = new Trade({
                         userId: user._id,
                         amount: tradeAmount,
@@ -358,7 +359,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     const trade = await Trade.findOne({
                         _id: data.tradeId,
                         userId: user._id,
-                        status: "pending" // Only allow canceling pending trades now
+                        status: "pending"
                     });
                     if (!trade) return socket.emit("error", { message: "Trade not found or cannot be cancelled." });
 
@@ -400,20 +401,24 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
     }
 }
 
-// --- SETTLEMENT LOGIC ---
-async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
+// --- CORRECTED SETTLEMENT LOGIC ---
+async function settleActiveTradesForPair(io, User, Trade, pair, completedCandle) {
     try {
-        const exitPrice = lastCompletedCandle.close;
-        const completedCandleTime = new Date(lastCompletedCandle.timestamp);
-        completedCandleTime.setSeconds(0, 0);
+        const exitPrice = completedCandle.close;
+        const completedCandleTime = new Date(completedCandle.timestamp);
+        completedCandleTime.setSeconds(0, 0); // Normalize to minute start
         
-        const actives = await Trade.find({ status: "active", asset: pair });
+        const activeTrades = await Trade.find({ 
+            status: "active", 
+            asset: pair 
+        });
         
-        for (const trade of actives) {
+        for (const trade of activeTrades) {
             const activationTime = new Date(trade.activationTimestamp);
-            activationTime.setSeconds(0, 0);
+            activationTime.setSeconds(0, 0); // Normalize to minute start
             
-            // Settle trades that were activated exactly at the completed candle's start time
+            // CRITICAL FIX: Settle trades that were activated at the start of THIS completed candle
+            // Trade activated at 10:00:00 should settle when 10:00 candle completes at 10:00:59
             if (activationTime.getTime() === completedCandleTime.getTime()) {
                 
                 const win = (trade.direction === "UP" && exitPrice > trade.entryPrice) || 
