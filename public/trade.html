@@ -3,636 +3,821 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trade - Trading App</title>
+<title>Trade - TradePro</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-    body { 
-        font-family: 'Inter', sans-serif; 
-        padding-bottom: 80px; 
-        background-color: #0c1021; 
+    :root {
+        --bg-primary: #050b18;
+        --bg-secondary: #0a1628;
+        --bg-card: #0d1f3c;
+        --accent-blue: #3b82f6;
+        --accent-gold: #f59e0b;
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --border-color: rgba(59, 130, 246, 0.15);
+        --text-primary: #f0f4ff;
+        --text-secondary: #8899bb;
     }
 
-    /* 5-ITEM Bottom Nav Style (Fixed) - MATCHED FROM DASHBOARD */
-    .bottom-nav { 
-        position: fixed; 
-        bottom: 0; 
-        left: 0; 
-        width: 100%; 
-        display: flex; 
-        justify-content: space-around; 
-        z-index: 1000; 
-        background-color: #111827; 
-        border-top: 1px solid #374151; 
-        padding: 8px 0; 
-    }
-    .nav-link { 
-        display: flex; 
-        flex-direction: column; 
-        align-items: center; 
-        justify-content: center; 
-        flex-grow: 1; 
-        text-decoration: none; 
-        color: #9ca3af; 
-        font-weight: 500; 
-        font-size: 0.75rem; /* 12px */
-        transition: all 0.2s ease-in-out; 
-        gap: 4px; 
-        width: 20%; 
-    }
-    .nav-link svg { 
-        width: 24px; 
-        height: 24px; 
-    }
-    .nav-link.active { 
-        color: #4ade80; 
-        font-weight: 600; 
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        font-family: 'Inter', sans-serif;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        padding-bottom: 90px;
+        min-height: 100vh;
+        background-image:
+            radial-gradient(ellipse at 20% 0%, rgba(59,130,246,0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 80% 0%, rgba(245,158,11,0.05) 0%, transparent 50%);
     }
 
-    /* --- TAB PILL STYLING (MATCHES DASHBOARD) --- */
-    .tab-link {
-        padding: 0.5rem 1rem; /* 8px 16px */
-        font-weight: 600;
-        font-size: 0.875rem; /* 14px */
-        color: #9ca3af; /* Default gray text */
-        border-radius: 9999px; /* full pill */
-        transition: all 0.2s;
-        border: none;
-        background-color: transparent;
-    }
-    .tab-link.active-pill {
-        color: #111827; /* Dark text */
-        background-color: #4ade80; /* Bright green pill */
-    }
-    /* --- End of Tab Styling --- */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: var(--accent-blue); border-radius: 2px; }
 
-    /* Original trade.html styles follow */
-    .status-badge { padding: 4px 10px; border-radius: 9999px; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; line-height: 1; display: inline-block; }
-    .status-win { background-color: rgba(34, 197, 94, 0.2); color: #22c55e; }
-    .status-loss { background-color: rgba(239, 68, 68, 0.2); color: #ef4444; }
-    .status-active { background-color: rgba(234, 179, 8, 0.2); color: #eab308; }
-    .status-pending { background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-    .status-default { background-color: rgba(107, 114, 128, 0.2); color: #9ca3af; }
-    .cancel-btn { background-color: #f59e0b; color: white; border: none; padding: 2px 6px; font-size: 0.7rem; border-radius: 4px; cursor: pointer; margin-left: 8px; }
-    input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-    input[type="number"] { -moz-appearance: textfield; }
-    @keyframes price-flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(34,197,94,0.3); } }
-    @keyframes price-flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.3); } }
-    .price-up { animation: price-flash-up 0.5s ease-out; }
-    .price-down { animation: price-flash-down 0.5s ease-out; }
-    .time-scroller-container { overflow-x: auto; white-space: nowrap; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: #4b5563 #1f2937; }
-    .time-scroller-container::-webkit-scrollbar { height: 6px; }
-    .time-scroller-container::-webkit-scrollbar-track { background: #1f2937; }
-    .time-scroller-container::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 3px; }
-    .time-scroller { display: inline-flex; gap: 10px; }
-    .time-option { padding: 8px 16px; background-color: #374151; color: #d1d5db; border: 1px solid transparent; border-radius: 9999px; cursor: pointer; font-weight: 500; transition: all 0.2s ease-in-out; }
-    .time-option:hover { background-color: #4b5563; }
-    .time-option.active { background-color: #3b82f6; color: white; font-weight: 700; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+    /* ---- GLASS CARD ---- */
+    .glass-card {
+        background: rgba(13,31,60,0.6);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 16px;
+    }
+
+    /* ---- HEADER ---- */
+    .trade-header {
+        background: rgba(13,31,60,0.8);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+
+    /* ---- ASSET DROPDOWN ---- */
     .asset-dropdown { position: relative; display: inline-block; }
-    .asset-dropdown-btn { background-color: #374151; color: white; padding: 8px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; border: 1px solid #4b5563; }
-    .asset-dropdown-content { display: none; position: absolute; background-color: #1f2937; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5); z-index: 1; border-radius: 8px; border: 1px solid #4b5563; margin-top: 4px; padding: 4px; }
-    .asset-dropdown-content a { color: #d1d5db; padding: 10px 14px; text-decoration: none; display: block; border-radius: 6px; }
-    .asset-dropdown-content a:hover { background-color: #4b5563; }
+    .asset-dropdown-btn {
+        background: rgba(5,11,24,0.8);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 14px;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 15px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: 'Inter', sans-serif;
+        transition: border-color 0.2s;
+    }
+    .asset-dropdown-btn:hover { border-color: rgba(59,130,246,0.4); }
+    .asset-dropdown-content {
+        display: none;
+        position: absolute;
+        background: #0a1628;
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        min-width: 160px;
+        z-index: 100;
+        margin-top: 6px;
+        padding: 6px;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    }
+    .asset-dropdown-content a {
+        color: var(--text-secondary);
+        padding: 9px 12px;
+        text-decoration: none;
+        display: block;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        transition: all 0.15s;
+    }
+    .asset-dropdown-content a:hover {
+        background: rgba(59,130,246,0.1);
+        color: var(--text-primary);
+    }
     .show { display: block; }
 
-    /* Copy Trade Specific Styles */
-    .copy-trade-card { 
-        background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 100%); 
-        border: 1px solid #4f46e5; 
-        position: relative;
+    /* ---- PRICE DISPLAY ---- */
+    .current-price {
+        font-size: 28px;
+        font-weight: 800;
+        color: var(--text-primary);
+        font-family: 'Inter', monospace;
+        letter-spacing: -0.5px;
     }
-    .copy-trade-card.expiring { 
-        background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); 
-        border-color: #ef4444; 
+
+    /* ---- TIMER ---- */
+    .timer-box {
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.2);
+        border-radius: 12px;
+        padding: 10px 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 12px;
     }
-    .copy-btn { 
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
+    .timer-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: white;
+        font-family: 'Inter', monospace;
+    }
+    .timer-value.warning { color: #f59e0b; }
+    .timer-value.critical { color: #ef4444; animation: blink 0.5s infinite; }
+    @keyframes blink { 50% { opacity: 0.6; } }
+
+    /* ---- TABS ---- */
+    .tab-container {
+        background: rgba(5,11,24,0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 4px;
+        display: flex;
+        gap: 4px;
+        margin-bottom: 16px;
+    }
+    .tab-btn {
+        flex: 1;
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
+    .tab-btn.active {
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        color: white;
+        box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+    }
+
+    /* ---- AMOUNT INPUT ---- */
+    .amount-input {
+        width: 100%;
+        background: rgba(5,11,24,0.8);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 13px 16px;
+        color: var(--text-primary);
+        font-size: 16px;
+        font-weight: 600;
+        font-family: 'Inter', sans-serif;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+    .amount-input:focus { border-color: rgba(59,130,246,0.5); }
+    .amount-input::placeholder { color: var(--text-secondary); font-weight: 400; }
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    input[type="number"] { -moz-appearance: textfield; }
+
+    /* ---- TRADE BUTTONS ---- */
+    .btn-up {
+        flex: 1;
+        padding: 16px;
+        background: linear-gradient(135deg, #10b981, #059669);
+        border: none;
+        border-radius: 14px;
+        color: white;
+        font-size: 16px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 16px rgba(16,185,129,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+    .btn-up:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
+    .btn-up:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .btn-down {
+        flex: 1;
+        padding: 16px;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        border: none;
+        border-radius: 14px;
+        color: white;
+        font-size: 16px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 16px rgba(239,68,68,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+    .btn-down:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239,68,68,0.4); }
+    .btn-down:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* ---- QUICK AMOUNT CHIPS ---- */
+    .amount-chip {
+        padding: 6px 14px;
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.2);
+        border-radius: 8px;
+        color: #60a5fa;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+        font-family: 'Inter', sans-serif;
+    }
+    .amount-chip:hover {
+        background: rgba(59,130,246,0.2);
+        border-color: rgba(59,130,246,0.4);
+    }
+
+    /* ---- TRADE HISTORY ---- */
+    .trade-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        background: rgba(5,11,24,0.5);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .trade-row:hover {
+        background: rgba(59,130,246,0.06);
+        border-color: rgba(59,130,246,0.25);
+    }
+
+    /* ---- STATUS BADGES ---- */
+    .badge {
+        padding: 3px 9px;
+        border-radius: 7px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .badge-win { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+    .badge-loss { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+    .badge-active { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
+    .badge-pending { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+    .badge-default { background: rgba(136,153,187,0.12); color: var(--text-secondary); border: 1px solid var(--border-color); }
+
+    .cancel-btn {
+        padding: 3px 8px;
+        background: rgba(245,158,11,0.12);
+        border: 1px solid rgba(245,158,11,0.2);
+        color: #f59e0b;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        margin-left: 6px;
+        transition: all 0.15s;
+    }
+    .cancel-btn:hover { background: rgba(245,158,11,0.2); }
+
+    /* ---- COPY TRADE CARD ---- */
+    .copy-card {
+        background: rgba(13,31,60,0.6);
+        border: 1px solid rgba(59,130,246,0.2);
+        border-radius: 16px;
+        padding: 16px;
         transition: all 0.2s;
     }
-    .copy-btn:hover { 
-        background: linear-gradient(135deg, #059669 0%, #047857 100%); 
-        transform: scale(1.02);
-    }
-    .copy-btn:disabled { 
-        background: #6b7280; 
-        cursor: not-allowed; 
+    .copy-card:hover { border-color: rgba(59,130,246,0.4); }
+    .copy-card.expiring {
+        border-color: rgba(239,68,68,0.3);
+        background: rgba(239,68,68,0.05);
     }
 
-    @keyframes modal-in {
-    from { opacity: 0; transform: scale(0.9); }
-    to { opacity: 1; transform: scale(1); }
+    .copy-btn {
+        width: 100%;
+        padding: 11px;
+        background: linear-gradient(135deg, #10b981, #059669);
+        border: none;
+        border-radius: 10px;
+        color: white;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 12px rgba(16,185,129,0.25);
     }
-    @keyframes modal-out {
-    from { opacity: 1; transform: scale(1); }
-    to { opacity: 0; transform: scale(0.9); }
+    .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
+    .copy-btn:disabled { background: rgba(107,114,128,0.3); cursor: not-allowed; transform: none; box-shadow: none; color: var(--text-secondary); }
+
+    /* ---- PRICE FLASH ---- */
+    @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
+    @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
+    .price-up { animation: flash-up 0.5s ease-out; border-radius: 6px; }
+    .price-down { animation: flash-down 0.5s ease-out; border-radius: 6px; }
+
+    /* ---- MODALS ---- */
+    .modal-overlay {
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.75);
+        z-index: 9998;
+        display: none;
+        align-items: center;
+        justify-content: center;
     }
-    @keyframes toast-in {
-    from { opacity: 0; transform: translateY(-100%); }
-    to { opacity: 1; transform: translateY(0); }
+    .modal-overlay.show { display: flex; }
+
+    .modal {
+        position: fixed; inset: 0;
+        z-index: 9999;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
     }
-    @keyframes toast-out {
-    from { opacity: 1; transform: translateY(0); }
-    to { opacity: 0; transform: translateY(-100%); }
+    .modal.show { display: flex; }
+
+    .modal-card {
+        background: #0d1f3c;
+        border: 1px solid var(--border-color);
+        border-radius: 24px;
+        padding: 32px 28px;
+        width: 100%; max-width: 360px;
+        text-align: center;
+        animation: popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
+        position: relative;
+        overflow: hidden;
     }
-    @keyframes pulse-live {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
-    }
-    @keyframes confetti-fall {
-    0% { transform: translateY(-100%) rotateZ(0deg); opacity: 1; }
-    100% { transform: translateY(300px) rotateZ(360deg); opacity: 0; }
+    .modal-card.win-card { border-color: rgba(16,185,129,0.4); }
+    .modal-card.loss-card { border-color: rgba(239,68,68,0.3); }
+    @keyframes popIn { 0% { transform:scale(0.85); opacity:0; } 100% { transform:scale(1); opacity:1; } }
+
+    .modal-icon {
+        width: 64px; height: 64px;
+        border-radius: 20px;
+        display: flex; align-items: center; justify-content: center;
+        margin: 0 auto 20px;
     }
 
-    .modal, .modal-overlay { z-index: 9998; }
-    .toast { z-index: 9999; }
-
-    .modal.show, .modal-overlay.show {
-    display: flex;
-    animation: modal-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    .btn-modal-close {
+        width: 100%;
+        padding: 13px;
+        border: none;
+        border-radius: 14px;
+        color: white;
+        font-weight: 700;
+        font-size: 15px;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        margin-top: 20px;
+        transition: all 0.2s;
     }
-    .modal.hide, .modal-overlay.hide {
-    animation: modal-out 0.2s ease-out forwards;
+    .btn-modal-close:hover { transform: translateY(-1px); }
+
+    /* ---- TOAST ---- */
+    .toast {
+        position: fixed;
+        top: 20px; left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: none;
     }
     .toast.show {
-    display: flex;
-    animation: toast-in 0.4s ease-out forwards;
+        display: flex;
+        animation: slideDown 0.4s ease-out;
     }
-    .toast.hide {
-    animation: toast-out 0.3s ease-in forwards;
+    @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
+    .toast-inner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 20px;
+        border-radius: 14px;
+        font-weight: 600;
+        font-size: 14px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
-    .live-dot {
-    animation: pulse-live 1.5s infinite;
-    }
+
+    /* ---- LIVE DOT ---- */
+    .live-dot { animation: pulse-live 1.5s infinite; }
+    @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+    /* ---- CONFETTI ---- */
     .confetti-particle {
-    position: absolute;
-    width: 8px;
-    height: 16px;
-    background-color: #f00;
-    opacity: 0;
-    animation: confetti-fall 2s ease-out forwards;
+        position: absolute;
+        width: 8px; height: 14px;
+        opacity: 0;
+        animation: confetti-fall 2s ease-out forwards;
+    }
+    @keyframes confetti-fall {
+        0% { transform: translateY(-100%) rotateZ(0deg); opacity: 1; }
+        100% { transform: translateY(320px) rotateZ(360deg); opacity: 0; }
     }
 
-    .header-container {
-    background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
-    border-radius: 12px;
-    padding: 16px;
-    border: 1px solid #374151;
-    margin-bottom: 20px;
+    /* ---- LOAD MORE ---- */
+    .btn-load-more {
+        width: 100%;
+        padding: 10px;
+        background: rgba(59,130,246,0.08);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.2s;
+        margin-top: 8px;
+    }
+    .btn-load-more:hover { background: rgba(59,130,246,0.15); color: var(--text-primary); }
+    .btn-load-more:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ---- SECTION LABEL ---- */
+    .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
     }
 
-    .asset-price-section {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
+    /* ---- SKELETON ---- */
+    .skeleton {
+        background: linear-gradient(90deg, rgba(13,31,60,0.8) 25%, rgba(59,130,246,0.05) 50%, rgba(13,31,60,0.8) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 10px;
+    }
+    @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
+
+    /* ---- BOTTOM NAV ---- */
+    .bottom-nav {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: rgba(10,22,40,0.95);
+        backdrop-filter: blur(20px);
+        border-top: 1px solid var(--border-color);
+        padding: 10px 0 20px;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        z-index: 1000;
+    }
+    .nav-item {
+        display: flex; flex-direction: column;
+        align-items: center; gap: 4px;
+        text-decoration: none;
+        color: var(--text-secondary);
+        font-size: 11px; font-weight: 500;
+        flex: 1; transition: all 0.2s;
+        position: relative; padding: 4px 0;
+    }
+    .nav-item svg { width: 22px; height: 22px; }
+    .nav-item.active { color: var(--accent-blue); }
+    .nav-item.active::before {
+        content: '';
+        position: absolute;
+        top: -10px; left: 50%;
+        transform: translateX(-50%);
+        width: 32px; height: 3px;
+        background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        border-radius: 0 0 4px 4px;
     }
 
-    .asset-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    /* ---- TRADE DETAILS MODAL ---- */
+    .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-color);
     }
-
-    .price-info {
-    text-align: right;
-    }
-
-    .current-price {
-    font-size: 1.75rem;
-    font-weight: 700;
-    color: #4ade80; 
-    font-family: 'Inter', monospace;
-    }
-
-    .timer-section {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: rgba(59, 130, 246, 0.1);
-    padding: 12px 16px;
-    border-radius: 8px;
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    }
-
-    .timer-label {
-    color: #93c5fd;
-    font-weight: 600;
-    font-size: 0.875rem;
-    }
-
-    .timer-value {
-    font-size: 1.125rem;
-    font-weight: 700;
-    color: white;
-    font-family: 'Inter', monospace;
-    }
-
-    .timer-value.warning {
-    color: #fbbf24;
-    animation: pulse 1s infinite;
-    }
-
-    .timer-value.critical {
-    color: #ef4444;
-    animation: pulse 0.5s infinite;
-    }
-
-    @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-    }
-
-    .trade-details-modal {
-    background: #1f2937;
-    border-radius: 16px;
-    padding: 0;
-    max-width: 400px;
-    width: 90%;
-    border: 1px solid #374151;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-    }
-
-    .trade-details-header {
-    background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
-    padding: 20px 24px;
-    border-bottom: 1px solid #374151;
-    border-radius: 16px 16px 0 0;
-    }
-
-    .trade-details-title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: white;
-    margin: 0;
-    }
-
-    .trade-details-body {
-    padding: 24px;
-    }
-
-    .trade-detail-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 0;
-    border-bottom: 1px solid #374151;
-    }
-
-    .trade-detail-row:last-child {
-    border-bottom: none;
-    }
-
-    .trade-detail-label {
-    color: #9ca3af;
-    font-weight: 500;
-    font-size: 0.875rem;
-    }
-
-    .trade-detail-value {
-    color: white;
-    font-weight: 600;
-    font-size: 0.875rem;
-    }
-
-    .trade-detail-pnl {
-    background: rgba(34, 197, 94, 0.1);
-    padding: 16px;
-    border-radius: 12px;
-    margin-top: 16px;
-    border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-
-    .trade-detail-pnl.loss {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.3);
-    }
-
-    .trade-detail-pnl .trade-detail-label {
-    color: #d1d5db;
-    font-size: 1rem;
-    }
-
-    .trade-detail-pnl .trade-detail-value {
-    font-size: 1.25rem;
-    }
-
-    .trade-detail-pnl .trade-detail-value.positive {
-    color: #10b981;
-    }
-
-    .trade-detail-pnl .trade-detail-value.negative {
-    color: #ef4444;
-    }
-
-    .close-trade-details {
-    background: #374151;
-    color: white;
-    border: none;
-    padding: 12px 24px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    width: 100%;
-    margin-top: 16px;
-    transition: background-color 0.2s;
-    }
-
-    .close-trade-details:hover {
-    background: #4b5563;
-    }
-
-    #loadMoreTradesBtn {
-    background-color: #374151;
-    transition: background-color 0.2s ease-in-out;
-    }
-    #loadMoreTradesBtn:hover {
-    background-color: #4b5563;
-    }
-    #loadMoreTradesBtn:disabled {
-    background-color: #1f2937;
-    color: #6b7280;
-    cursor: not-allowed;
-    }
-
+    .detail-row:last-child { border-bottom: none; }
 </style>
 </head>
 
-<body class="text-gray-100">
+<body>
 <script>
-if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
+    if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
 </script>
 
-<div class="container mx-auto p-4 max-w-4xl">
-    <header class="flex justify-between items-center mb-6">
+<div class="container mx-auto px-4 pt-5 max-w-5xl">
+
+    <!-- ===== HEADER ===== -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
         <div>
-            <h1 class="text-2xl font-bold text-white">Trading</h1>
-            <p class="text-gray-400">Place your trades on the live market</p>
+            <h1 style="font-size:20px; font-weight:800; color:var(--text-primary);">Trading</h1>
+            <p style="font-size:12px; color:var(--text-secondary);">Live binary options market</p>
         </div>
+        <div style="text-align:right;">
+            <p style="font-size:11px; color:var(--text-secondary);">Balance</p>
+            <p id="balance-display" style="font-size:20px; font-weight:800; color:#10b981;">$0.00</p>
+        </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr; gap:16px;">
+
+        <!-- ===== LEFT COLUMN ===== -->
         <div>
-            <p class="text-lg">Balance: <span id="balance-display" class="font-bold text-green-400">$0.00</span></p>
-        </div>
-    </header>
-
-    <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        <div class="lg:col-span-2 space-y-4">
-
-            <div>
-
-                <div class="header-container !mb-4">
-                    <div class="asset-price-section !mb-2">
-                        <div class="asset-info">
-                            <div class="asset-dropdown">
-                                <button id="assetDropdownBtn" class="asset-dropdown-btn">
-                                    <span id="selectedAssetSpan">Select Asset</span>
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                                </button>
-                                <div id="assetDropdownContent" class="asset-dropdown-content"></div>
-                            </div>
-                        </div>
-                        <div class="price-info">
-                            <div class="current-price" id="currentPrice">-.--</div>
-                        </div>
+            <!-- Asset Header -->
+            <div class="trade-header">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div class="asset-dropdown">
+                        <button id="assetDropdownBtn" class="asset-dropdown-btn">
+                            <span id="selectedAssetSpan">Select Asset</span>
+                            <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                        <div id="assetDropdownContent" class="asset-dropdown-content"></div>
                     </div>
-
-                    <div class="timer-section">
-                        <div class="timer-label">NEXT CANDLE IN</div>
-                        <div id="countdownSeconds" class="timer-value">--</div>
+                    <div style="text-align:right;">
+                        <p class="section-label" style="margin-bottom:2px;">Current Price</p>
+                        <p id="currentPrice" class="current-price">-.--</p>
                     </div>
                 </div>
-
-                <div id="candlestickContainer" style="width: 100%; height: 400px;" class="bg-gray-900 rounded-lg"></div>
+                <div class="timer-box">
+                    <span style="font-size:12px; font-weight:600; color:#60a5fa;">NEXT CANDLE IN</span>
+                    <span id="countdownSeconds" class="timer-value">--</span>
+                </div>
             </div>
 
-            <div class="h-px bg-gray-700 mx-auto w-full max-w-lg lg:max-w-none"></div>
+            <!-- Chart -->
+            <div class="glass-card" style="padding:0; overflow:hidden; margin-bottom:16px;">
+                <div id="candlestickContainer" style="width:100%; height:320px;"></div>
+            </div>
 
-            <div class="bg-gray-800/50 p-1 rounded-full flex justify-between space-x-1" id="trade-tab-container">
-                <button class="tab-link active-pill w-1/2" data-tab="trade">
-                    <svg class="w-5 h-5 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+            <!-- Tabs -->
+            <div class="tab-container">
+                <button class="tab-btn active" data-tab="trade">
+                    <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                    </svg>
                     Live Trade
                 </button>
-                <button class="tab-link w-1/2" data-tab="copy-trade">
-                    <svg class="w-5 h-5 inline mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2m4 0l3-3m0 0l-3-3m0 3h-3m-6 0l-3 3m0 0l3 3"></path></svg>
+                <button class="tab-btn" data-tab="copy-trade">
+                    <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
+                    </svg>
                     Copy Trade
                 </button>
             </div>
 
-            <div id="trade-content" class="p-4 sm:p-6 space-y-6">
-                
-                <div class="flex justify-center gap-4 bg-gray-900/50 p-2 rounded-xl">
-                    <button id="instantTradeBtn" class="flex-1 px-4 py-2 rounded-lg text-white font-semibold transition-all bg-blue-600">Instant Trade</button>
+            <!-- Live Trade Panel -->
+            <div id="trade-content" class="glass-card" style="margin-bottom:16px;">
+                <p class="section-label" style="margin-bottom:12px;">Investment Amount</p>
+                <input type="number" id="investmentAmount" min="0.5" step="0.01"
+                    class="amount-input" placeholder="Enter amount (min $0.50)" style="margin-bottom:10px;">
+
+                <!-- Quick Amount Chips -->
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <button class="amount-chip" data-amount="10">$10</button>
+                    <button class="amount-chip" data-amount="25">$25</button>
+                    <button class="amount-chip" data-amount="50">$50</button>
+                    <button class="amount-chip" data-amount="100">$100</button>
+                    <button class="amount-chip" data-amount="250">$250</button>
+                </div>
+
+                <div style="display:flex; gap:10px;">
+                    <button id="tradeUp" class="btn-up">
+                        <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+                        </svg>
+                        UP
+                    </button>
+                    <button id="tradeDown" class="btn-down">
+                        <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                        </svg>
+                        DOWN
+                    </button>
+                </div>
+
+                <div id="tradeStatus" style="margin-top:12px; min-height:20px; text-align:center; font-size:13px; font-weight:600;"></div>
+            </div>
+
+            <!-- Copy Trade Panel -->
+            <div id="copy-trade-content" class="glass-card" style="display:none; margin-bottom:16px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+                    <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(59,130,246,0.3);">
+                        <svg style="width:16px;height:16px;color:white;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
+                        </svg>
                     </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                     <div>
-                        <label for="investmentAmount" class="text-sm font-medium text-gray-300">Amount ($)</label>
-                        <input type="number" id="investmentAmount" min="0.5" step="0.01" class="w-full mt-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-green-400 focus:border-green-400" placeholder="e.g., 10.00">
-                    </div>
-                    <div class="md:col-span-2 grid grid-cols-2 gap-4 pt-5">
-                        <button id="tradeUp" class="w-full py-3 font-bold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-transform transform hover:scale-105 shadow-md shadow-green-900/50">UP</button>
-                        <button id="tradeDown" class="w-full py-3 font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-transform transform hover:scale-105 shadow-md shadow-red-900/50">DOWN</button>
+                        <p style="font-weight:700; font-size:15px;">Available Copy Trades</p>
+                        <p style="font-size:11px; color:var(--text-secondary);">Follow expert traders automatically</p>
                     </div>
                 </div>
 
-                <div id="tradeStatus" class="text-center min-h-[24px] font-semibold"></div>
-            </div>
-
-            <div id="copy-trade-content" class="space-y-6 hidden p-4 sm:p-6">
-                <section id="copyTradesSection" class="overflow-hidden">
-                    <div class="bg-gradient-to-r from-blue-600 to-purple-700 p-4 rounded-xl">
-                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2m4 0l3-3m0 0l-3-3m0 3h-3m-6 0l-3 3m0 0l3 3"></path>
-                            </svg>
-                            Available Copy Trades
-                        </h2>
-                        <p class="text-blue-100 text-sm">Follow expert traders automatically</p>
-                    </div>
-
-                    <div id="copyTradesContainer" class="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                        <div id="loadingPlaceholder" class="text-center py-8 text-blue-400 animate-pulse">
-                            <svg class="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.836 0H20v-5m-1.418 5L12 15M4 12a8 8 0 0116 0z"></path>
-                            </svg>
-                            <p>Loading available copy trades...</p>
-                        </div>
-                        <div id="noCopyTrades" class="text-center py-8 text-gray-400 hidden">
-                            <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                            <p>No copy trades available right now.</p>
-                            <p class="text-sm">Trades update every minute. Check back soon!</p>
-                        </div>
-                    </div>
-
-                    <div id="copyTradeStatus" class="px-4 pb-4 text-center text-sm min-h-[20px] text-red-400"></div>
-                </section>
-            </div>
-
-
-        </div>
-
-
-        <div class="space-y-6 lg:col-span-1">
-            <div class="p-4 space-y-4">
-                <h2 class="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">Trade History</h2>
-                <div id="tradeHistoryContainer" class="overflow-y-auto h-96 pr-2 space-y-2">
+                <div id="loadingPlaceholder" style="text-align:center; padding:24px 0;">
+                    <div class="skeleton" style="height:80px; margin-bottom:10px;"></div>
+                    <div class="skeleton" style="height:80px;"></div>
                 </div>
-                <button id="loadMoreTradesBtn" class="w-full mt-4 py-2 px-4 font-semibold rounded-lg hidden bg-gray-700/50">
-                    Load More
-                </button>
+
+                <div id="noCopyTrades" style="display:none; text-align:center; padding:24px 0;">
+                    <p style="font-size:13px; color:var(--text-secondary);">No copy trades available right now.</p>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Check back soon!</p>
+                </div>
+
+                <div id="copyTradesContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+                <div id="copyTradeStatus" style="margin-top:10px; text-align:center; font-size:13px; font-weight:500;"></div>
             </div>
         </div>
-    </main>
-</div>
 
-<div id="modal-overlay" class="modal-overlay hidden fixed inset-0 bg-black/70 items-center justify-center"></div>
-<div id="modal-pending" class="modal hidden fixed inset-0 items-center justify-center p-4">
-    <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
-        <div class="p-8 text-center">
-            <svg class="w-16 h-16 text-blue-500 mx-auto mb-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 id="pending-title" class="text-3xl font-bold mb-2">Trade Pending</h2>
-            <p class="text-gray-400 text-lg">
-                Your <span id="pending-amount" class="font-bold text-white">$0.00</span> trade on
-                <span id="pending-asset" class="font-bold text-white">ASSET</span>
-                <span id="pending-time-container" style="display: none;">
-                    is set for <span id="pending-time" class="font-bold text-white">00:00:00</span>.
-                </span>
-            </p>
-            <button class="btn-close mt-8 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-10 rounded-lg w-full transition-all">
-                Got it
-            </button>
+        <!-- ===== TRADE HISTORY ===== -->
+        <div class="glass-card">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+                <div style="width:32px;height:32px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);display:flex;align-items:center;justify-content:center;">
+                    <svg style="width:16px;height:16px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                </div>
+                <p style="font-weight:700; font-size:15px;">Trade History</p>
+            </div>
+            <div id="tradeHistoryContainer" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto;"></div>
+            <button id="loadMoreTradesBtn" class="btn-load-more" style="display:none;">Load More</button>
         </div>
+
     </div>
 </div>
-<div id="toast-active" class="toast hidden fixed top-5 left-1/2 -translate-x-1/2">
-    <div class="flex items-center bg-gray-700 text-white py-3 px-6 rounded-full shadow-2xl border border-gray-600">
-        <span class="relative flex h-3 w-3 mr-3">
-            <span class="live-dot absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+
+<!-- ===== MODAL OVERLAY ===== -->
+<div id="modal-overlay" class="modal-overlay"></div>
+
+<!-- ===== PENDING MODAL ===== -->
+<div id="modal-pending" class="modal">
+    <div class="modal-card">
+        <div class="modal-icon" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);">
+            <svg style="width:28px;height:28px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        </div>
+        <h2 id="pending-title" style="font-size:20px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">Trade Pending</h2>
+        <p style="font-size:14px; color:var(--text-secondary); line-height:1.6;">
+            Your <span id="pending-amount" style="color:var(--text-primary); font-weight:700;">$0.00</span> trade on
+            <span id="pending-asset" style="color:#60a5fa; font-weight:700;">ASSET</span>
+            <span id="pending-time-container" style="display:none;">
+                executes at <span id="pending-time" style="color:var(--text-primary); font-weight:700;">00:00</span>
+            </span>
+        </p>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#3b82f6,#2563eb); box-shadow:0 4px 16px rgba(59,130,246,0.3);">Got it</button>
+    </div>
+</div>
+
+<!-- ===== WIN MODAL ===== -->
+<div id="modal-win" class="modal">
+    <div class="modal-card win-card">
+        <div id="confetti-container" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>
+        <div class="modal-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);">
+            <svg style="width:28px;height:28px;color:#10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        </div>
+        <h2 style="font-size:28px; font-weight:800; color:#10b981; margin-bottom:8px;">YOU WON!</h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Trade Closed Successfully</p>
+        <div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:14px;padding:14px;">
+            <p id="win-amount" style="font-size:28px; font-weight:800; color:#10b981;">+$0.00</p>
+        </div>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 16px rgba(16,185,129,0.3);">Awesome!</button>
+    </div>
+</div>
+
+<!-- ===== LOSS MODAL ===== -->
+<div id="modal-loss" class="modal">
+    <div class="modal-card loss-card">
+        <div class="modal-icon" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);">
+            <svg style="width:28px;height:28px;color:#ef4444;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        </div>
+        <h2 style="font-size:24px; font-weight:800; color:#ef4444; margin-bottom:8px;">Trade Closed</h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Better luck next time!</p>
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:14px;padding:14px;">
+            <p id="loss-amount" style="font-size:24px; font-weight:800; color:#ef4444;">-$0.00</p>
+        </div>
+        <button class="btn-modal-close btn-close" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;">Close</button>
+    </div>
+</div>
+
+<!-- ===== TRADE DETAILS MODAL ===== -->
+<div id="modal-trade-details" class="modal">
+    <div class="modal-card" style="text-align:left;">
+        <p style="font-size:17px; font-weight:800; color:var(--text-primary); margin-bottom:16px;">Trade Details</p>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Asset</span>
+            <span id="detail-asset" style="font-size:13px; font-weight:700; color:var(--text-primary);">-</span>
+        </div>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Trade Time</span>
+            <span id="detail-trade-time" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+        </div>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Entry Price</span>
+            <span id="detail-opening-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+        </div>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Exit Price</span>
+            <span id="detail-closing-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+        </div>
+        <div id="detail-pnl-container" style="margin-top:12px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:12px; padding:12px; display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:13px; color:var(--text-secondary);">P&L</span>
+                <span id="detail-pnl" style="font-size:18px; font-weight:800; color:#10b981;">-</span>
+            </div>
+        </div>
+        <button class="btn-modal-close btn-close" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;">Close</button>
+    </div>
+</div>
+
+<!-- ===== COPY SUCCESS MODAL ===== -->
+<div id="modal-copy-success" class="modal">
+    <div class="modal-card">
+        <div class="modal-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);">
+            <svg style="width:28px;height:28px;color:#10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        </div>
+        <h2 style="font-size:20px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">Trade Copied!</h2>
+        <p style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
+            You are now copying the trade for
+            <span id="copy-success-asset" style="color:#60a5fa; font-weight:700;">ASSET</span>.
+            It will execute automatically.
+        </p>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 16px rgba(16,185,129,0.3);">Great!</button>
+    </div>
+</div>
+
+<!-- ===== TOASTS ===== -->
+<div id="toast-active" class="toast">
+    <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(245,158,11,0.3);">
+        <span class="relative flex" style="width:10px;height:10px;">
+            <span class="live-dot" style="position:absolute;width:100%;height:100%;border-radius:50%;background:#f59e0b;opacity:0.75;display:inline-flex;"></span>
+            <span style="position:relative;width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-flex;"></span>
         </span>
-        <span class="font-semibold text-lg">Your trade is now ACTIVE!</span>
-    </div>
-</div>
-<div id="modal-win" class="modal hidden fixed inset-0 items-center justify-center p-4">
-    <div class="relative bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border-2 border-green-500 overflow-hidden">
-        <div id="confetti-container" class="absolute inset-0"></div>
-        <div class="p-8 text-center relative z-10">
-            <svg class="w-16 h-16 text-green-500 mx-auto mb-4" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M11 3a1 1 0 100 2h.586l-1.293 1.293a1 1 0 101.414 1.414L13 6.414V10a1 1 0 102 0V6.414l1.293 1.293a1 1 0 001.414-1.414L16.414 5H17a1 1 0 100-2h-6zM3.293 7.293a1 1 0 011.414 0L6 8.586V3a1 1 0 112 0v5.586l1.293-1.293a1 1 0 111.414 1.414L8.414 11H12a1 1 0 110 2H8.414l2.293 2.293a1 1 0 11-1.414 1.414L7 14.414V17a1 1 0 11-2 0v-2.586l-1.293 1.293a1 1 0 01-1.414-1.414L4.586 13H3a1 1 0 110-2h1.586l-1.293-1.293a1 1 0 010-1.414z"></path></svg>
-            <h2 class="text-5xl font-extrabold text-green-400 mb-3">YOU WON!</h2>
-            <p class="text-gray-300 text-xl mb-2">Trade Closed</p>
-            <p id="win-amount" class="text-4xl font-bold text-white bg-green-500/20 py-2 px-4 rounded-lg inline-block">
-                + $0.00
-            </p>
-            <button class="btn-close mt-8 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-10 rounded-lg w-full transition-all">
-                Awesome!
-            </button>
-        </div>
-    </div>
-</div>
-<div id="modal-loss" class="modal hidden fixed inset-0 items-center justify-center p-4">
-    <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
-        <div class="p-8 text-center">
-            <svg class="w-16 h-16 text-red-500 mx-auto mb-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 class="text-3xl font-bold mb-2">Trade Closed</h2>
-            <p class="text-gray-400 text-lg">
-                Your <span id="loss-amount" class="font-bold text-white">$0.00</span> trade resulted in a loss. Better luck next time!
-            </p>
-            <button class="btn-close mt-8 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-10 rounded-lg w-full transition-all">
-                Close
-            </button>
-        </div>
-    </div>
-</div>
-<div id="modal-trade-details" class="modal hidden fixed inset-0 items-center justify-center p-4">
-    <div class="trade-details-modal">
-        <div class="trade-details-header">
-            <h3 class="trade-details-title">Trade Details</h3>
-        </div>
-        <div class="trade-details-body">
-            <div class="trade-detail-row">
-                <span class="trade-detail-label">Asset</span>
-                <span id="detail-asset" class="trade-detail-value">-</span>
-            </div>
-            <div class="trade-detail-row">
-                <span class="trade-detail-label">Trade Time</span>
-                <span id="detail-trade-time" class="trade-detail-value">-</span>
-            </div>
-            <div class="trade-detail-row">
-                <span class="trade-detail-label">Opening Price</span>
-                <span id="detail-opening-price" class="trade-detail-value">-</span>
-            </div>
-            <div class="trade-detail-row">
-                <span class="trade-detail-label">Closing Price</span>
-                <span id="detail-closing-price" class="trade-detail-value">-</span>
-            </div>
-            <div id="detail-pnl-container" class="trade-detail-pnl">
-                <div class="trade-detail-row" style="border-bottom: none; padding: 0;">
-                    <span class="trade-detail-label">Profit / Loss (P&L)</span>
-                    <span id="detail-pnl" class="trade-detail-value positive">-</span>
-                </div>
-            </div>
-            <button class="close-trade-details btn-close">Close</button>
-        </div>
-    </div>
-</div>
-<div id="modal-copy-success" class="modal hidden fixed inset-0 items-center justify-center p-4">
-    <div class="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm border border-gray-700">
-        <div class="p-8 text-center">
-            <svg class="w-16 h-16 text-green-500 mx-auto mb-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <h2 class="text-3xl font-bold mb-2">Trade Copied!</h2>
-            <p class="text-gray-400 text-lg">
-                You are now copying the trade for <span id="copy-success-asset" class="font-bold text-white">ASSET</span>.
-                It will execute automatically.
-            </p>
-            <button class="btn-close mt-8 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-10 rounded-lg w-full transition-all">
-                Great!
-            </button>
-        </div>
-    </div>
-</div>
-<div id="toast-copy-executed" class="toast hidden fixed top-5 left-1/2 -translate-x-1/2">
-    <div class="flex items-center bg-blue-600 text-white py-3 px-6 rounded-full shadow-2xl border border-blue-400">
-        <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
-        <span id="copy-executed-text" class="font-semibold text-lg">Your copy trade has executed!</span>
+        <span style="color:var(--text-primary);">Your trade is now <strong style="color:#f59e0b;">ACTIVE!</strong></span>
     </div>
 </div>
 
+<div id="toast-copy-executed" class="toast">
+    <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(59,130,246,0.3);">
+        <svg style="width:18px;height:18px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+        </svg>
+        <span id="copy-executed-text" style="color:var(--text-primary);">Copy trade executed!</span>
+    </div>
+</div>
 
+<!-- ===== BOTTOM NAV ===== -->
 <nav class="bottom-nav">
-    <a href="dashboard.html" class="nav-link" id="nav-dashboard">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+    <a href="dashboard.html" class="nav-item" id="nav-dashboard">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
         <span>Home</span>
     </a>
-    <a href="trade.html" class="nav-link" id="nav-trade">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+    <a href="trade.html" class="nav-item" id="nav-trade">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
         <span>Trade</span>
     </a>
-    <a href="deposit.html" class="nav-link" id="nav-deposit">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+    <a href="deposit.html" class="nav-item" id="nav-deposit">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
         <span>Deposit</span>
     </a>
-    <a href="withdraw.html" class="nav-link" id="nav-withdraw">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
-        <span>Withdraw</span>
+    <a href="withdraw.html" class="nav-item" id="nav-withdraw">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+        <span>Wallet</span>
     </a>
-    <a href="profile.html" class="nav-link" id="nav-profile">
-        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+    <a href="profile.html" class="nav-item" id="nav-profile">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
         <span>Profile</span>
     </a>
 </nav>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Initial Nav Setup ---
-    const currentPage = window.location.pathname.split('/').pop().replace('.html', '');
-    document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
-    document.getElementById(`nav-${currentPage}`).classList.add('active');
+
+    // FIX 1: Safe nav active — no crash if element not found
+    const currentPage = window.location.pathname.split('/').pop().replace('.html', '') || 'trade';
+    const navEl = document.getElementById(`nav-${currentPage}`);
+    if (navEl) navEl.classList.add('active');
 
     const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
-    // --- DOM Elements ---
+    // ---- DOM ELEMENTS ----
     const balanceElem = document.getElementById('balance-display');
     const currentPriceElem = document.getElementById('currentPrice');
     const countdownSecondsElem = document.getElementById('countdownSeconds');
@@ -641,221 +826,85 @@ document.addEventListener('DOMContentLoaded', () => {
     const tradeDownBtn = document.getElementById('tradeDown');
     const investmentInput = document.getElementById('investmentAmount');
     const tradeStatusElem = document.getElementById('tradeStatus');
-    const instantBtn = document.getElementById("instantTradeBtn");
-    
-    // Elements for Scheduled Trade REMOVED: scheduledBtn, scheduledContainer, timeScroller
-
     const assetDropdownBtn = document.getElementById('assetDropdownBtn');
     const selectedAssetSpan = document.getElementById('selectedAssetSpan');
     const assetDropdownContent = document.getElementById('assetDropdownContent');
-
-    // Trade/Copy Trade Tab Elements
-    const tradeTabContainer = document.getElementById('trade-tab-container');
     const tradeContent = document.getElementById('trade-content');
     const copyTradeContent = document.getElementById('copy-trade-content');
-
-    // Copy Trade Elements
     const copyTradesContainer = document.getElementById('copyTradesContainer');
     const loadingPlaceholder = document.getElementById('loadingPlaceholder');
     const noCopyTrades = document.getElementById('noCopyTrades');
     const copyTradeStatus = document.getElementById('copyTradeStatus');
-
-    // Charting
-    const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
-
-    // Popup Elements
+    const loadMoreBtn = document.getElementById('loadMoreTradesBtn');
     const overlay = document.getElementById('modal-overlay');
     const modalPending = document.getElementById('modal-pending');
     const toastActive = document.getElementById('toast-active');
     const modalWin = document.getElementById('modal-win');
     const modalLoss = document.getElementById('modal-loss');
     const modalTradeDetails = document.getElementById('modal-trade-details');
-    const modalCopySuccess = document.getElementById('modal-copy-success'); 
-    const toastCopyExecuted = document.getElementById('toast-copy-executed'); 
-
+    const modalCopySuccess = document.getElementById('modal-copy-success');
+    const toastCopyExecuted = document.getElementById('toast-copy-executed');
     const allModals = [modalPending, modalWin, modalLoss, modalTradeDetails, modalCopySuccess];
 
-    // Trade History Pagination
-    const loadMoreBtn = document.getElementById('loadMoreTradesBtn');
+    // ---- STATE ----
+    let marketData = {}, currentAsset = '', lastPrice = 0;
+    let availableCopyTrades = [];
+    let tradeHistoryData = {};
+    let assetPrices = {};
+    let activeTab = 'trade';
     let fullTradeHistory = [];
     let visibleHistoryCount = 0;
     const TRADES_PER_PAGE = 5;
 
-    // State Variables
-    let marketData = {}, currentAsset = '', lastPrice = 0, isScheduled = false; // isScheduled variable is now redundant but kept as false
-    let availableCopyTrades = []; 
-    let tradeHistoryData = {};
-    let assetPrices = {};
-    let activeTab = 'trade';
-
-    // ✅ ADD: Price update debouncing
+    // FIX 2: Separate price update debounce from balance updates
     let lastPriceUpdate = 0;
-    const PRICE_UPDATE_DEBOUNCE = 300; // Only update price display every 300ms
+    const PRICE_UPDATE_DEBOUNCE = 300;
 
-    // --- Tab Switching Logic ---
-    tradeTabContainer.addEventListener('click', (e) => {
-        if (e.target.tagName !== 'BUTTON') return;
+    // ---- CHART ----
+    const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
-        tradeTabContainer.querySelectorAll('.tab-link').forEach(btn => btn.classList.remove('active-pill'));
-        e.target.classList.add('active-pill');
-
-        activeTab = e.target.getAttribute('data-tab');
-
-        if (activeTab === 'trade') {
-            copyTradeContent.classList.add('hidden');
-            tradeContent.classList.remove('hidden');
-        } else if (activeTab === 'copy-trade') {
-            tradeContent.classList.add('hidden');
-            copyTradeContent.classList.remove('hidden');
-            fetchCopyTrades();
-        }
+    // ---- QUICK AMOUNT CHIPS ----
+    document.querySelectorAll('.amount-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            investmentInput.value = chip.dataset.amount;
+        });
     });
 
-    // --- Helper Functions ---
+    // ---- TABS ----
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            activeTab = btn.dataset.tab;
 
-    function formatPrice(price, asset) {
-        const decimalMap = {
-            'BTCUSDT': 2, 'ETHUSDT': 2, 'BNBUSDT': 2, 'LTCUSDT': 2, 'SOLUSDT': 2, 'AVAXUSDT': 2,
-            'ADAUSDT': 4, 'MATICUSDT': 4, 'XRPUSDT': 4,
-            'DOTUSDT': 3,
-            'DOGEUSDT': 5
-        };
-        const decimals = decimalMap[asset] || 2;
-        return price.toFixed(decimals);
-    }
-
-    // --- Copy Trading Functions ---
-
-    async function fetchCopyTrades() {
-        if (activeTab !== 'copy-trade') return;
-
-        loadingPlaceholder.classList.remove('hidden');
-        noCopyTrades.classList.add('hidden');
-        copyTradesContainer.innerHTML = ''; 
-
-        try {
-            const response = await fetch('/api/user/copy-trades/available', {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            if (!response.ok) throw new Error('Failed to fetch copy trades');
-
-            const data = await response.json();
-            if (data.success) {
-                availableCopyTrades = data.copyTrades || [];
-                renderCopyTrades();
-
-                if (data.message && data.message.includes('Minimum $100')) {
-                    copyTradeStatus.textContent = data.message;
-                    copyTradeStatus.classList.remove('text-red-400');
-                    copyTradeStatus.classList.add('text-yellow-400');
-                } else {
-                    copyTradeStatus.textContent = '';
-                }
+            if (activeTab === 'trade') {
+                copyTradeContent.style.display = 'none';
+                tradeContent.style.display = 'block';
+            } else {
+                tradeContent.style.display = 'none';
+                copyTradeContent.style.display = 'block';
+                fetchCopyTrades();
             }
-        } catch (error) {
-            console.error('Error fetching copy trades:', error);
-            copyTradeStatus.textContent = 'Error loading copy trades';
-        } finally {
-            loadingPlaceholder.classList.add('hidden');
-        }
-    }
-
-    function renderCopyTrades() {
-        if (availableCopyTrades.length === 0) {
-            noCopyTrades.classList.remove('hidden');
-            copyTradesContainer.innerHTML = '';
-            copyTradesContainer.appendChild(noCopyTrades);
-            return;
-        }
-
-        noCopyTrades.classList.add('hidden');
-        copyTradesContainer.innerHTML = '';
-
-        availableCopyTrades.forEach(trade => {
-            const now = new Date();
-            const executionTime = new Date(trade.executionTime);
-            const timeLeft = executionTime - now;
-            const minutesLeft = Math.max(0, Math.floor(timeLeft / (1000 * 60)));
-            const isExpiringSoon = minutesLeft < 5;
-
-            const tradeCard = document.createElement('div');
-            tradeCard.className = `copy-trade-card p-4 rounded-lg shadow-lg ${isExpiringSoon ? 'expiring' : ''}`;
-
-            const directionIcon = trade.direction === 'CALL' 
-                ? `<svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>`
-                : `<svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>`;
-
-            tradeCard.innerHTML = `
-                <div class="flex justify-between items-start mb-2">
-                    <div class="flex items-center gap-2">
-                        ${directionIcon}
-                        <span class="font-bold text-white text-lg">${trade.tradingPair}</span>
-                    </div>
-                    <span class="text-sm px-2 py-1 rounded-full ${trade.direction === 'CALL' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}">
-                        ${trade.direction}
-                    </span>
-                </div>
-                <div class="grid grid-cols-2 gap-2 text-sm mb-3">
-                    <div>
-                        <span class="text-gray-300">Percentage:</span>
-                        <span class="text-yellow-400 font-semibold ml-1">${trade.percentage}%</span>
-                    </div>
-                    <div>
-                        <span class="text-gray-300">Your Investment:</span>
-                        <span class="text-green-400 font-semibold ml-1">${trade.percentage.toFixed(2)}% of balance</span>
-                    </div>
-                    <div class="col-span-2">
-                        <span class="text-gray-300">Executes in:</span>
-                        <span class="text-blue-400 font-semibold ml-1 ${isExpiringSoon ? 'text-orange-400' : ''}">
-                            ${minutesLeft} minutes
-                        </span>
-                    </div>
-                </div>
-                <button data-id="${trade._id}" data-asset="${trade.tradingPair}"
-                    class="copy-btn w-full py-2 text-white font-semibold rounded-lg transition-all hover:scale-105 active:scale-95">
-                    Copy Trade
-                </button>
-            `;
-            copyTradesContainer.appendChild(tradeCard);
         });
+    });
 
-        // Attach listeners after rendering
-        document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                const copyTradeId = btn.getAttribute('data-id');
-                const asset = btn.getAttribute('data-asset');
-
-                btn.textContent = 'Copying...';
-                btn.disabled = true;
-
-                socket.emit('copy_trade', { copyTradeId, asset }); 
-            });
-        });
-    }
-
-    // --- Asset Dropdown Logic (No Change) ---
+    // ---- ASSET DROPDOWN ----
     assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
-
-    window.onclick = (event) => {
-        if (!event.target.matches('.asset-dropdown-btn, .asset-dropdown-btn *') && assetDropdownContent.classList.contains('show')) {
-            assetDropdownContent.classList.remove('show');
-        }
-    }
+    window.addEventListener('click', (e) => {
+        if (!e.target.closest('.asset-dropdown')) assetDropdownContent.classList.remove('show');
+    });
 
     function populateAssetSelector(assets) {
         assetDropdownContent.innerHTML = '';
         assets.forEach(asset => {
             const link = document.createElement('a');
-            link.href = "#"; link.textContent = asset; link.dataset.asset = asset;
+            link.href = '#';
+            link.textContent = asset;
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 currentAsset = asset;
-                localStorage.setItem('lastSelectedAsset', currentAsset);
-                selectedAssetSpan.textContent = currentAsset;
+                localStorage.setItem('lastSelectedAsset', asset);
+                selectedAssetSpan.textContent = asset;
                 assetDropdownContent.classList.remove('show');
                 updateUIForCurrentAsset();
             });
@@ -863,272 +912,186 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function setActiveAsset(asset) { 
-        selectedAssetSpan.textContent = asset;
+    // ---- HELPERS ----
+    function formatPrice(price, asset) {
+        const decimals = { 'BTCUSDT':2,'ETHUSDT':2,'BNBUSDT':2,'SOLUSDT':2,'AVAXUSDT':2,'ADAUSDT':4,'MATICUSDT':4,'XRPUSDT':4,'DOGEUSDT':5,'LINKUSDT':4 };
+        return price.toFixed(decimals[asset] || 2);
     }
 
-    // --- Trade Mode Cleanup ---
-    // The previous Scheduled Trade logic is no longer needed. The trade mode is implicitly "Instant".
-    // Keep the initialization of the Instant Trade button for styling purposes.
-    instantBtn.classList.add('bg-blue-600'); // Ensure Instant Trade button is styled as active
+    function showStatus(msg, color) {
+        const colors = { red:'#ef4444', green:'#10b981', blue:'#60a5fa', yellow:'#f59e0b', gray:'var(--text-secondary)' };
+        tradeStatusElem.textContent = msg;
+        tradeStatusElem.style.color = colors[color] || colors.gray;
+    }
 
-    // --- SOCKET.IO Event Handlers ---
-
-    socket.on('init', (data) => {
-        marketData = data.marketData;
-        const assets = Object.keys(marketData);
-        populateAssetSelector(assets);
-
-        const lastAsset = localStorage.getItem('lastSelectedAsset');
-        currentAsset = (lastAsset && assets.includes(lastAsset)) ? lastAsset : assets[0];
-        setActiveAsset(currentAsset);
-
-        updateBalance(data.balance);
-
-        tradeHistoryContainer.innerHTML = '';
-        fullTradeHistory = data.tradeHistory; 
-        visibleHistoryCount = 0;
-        loadMoreTrades(); 
-
-        updateUIForCurrentAsset();
-    });
-
-    socket.on('copy_trades_available', (data) => {
-        if (activeTab === 'copy-trade') {
-            availableCopyTrades = data.copyTrades || [];
-            renderCopyTrades();
-
-            if (data.message && data.message.includes('Minimum $100')) {
-                copyTradeStatus.textContent = data.message;
-                copyTradeStatus.classList.remove('text-red-400');
-                copyTradeStatus.classList.add('text-yellow-400');
-            } else {
-                copyTradeStatus.textContent = '';
-            }
-        }
-    });
-
-    socket.on('copy_trade_success', (data) => {
-        showCopySuccessPopup(data.asset || 'that trade'); 
-        socket.emit('request_copy_trades'); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
+    function setTradeButtonsDisabled(disabled) {
+        [tradeUpBtn, tradeDownBtn].forEach(btn => {
+            btn.disabled = disabled;
+            btn.style.opacity = disabled ? '0.5' : '1';
         });
-    });
-
-    socket.on('copy_trade_executed', (data) => {
-        showCopyExecutedToast(data.trade);
-        updateBalance(data.balance);
-        addTradeToHistory(data.trade);
-    });
-
-    // ✅ UPDATED: Price update with debouncing
-    socket.on('price_update', (data) => {
-        const now = Date.now();
-        if (now - lastPriceUpdate < PRICE_UPDATE_DEBOUNCE) return;
-        lastPriceUpdate = now;
-        
-        Object.entries(data).forEach(([asset, assetData]) => {
-            assetPrices[asset] = assetData.price;
-            if (marketData[asset]) {
-                marketData[asset].currentPrice = assetData.price;
-            }
-        });
-
-        if (data[currentAsset]) {
-            const newPrice = data[currentAsset].price;
-            const countdown = data[currentAsset].countdown;
-
-            currentPriceElem.classList.remove('price-up', 'price-down');
-            if (lastPrice !== 0 && newPrice !== lastPrice) {
-                currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
-            }
-
-            currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
-
-            countdownSecondsElem.textContent = `${countdown}s`;
-            countdownSecondsElem.classList.remove('warning', 'critical');
-            if (countdown <= 10) {
-                countdownSecondsElem.classList.add('critical');
-            } else if (countdown <= 30) {
-                countdownSecondsElem.classList.add('warning');
-            }
-
-            lastPrice = newPrice;
-        }
-    });
-
-    // ✅ CRITICAL FIX: Updated market_data handler for real-time candle movement
-    socket.on('market_data', (data) => { 
-        if (data.asset === currentAsset) {
-            // ✅ Pass both completed candles AND current forming candle for real-time updates
-            updateChart(data.candles, data.currentCandle); 
-            
-            // Also update current price in real-time from market_data
-            if (data.currentPrice) {
-                const newPrice = data.currentPrice;
-                currentPriceElem.classList.remove('price-up', 'price-down');
-                if (lastPrice !== 0 && newPrice !== lastPrice) {
-                    currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
-                }
-                currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
-                lastPrice = newPrice;
-            }
-        }
-    });
-
-    socket.on('trade_pending', (data) => { 
-        updateBalance(data.balance); 
-        addTradeToHistory(data.trade);
-        showPendingPopup(data.trade);
-    });
-
-    socket.on('trade_scheduled', (data) => { 
-        updateBalance(data.balance); 
-        addTradeToHistory(data.trade);
-        // This handler remains for Copy Trades, which are status="scheduled"
-        showScheduledPopup(data.trade); 
-    });
-
-    socket.on('trade_active', (data) => {
-        tradeHistoryData[data.trade._id] = data.trade;
-        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
-        if (!tradeRow) {
-            addTradeToHistory(data.trade);
-        } else {
-            updateTradeStatus(data.trade._id, 'Active');
-        }
-        showToast(toastActive);
-    });
-
-    socket.on('trade_result', (data) => {
-        updateBalance(data.balance);
-
-        tradeHistoryData[data.trade._id] = data.trade;
-
-        const tradeRow = document.getElementById(`trade-${data.trade._id}`);
-        if (!tradeRow) {
-            addTradeToHistory(data.trade);
-        } else {
-            updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
-        }
-
-        setTradeButtonsDisabled(false);
-
-        if (data.trade.result === 'WIN') {
-            showWinPopup(data.trade);
-        } else if (data.trade.result === 'LOSS') {
-            showLossPopup(data.trade);
-        }
-    });
-
-    socket.on('trade_cancelled', (data) => { 
-        updateBalance(data.balance); 
-        delete tradeHistoryData[data.tradeId];
-        const row = document.getElementById(`trade-${data.tradeId}`); 
-        if (row) row.remove(); 
-        showStatus('Trade cancelled.', 'gray'); 
-        setTradeButtonsDisabled(false); 
-    });
-
-    socket.on('error', (data) => { 
-        showStatus(`Error: ${data.message}`, 'red'); 
-        setTradeButtonsDisabled(false); 
-
-        const allCopyBtns = document.querySelectorAll('.copy-btn');
-        allCopyBtns.forEach(btn => {
-            btn.disabled = false;
-            if(btn.textContent === 'Copying...') btn.textContent = 'Copy Trade';
-        });
-    });
-
-    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
-
-    // --- Core Trade & UI Functions ---
-
-    const requestTrade = (direction) => {
-        setTradeButtonsDisabled(true);
-        const amount = parseFloat(investmentInput.value);
-        if (isNaN(amount) || amount < 0.5) {
-            showStatus('Invalid amount. Minimum is $0.50.', 'red');
-            setTradeButtonsDisabled(false);
-            return;
-        }
-
-        const currentPrice = assetPrices[currentAsset] || lastPrice;
-        if (currentPrice === 0) {
-            showStatus('Waiting for price data...', 'red');
-            setTradeButtonsDisabled(false);
-            return;
-        }
-
-        const tradeData = { 
-            direction, 
-            asset: currentAsset, 
-            amount,
-            openingPrice: currentPrice
-        };
-
-        // Always emit as a regular "trade" now that "scheduled_trade" is removed
-        socket.emit("trade", tradeData);
-    };
-    
-    tradeUpBtn.addEventListener("click", () => requestTrade("UP"));
-    tradeDownBtn.addEventListener("click", () => requestTrade("DOWN"));
+    }
 
     function updateBalance(newBalance) {
-        balanceElem.textContent = `$${newBalance.toFixed(2)}`;
-        socket.emit('request_copy_trades'); 
+        balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
+        // FIX 2: Removed unnecessary request_copy_trades emit on every balance update
     }
 
-    // --- Trade History Functions ---
+    // ---- COPY TRADES ----
+    async function fetchCopyTrades() {
+        if (activeTab !== 'copy-trade') return;
+        loadingPlaceholder.style.display = 'block';
+        noCopyTrades.style.display = 'none';
+        copyTradesContainer.innerHTML = '';
 
-    function createTradeHistoryRow(trade) {
+        try {
+            const res = await fetch('/api/user/copy-trades/available', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+            });
+            if (!res.ok) throw new Error('Failed to fetch');
+            const data = await res.json();
+
+            if (data.success) {
+                availableCopyTrades = data.copyTrades || [];
+                renderCopyTrades();
+                if (data.message && data.message.includes('$100')) {
+                    copyTradeStatus.textContent = data.message;
+                    copyTradeStatus.style.color = '#f59e0b';
+                } else {
+                    copyTradeStatus.textContent = '';
+                }
+            }
+        } catch (err) {
+            copyTradeStatus.textContent = 'Error loading copy trades.';
+            copyTradeStatus.style.color = '#ef4444';
+        } finally {
+            loadingPlaceholder.style.display = 'none';
+        }
+    }
+
+    function renderCopyTrades() {
+        copyTradesContainer.innerHTML = '';
+        if (availableCopyTrades.length === 0) {
+            noCopyTrades.style.display = 'block';
+            return;
+        }
+        noCopyTrades.style.display = 'none';
+
+        availableCopyTrades.forEach(trade => {
+            const now = new Date();
+            const executionTime = new Date(trade.executionTime);
+            const minutesLeft = Math.max(0, Math.floor((executionTime - now) / 60000));
+            const isExpiring = minutesLeft < 5;
+
+            const isUp = trade.direction === 'CALL';
+            const card = document.createElement('div');
+            card.className = `copy-card${isExpiring ? ' expiring' : ''}`;
+
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="width:32px;height:32px;border-radius:10px;background:${isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};border:1px solid ${isUp ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};display:flex;align-items:center;justify-content:center;">
+                            <svg style="width:16px;height:16px;color:${isUp ? '#10b981' : '#ef4444'};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <p style="font-weight:700; font-size:15px; color:var(--text-primary);">${trade.tradingPair}</p>
+                            <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:${isUp ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color:${isUp ? '#10b981' : '#ef4444'};">${trade.direction}</span>
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:11px; color:var(--text-secondary);">Executes in</p>
+                        <p style="font-size:14px; font-weight:700; color:${isExpiring ? '#ef4444' : '#60a5fa'};">${minutesLeft}m</p>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
+                    <div style="background:rgba(5,11,24,0.5);border:1px solid var(--border-color);border-radius:10px;padding:8px 10px;">
+                        <p style="font-size:11px; color:var(--text-secondary);">Percentage</p>
+                        <p style="font-size:14px; font-weight:700; color:#f59e0b;">${trade.percentage}%</p>
+                    </div>
+                    <div style="background:rgba(5,11,24,0.5);border:1px solid var(--border-color);border-radius:10px;padding:8px 10px;">
+                        <p style="font-size:11px; color:var(--text-secondary);">Of Your Balance</p>
+                        <!-- FIX 5: Show actual percentage of balance, not duplicate percentage -->
+                        <p style="font-size:14px; font-weight:700; color:#10b981;">${trade.percentage}% used</p>
+                    </div>
+                </div>
+                <button data-id="${trade._id}" data-asset="${trade.tradingPair}" class="copy-btn">
+                    Copy This Trade
+                </button>
+            `;
+            copyTradesContainer.appendChild(card);
+        });
+
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                btn.textContent = 'Copying...';
+                btn.disabled = true;
+                socket.emit('copy_trade', {
+                    copyTradeId: btn.dataset.id,
+                    asset: btn.dataset.asset
+                });
+            });
+        });
+    }
+
+    // ---- TRADE HISTORY ----
+    function createTradeRow(trade) {
         tradeHistoryData[trade._id] = trade;
-        const tradeElement = document.createElement('div');
-        tradeElement.id = `trade-${trade._id}`;
-        tradeElement.className = 'flex justify-between items-center bg-gray-700/50 p-3 rounded-lg transition-all hover:bg-gray-700 cursor-pointer';
+        const el = document.createElement('div');
+        el.id = `trade-${trade._id}`;
+        el.className = 'trade-row';
+        el.addEventListener('click', () => showTradeDetails(trade._id));
 
-        tradeElement.addEventListener('click', () => showTradeDetails(trade._id));
-
-        const directionIcon = (trade.direction === 'UP' || trade.direction === 'CALL')
-            ? `<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>`
-            : `<svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>`;
-
-        tradeElement.innerHTML = `
-            <div class="flex items-center gap-3">
-                ${directionIcon}
+        const isUp = trade.direction === 'UP' || trade.direction === 'CALL';
+        el.innerHTML = `
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:34px;height:34px;border-radius:10px;background:${isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};border:1px solid ${isUp ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg style="width:14px;height:14px;color:${isUp ? '#10b981' : '#ef4444'};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+                    </svg>
+                </div>
                 <div>
-                    <p class="font-bold text-white">${trade.asset || trade.tradingPair}</p>
-                    <p class="text-xs text-gray-400">Amount: $${trade.amount.toFixed(2)}</p>
+                    <p style="font-weight:700; font-size:13px; color:var(--text-primary);">${trade.asset || trade.tradingPair}</p>
+                    <p style="font-size:11px; color:var(--text-secondary);">$${trade.amount.toFixed(2)}</p>
                 </div>
             </div>
-            <div id="status-${trade._id}" class="text-right"></div>
+            <div id="status-${trade._id}" style="text-align:right;"></div>
         `;
-        return tradeElement;
+        return el;
+    }
+
+    function updateTradeStatus(tradeId, status, result = null) {
+        const container = document.getElementById(`status-${tradeId}`);
+        if (!container) return;
+
+        let badgeClass = 'badge-default';
+        let text = (result || status).toUpperCase();
+
+        if (result === 'WIN') badgeClass = 'badge-win';
+        else if (result === 'LOSS') badgeClass = 'badge-loss';
+        else if (status.toLowerCase() === 'active') badgeClass = 'badge-active';
+        else if (['pending','scheduled'].includes(status.toLowerCase())) badgeClass = 'badge-pending';
+
+        let html = `<span class="badge ${badgeClass}">${text}</span>`;
+        if (['pending','scheduled'].includes(status.toLowerCase())) {
+            html += `<button onclick="event.stopPropagation();cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
+        }
+        container.innerHTML = html;
     }
 
     function loadMoreTrades() {
-        const startIndex = visibleHistoryCount;
-        const endIndex = startIndex + TRADES_PER_PAGE;
-        const tradesToLoad = fullTradeHistory.slice(startIndex, endIndex);
-
-        if (tradesToLoad.length === 0 && startIndex === 0) {
-            loadMoreBtn.classList.add('hidden');
+        const slice = fullTradeHistory.slice(visibleHistoryCount, visibleHistoryCount + TRADES_PER_PAGE);
+        if (slice.length === 0 && visibleHistoryCount === 0) {
+            loadMoreBtn.style.display = 'none';
             return;
         }
-
-        tradesToLoad.forEach(trade => {
-            const tradeElement = createTradeHistoryRow(trade);
-            tradeHistoryContainer.append(tradeElement); 
+        slice.forEach(trade => {
+            const el = createTradeRow(trade);
+            tradeHistoryContainer.appendChild(el);
             updateTradeStatus(trade._id, trade.status, trade.result);
         });
-
-        visibleHistoryCount = endIndex;
-
+        visibleHistoryCount += TRADES_PER_PAGE;
+        loadMoreBtn.style.display = 'block';
         if (visibleHistoryCount >= fullTradeHistory.length) {
             loadMoreBtn.textContent = 'No More Trades';
             loadMoreBtn.disabled = true;
@@ -1136,108 +1099,55 @@ document.addEventListener('DOMContentLoaded', () => {
             loadMoreBtn.textContent = 'Load More';
             loadMoreBtn.disabled = false;
         }
-        loadMoreBtn.classList.remove('hidden');
     }
+
     loadMoreBtn.addEventListener('click', loadMoreTrades);
 
     function addTradeToHistory(trade) {
-        const tradeElement = createTradeHistoryRow(trade);
-        tradeHistoryContainer.prepend(tradeElement); 
+        const el = createTradeRow(trade);
+        tradeHistoryContainer.prepend(el);
         updateTradeStatus(trade._id, trade.status, trade.result);
     }
 
-    function updateTradeStatus(tradeId, status, result = null) {
-        const statusContainer = document.getElementById(`status-${tradeId}`);
-        if (!statusContainer) return;
+    window.cancelTrade = (tradeId) => socket.emit('cancel_trade', { tradeId });
 
-        let statusText = (result || status).toUpperCase();
-        let statusClass = 'status-default';
-
-        if (result === 'WIN') statusClass = 'status-win';
-        else if (result === 'LOSS') statusClass = 'status-loss';
-        else if (status.toLowerCase() === 'active') statusClass = 'status-active';
-        else if (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled') statusClass = 'status-pending';
-
-        let statusContent = `<span class="status-badge ${statusClass}">${statusText}</span>`;
-        if (status.toLowerCase() === 'pending' || status.toLowerCase() === 'scheduled') {
-            statusContent += ` <button onclick="event.stopPropagation(); cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
-        }
-        statusContainer.innerHTML = statusContent;
+    // ---- CHART ----
+    function buildChartData(candles, currentCandle) {
+        const all = [...(candles || [])];
+        if (currentCandle) all.push(currentCandle);
+        return {
+            data: all.map(c => [c.open, c.close, c.low, c.high]),
+            dates: all.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }))
+        };
     }
 
-    window.cancelTrade = (tradeId) => {
-        socket.emit('cancel_trade', { tradeId });
-    };
-
-    // --- UI Helper Functions ---
-
-    function showStatus(message, color) { 
-        const colorMap = { red: 'text-red-400', green: 'text-green-500', blue: 'text-blue-400', yellow: 'text-yellow-500', gray: 'text-gray-400' }; 
-        tradeStatusElem.textContent = message; 
-        tradeStatusElem.className = `text-center mt-4 min-h-[24px] font-semibold ${colorMap[color] || 'text-gray-400'}`; 
-    }
-
-    function setTradeButtonsDisabled(disabled) { 
-        [tradeUpBtn, tradeDownBtn].forEach(btn => { 
-            btn.disabled = disabled; 
-            btn.classList.toggle('opacity-50', disabled); 
-            btn.classList.toggle('cursor-not-allowed', disabled); 
-        }); 
-    }
-
-    // --- Charting Functions ---
-
-    // ✅ CRITICAL FIX: Updated initChart to handle current forming candle
     function initChart(candles, currentCandle) {
-        if ((!candles || candles.length === 0) && !currentCandle) { 
-            myChart.clear(); 
-            return; 
-        }
-        
-        // ✅ Combine completed candles + current forming candle for real-time display
-        const allCandles = [...(candles || [])];
-        if (currentCandle) {
-            allCandles.push(currentCandle);
-        }
-        
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        
-        const options = {
+        const { data, dates } = buildChartData(candles, currentCandle);
+        if (!data.length) { myChart.clear(); return; }
+
+        myChart.setOption({
             backgroundColor: 'transparent',
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-            xAxis: { type: 'category', data: chartDates, axisLine: { lineStyle: { color: '#8392A5' } } },
-            yAxis: { scale: true, axisLine: { lineStyle: { color: '#8392A5' } }, splitLine: { lineStyle: { color: '#2a2e39' } } },
-            grid: { left: '15%', right: '5%', bottom: '15%' },
-            dataZoom: [{ type: 'inside', startValue: Math.max(0, chartDates.length - 50), endValue: chartDates.length - 1, zoomOnMouseWheel: 'shift' }],
-            series: [{ type: 'candlestick', data: chartData, itemStyle: { color: '#22c55e', color0: '#ef4444', borderColor: '#22c55e', borderColor0: '#ef4444' } }]
-        };
-        myChart.setOption(options, { notMerge: true });
+            xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#8899bb' } }, axisLabel: { color: '#8899bb', fontSize: 10 } },
+            yAxis: { scale: true, axisLine: { lineStyle: { color: '#8899bb' } }, axisLabel: { color: '#8899bb', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(59,130,246,0.08)' } } },
+            grid: { left: '14%', right: '4%', bottom: '12%', top: '4%' },
+            dataZoom: [{ type: 'inside', startValue: Math.max(0, dates.length - 50), endValue: dates.length - 1 }],
+            series: [{
+                type: 'candlestick',
+                data,
+                itemStyle: { color: '#10b981', color0: '#ef4444', borderColor: '#10b981', borderColor0: '#ef4444' }
+            }]
+        }, { notMerge: true });
     }
 
-    // ✅ CRITICAL FIX: Updated updateChart to handle current forming candle
     function updateChart(candles, currentCandle) {
-        if ((!candles || candles.length === 0) && !currentCandle) return;
-        
-        // ✅ Combine completed candles + current forming candle for real-time display
-        const allCandles = [...(candles || [])];
-        if (currentCandle) {
-            allCandles.push(currentCandle);
-        }
-        
-        const chartData = allCandles.map(c => [c.open, c.close, c.low, c.high]);
-        const chartDates = allCandles.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-        
-        myChart.setOption({
-            xAxis: { data: chartDates },
-            series: [{ data: chartData }]
-        });
+        const { data, dates } = buildChartData(candles, currentCandle);
+        if (!data.length) return;
+        myChart.setOption({ xAxis: { data: dates }, series: [{ data }] });
     }
 
-    // ✅ CRITICAL FIX: Updated to pass currentCandle to initChart
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset]) {
-            // ✅ Pass both completed candles AND current forming candle
             initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
@@ -1249,55 +1159,181 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    window.addEventListener('resize', () => {
-        if (myChart) myChart.resize();
+    window.addEventListener('resize', () => myChart.resize());
+
+    // ---- SOCKET EVENTS ----
+    socket.on('init', (data) => {
+        marketData = data.marketData;
+        const assets = Object.keys(marketData);
+        populateAssetSelector(assets);
+
+        const last = localStorage.getItem('lastSelectedAsset');
+        currentAsset = (last && assets.includes(last)) ? last : assets[0];
+        selectedAssetSpan.textContent = currentAsset;
+
+        updateBalance(data.balance);
+        fullTradeHistory = data.tradeHistory || [];
+        visibleHistoryCount = 0;
+        tradeHistoryContainer.innerHTML = '';
+        loadMoreTrades();
+        updateUIForCurrentAsset();
     });
 
-    // --- Popup & Modal Functions ---
+    // FIX 3: Only ONE source updates price — market_data handles chart, price_update handles ticker
+    socket.on('price_update', (data) => {
+        const now = Date.now();
+        if (now - lastPriceUpdate < PRICE_UPDATE_DEBOUNCE) return;
+        lastPriceUpdate = now;
 
-    function showModal(modal) {
-        hideAllModals(); 
-        overlay.classList.remove('hide');
-        overlay.classList.add('show');
-        modal.classList.remove('hide');
-        modal.classList.add('show');
+        Object.entries(data).forEach(([asset, d]) => {
+            assetPrices[asset] = d.price;
+            if (marketData[asset]) marketData[asset].currentPrice = d.price;
+        });
 
-        if (modal === modalWin) {
-            triggerConfetti();
+        if (data[currentAsset]) {
+            const newPrice = data[currentAsset].price;
+            const countdown = data[currentAsset].countdown;
+
+            currentPriceElem.classList.remove('price-up', 'price-down');
+            if (lastPrice !== 0 && newPrice !== lastPrice) {
+                currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
+            }
+            currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
+
+            countdownSecondsElem.textContent = `${countdown}s`;
+            countdownSecondsElem.className = 'timer-value';
+            if (countdown <= 10) countdownSecondsElem.classList.add('critical');
+            else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
+
+            lastPrice = newPrice;
         }
+    });
+
+    socket.on('market_data', (data) => {
+        if (data.asset === currentAsset) {
+            // FIX 3: market_data only updates chart, not price display (price_update handles that)
+            updateChart(data.candles, data.currentCandle);
+        }
+    });
+
+    socket.on('trade_pending', (data) => {
+        updateBalance(data.balance);
+        addTradeToHistory(data.trade);
+        showPendingPopup(data.trade);
+    });
+
+    socket.on('trade_scheduled', (data) => {
+        updateBalance(data.balance);
+        addTradeToHistory(data.trade);
+        showScheduledPopup(data.trade);
+    });
+
+    socket.on('trade_active', (data) => {
+        tradeHistoryData[data.trade._id] = data.trade;
+        const row = document.getElementById(`trade-${data.trade._id}`);
+        if (!row) addTradeToHistory(data.trade);
+        else updateTradeStatus(data.trade._id, 'active');
+        showToast(toastActive);
+    });
+
+    socket.on('trade_result', (data) => {
+        updateBalance(data.balance);
+        tradeHistoryData[data.trade._id] = data.trade;
+        const row = document.getElementById(`trade-${data.trade._id}`);
+        if (!row) addTradeToHistory(data.trade);
+        else updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
+        setTradeButtonsDisabled(false);
+        if (data.trade.result === 'WIN') showWinPopup(data.trade);
+        else if (data.trade.result === 'LOSS') showLossPopup(data.trade);
+    });
+
+    socket.on('trade_cancelled', (data) => {
+        updateBalance(data.balance);
+        delete tradeHistoryData[data.tradeId];
+        const row = document.getElementById(`trade-${data.tradeId}`);
+        if (row) row.remove();
+        showStatus('Trade cancelled.', 'gray');
+        setTradeButtonsDisabled(false);
+    });
+
+    socket.on('copy_trade_success', (data) => {
+        showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.disabled = false;
+            if (btn.textContent === 'Copying...') btn.textContent = 'Copy This Trade';
+        });
+    });
+
+    socket.on('copy_trade_executed', (data) => {
+        showCopyExecutedToast(data.trade);
+        updateBalance(data.balance);
+        addTradeToHistory(data.trade);
+    });
+
+    socket.on('error', (data) => {
+        showStatus(`Error: ${data.message}`, 'red');
+        setTradeButtonsDisabled(false);
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.disabled = false;
+            if (btn.textContent === 'Copying...') btn.textContent = 'Copy This Trade';
+        });
+    });
+
+    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
+
+    // ---- TRADE REQUEST ----
+    const requestTrade = (direction) => {
+        setTradeButtonsDisabled(true);
+        const amount = parseFloat(investmentInput.value);
+        if (isNaN(amount) || amount < 0.5) {
+            showStatus('Invalid amount. Minimum is $0.50.', 'red');
+            setTradeButtonsDisabled(false);
+            return;
+        }
+        const currentPrice = assetPrices[currentAsset] || lastPrice;
+        if (!currentPrice) {
+            showStatus('Waiting for price data...', 'red');
+            setTradeButtonsDisabled(false);
+            return;
+        }
+        socket.emit('trade', { direction, asset: currentAsset, amount, openingPrice: currentPrice });
+    };
+
+    tradeUpBtn.addEventListener('click', () => requestTrade('UP'));
+    tradeDownBtn.addEventListener('click', () => requestTrade('DOWN'));
+
+    // ---- MODALS ----
+    function showModal(modal) {
+        hideAllModals();
+        overlay.classList.add('show');
+        modal.classList.add('show');
+        if (modal === modalWin) triggerConfetti();
     }
 
     function hideModal(modal) {
         overlay.classList.remove('show');
-        overlay.classList.add('hide');
         modal.classList.remove('show');
-        modal.classList.add('hide');
-
-        setTimeout(() => {
-            overlay.classList.remove('show', 'hide');
-            modal.classList.remove('show', 'hide');
-        }, 300);
     }
 
     function hideAllModals() {
-        allModals.forEach(m => {
-            m.classList.remove('show', 'hide');
-        });
-        overlay.classList.remove('show', 'hide');
+        allModals.forEach(m => m.classList.remove('show'));
+        overlay.classList.remove('show');
     }
 
     function showToast(toast) {
-        toast.classList.remove('hide');
         toast.classList.add('show');
-        setTimeout(() => {
-            toast.classList.remove('show');
-            toast.classList.add('hide');
-            setTimeout(() => toast.classList.remove('hide'), 300);
-        }, 3000);
+        setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
-    // --- Popup Content Setters ---
+    overlay.addEventListener('click', hideAllModals);
+    document.querySelectorAll('.btn-close').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const modal = btn.closest('.modal');
+            if (modal) hideModal(modal);
+        });
+    });
 
+    // ---- POPUP CONTENT ----
     function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
@@ -1310,58 +1346,55 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pending-title').textContent = 'Trade Scheduled';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
         document.getElementById('pending-asset').textContent = trade.asset;
-        // This is primarily for Copy Trade now.
-        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString(); 
+        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
         document.getElementById('pending-time-container').style.display = 'inline';
         showModal(modalPending);
     }
 
     function showWinPopup(trade) {
-        document.getElementById('win-amount').textContent = `+ $${trade.pnl.toFixed(2)}`;
+        document.getElementById('win-amount').textContent = `+$${trade.pnl.toFixed(2)}`;
         showModal(modalWin);
     }
 
     function showLossPopup(trade) {
-        document.getElementById('loss-amount').textContent = `$${Math.abs(trade.pnl).toFixed(2)}`;
+        document.getElementById('loss-amount').textContent = `-$${Math.abs(trade.pnl).toFixed(2)}`;
         showModal(modalLoss);
     }
 
-    function showCopySuccessPopup(asset) { 
+    function showCopySuccessPopup(asset) {
         document.getElementById('copy-success-asset').textContent = asset;
         showModal(modalCopySuccess);
     }
 
-    function showCopyExecutedToast(trade) { 
+    function showCopyExecutedToast(trade) {
         document.getElementById('copy-executed-text').textContent = `Copy trade for ${trade.asset || trade.tradingPair} is now active!`;
         showToast(toastCopyExecuted);
     }
 
     function showTradeDetails(tradeId) {
         const trade = tradeHistoryData[tradeId];
-        if (!trade) {
-            console.error('Trade details not found for ID:', tradeId);
-            return;
-        }
+        if (!trade) return;
 
         const asset = trade.asset || trade.tradingPair;
+        // FIX 4: Use correct field names from Trade model (entryPrice, exitPrice)
+        const entryPrice = trade.entryPrice;
+        const exitPrice = trade.exitPrice;
         const pnl = trade.pnl;
-        const openingPrice = trade.openingPrice || trade.entryPrice;
-        const closingPrice = trade.closingPrice || trade.exitPrice;
 
         document.getElementById('detail-asset').textContent = asset;
         document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt).toLocaleString();
+        document.getElementById('detail-opening-price').textContent = entryPrice ? `$${formatPrice(entryPrice, asset)}` : 'N/A';
+        document.getElementById('detail-closing-price').textContent = exitPrice ? `$${formatPrice(exitPrice, asset)}` : 'N/A';
 
-        document.getElementById('detail-opening-price').textContent = openingPrice ? `$${formatPrice(openingPrice, asset)}` : 'N/A';
-        document.getElementById('detail-closing-price').textContent = closingPrice ? `$${formatPrice(closingPrice, asset)}` : 'N/A';
-
-        const pnlElement = document.getElementById('detail-pnl');
+        const pnlEl = document.getElementById('detail-pnl');
         const pnlContainer = document.getElementById('detail-pnl-container');
 
-        if (pnl !== undefined) {
-            const isPositive = pnl >= 0;
-            pnlElement.textContent = `${isPositive ? '+' : ''}$${pnl.toFixed(2)}`;
-            pnlElement.className = `trade-detail-value ${isPositive ? 'positive' : 'negative'}`;
-            pnlContainer.className = `trade-detail-pnl ${isPositive ? '' : 'loss'}`;
+        if (pnl !== undefined && pnl !== null) {
+            const isPos = pnl >= 0;
+            pnlEl.textContent = `${isPos ? '+' : ''}$${pnl.toFixed(2)}`;
+            pnlEl.style.color = isPos ? '#10b981' : '#ef4444';
+            pnlContainer.style.background = isPos ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+            pnlContainer.style.borderColor = isPos ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)';
             pnlContainer.style.display = 'block';
         } else {
             pnlContainer.style.display = 'none';
@@ -1370,54 +1403,27 @@ document.addEventListener('DOMContentLoaded', () => {
         showModal(modalTradeDetails);
     }
 
-    // --- Event Listeners for Close Buttons ---
-
-    const closeButtons = document.querySelectorAll('.btn-close, .close-trade-details');
-    closeButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const modal = btn.closest('.modal');
-            if(modal) hideModal(modal);
-        });
-    });
-
-    overlay.addEventListener('click', () => {
-        allModals.forEach(modal => {
-            if (modal.classList.contains('show')) {
-                hideModal(modal);
-            }
-        });
-    });
-
-    // --- Confetti Logic ---
-
+    // ---- CONFETTI ----
     function triggerConfetti() {
         const container = document.getElementById('confetti-container');
         container.innerHTML = '';
-        const colors = ['#059669', '#10b981', '#34d399', '#fde047', '#facc15'];
-
+        const colors = ['#10b981','#34d399','#f59e0b','#60a5fa','#a78bfa'];
         for (let i = 0; i < 30; i++) {
-            const particle = document.createElement('div');
-            particle.classList.add('confetti-particle');
-            const x = Math.random() * 100 + '%';
-            const delay = Math.random() * 0.5 + 's';
-            const color = colors[Math.floor(Math.random() * colors.length)];
-            const rotation = Math.random() * 360 + 'deg';
-
-            particle.style.left = x;
-            particle.style.animationDelay = delay;
-            particle.style.backgroundColor = color;
-            particle.style.transform = `rotateZ(${rotation})`;
-
-            container.appendChild(particle);
+            const p = document.createElement('div');
+            p.className = 'confetti-particle';
+            p.style.left = `${Math.random() * 100}%`;
+            p.style.animationDelay = `${Math.random() * 0.5}s`;
+            p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            p.style.transform = `rotateZ(${Math.random() * 360}deg)`;
+            container.appendChild(p);
         }
-        setTimeout(() => { container.innerHTML = ''; }, 2500);
+        setTimeout(() => container.innerHTML = '', 2500);
     }
 
-    // --- Initializations ---
-    // Removed setTradeMode(false) and intervals for populateTimeSelector
-    // Instant trade is now the default and only option.
-    setInterval(() => socket.emit('request_copy_trades'), 30000); 
-
+    // ---- AUTO REFRESH COPY TRADES ----
+    setInterval(() => {
+        if (activeTab === 'copy-trade') fetchCopyTrades();
+    }, 30000);
 });
 </script>
 </body>
