@@ -1,13 +1,13 @@
+// routes/user.js - CORRECTED VERSION
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
-const Message = require('../models/Message'); // ⭐ NEW: Import Message model
+const Message = require('../models/Message');
 const authMiddleware = require('../middleware/auth');
 
-// This route provides all data for the dashboard.html
 router.get('/dashboard', authMiddleware, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -18,6 +18,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         const recentTrades = await Trade.find({ userId: userId, status: 'closed' })
             .sort({ closeTime: -1 })
             .limit(5);
+
         const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
         const marketData = req.app.get('marketData') || {};
         const assets = [
@@ -26,7 +27,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         ];
         const marketInfo = assets.map(pair => {
             const data = marketData[pair];
-            if (!data || typeof data.currentPrice !== 'number') { return null; }
+            if (!data || typeof data.currentPrice !== 'number') return null;
             const lastCandle = (Array.isArray(data.candles) && data.candles[data.candles.length - 1]) || data.currentCandle;
             if (!lastCandle || typeof lastCandle.open !== 'number' || lastCandle.open === 0) {
                 return { name: pair.replace('USDT', ''), ticker: pair.replace('USDT', ''), price: data.currentPrice || 0, change: 0 };
@@ -41,7 +42,12 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
                 username: user.username,
                 balance: user.balance,
                 todayPnl: parseFloat(todayPnl.toFixed(2)),
-                recentTrades: recentTrades.map(trade => ({ asset: trade.symbol, pnl: parseFloat((trade.pnl || 0).toFixed(2)), result: trade.result })),
+                recentTrades: recentTrades.map(trade => ({
+                    // FIX: trade.symbol → trade.asset (correct field name from Trade model)
+                    asset: trade.asset,
+                    pnl: parseFloat((trade.pnl || 0).toFixed(2)),
+                    result: trade.result
+                })),
                 assets: marketInfo
             }
         });
@@ -51,11 +57,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     }
 });
 
-// This route provides basic user info like balance and join date
 router.get('/info', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select('-password');
-        if (!user) { return res.status(404).json({ success: false, message: 'User not found.' }); }
+        if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
         res.json({ success: true, user: user });
     } catch (error) {
         console.error("Error fetching user info:", error);
@@ -63,12 +68,11 @@ router.get('/info', authMiddleware, async (req, res) => {
     }
 });
 
-// This route provides the user's referral data
 router.get('/referral-info', authMiddleware, async (req, res) => {
     try {
         const userId = new mongoose.Types.ObjectId(req.user.id);
         const user = await User.findById(userId).select('referralCode referralCommissions');
-        if (!user) { return res.status(404).json({ success: false, message: 'User not found.' }); }
+        if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
         const referralCount = await User.countDocuments({ referredBy: userId });
         res.json({
             success: true,
@@ -82,7 +86,6 @@ router.get('/referral-info', authMiddleware, async (req, res) => {
     }
 });
 
-// This route provides all trading statistics, including the advanced ones
 router.get('/stats', authMiddleware, async (req, res) => {
     try {
         const userId = new mongoose.Types.ObjectId(req.user.id);
@@ -113,18 +116,17 @@ router.get('/stats', authMiddleware, async (req, res) => {
     }
 });
 
-// This route handles changing the user's password
 router.post('/change-password', authMiddleware, async (req, res) => {
     const { currentPassword, newPassword, confirmNewPassword } = req.body;
-    if (!currentPassword || !newPassword || !confirmNewPassword) { return res.status(400).json({ success: false, message: 'All fields are required.' }); }
-    if (newPassword !== confirmNewPassword) { return res.status(400).json({ success: false, message: 'New passwords do not match.' }); }
-    if (newPassword.length < 6) { return res.status(400).json({ success: false, message: 'New password must be at least 6 characters.' }); }
+    if (!currentPassword || !newPassword || !confirmNewPassword) return res.status(400).json({ success: false, message: 'All fields are required.' });
+    if (newPassword !== confirmNewPassword) return res.status(400).json({ success: false, message: 'New passwords do not match.' });
+    if (newPassword.length < 6) return res.status(400).json({ success: false, message: 'New password must be at least 6 characters.' });
 
     try {
         const user = await User.findById(req.user.id);
-        if (!user) { return res.status(404).json({ success: false, message: 'User not found.' }); }
+        if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
         const isMatch = await user.comparePassword(currentPassword);
-        if (!isMatch) { return res.status(400).json({ success: false, message: 'Incorrect current password.' }); }
+        if (!isMatch) return res.status(400).json({ success: false, message: 'Incorrect current password.' });
         user.password = newPassword;
         await user.save();
         res.json({ success: true, message: 'Password updated successfully.' });
@@ -134,13 +136,10 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     }
 });
 
-// ADDED: This route provides the data for the volume tracker on the profile page
 router.get('/volume-data', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select('totalDeposits totalTradeVolume');
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found.' });
-        }
+        if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
         res.json({
             success: true,
             totalDeposits: user.totalDeposits,
@@ -152,33 +151,20 @@ router.get('/volume-data', authMiddleware, async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// NEW: COPY TRADE ROUTES FOR USERS (Unchanged)
-// ----------------------------------------------------------------------
-
-// [GET] /api/user/copy-trades/available - Get available copy trades for users with balance > $100
 router.get('/copy-trades/available', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select('balance');
-        
-        if (!user) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "User not found" 
-            });
-        }
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        // Check if user has minimum balance of $100
         if (user.balance < 100) {
-            return res.json({ 
-                success: true, 
+            return res.json({
+                success: true,
                 copyTrades: [],
-                message: "Minimum $100 balance required to view copy trades" 
+                message: "Minimum $100 balance required to view copy trades"
             });
         }
 
-        // Get active copy trades that haven't expired
-        const availableTrades = await AdminCopyTrade.find({ 
+        const availableTrades = await AdminCopyTrade.find({
             status: 'active',
             executionTime: { $gt: new Date() }
         })
@@ -186,22 +172,18 @@ router.get('/copy-trades/available', authMiddleware, async (req, res) => {
         .select('tradingPair direction percentage executionTime createdAt')
         .sort({ executionTime: 1 });
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             copyTrades: availableTrades,
             userBalance: user.balance
         });
 
     } catch (error) {
         console.error('Available Copy Trades Fetch Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to fetch available copy trades" 
-        });
+        res.status(500).json({ success: false, message: "Failed to fetch available copy trades" });
     }
 });
 
-// [GET] /api/user/copy-trades/my-copies - Get user's copied trades history
 router.get('/copy-trades/my-copies', authMiddleware, async (req, res) => {
     try {
         const userCopyTrades = await AdminCopyTrade.find({
@@ -212,10 +194,9 @@ router.get('/copy-trades/my-copies', authMiddleware, async (req, res) => {
         .sort({ createdAt: -1 });
 
         const formattedTrades = userCopyTrades.map(trade => {
-            const userCopy = trade.userCopies.find(copy => 
+            const userCopy = trade.userCopies.find(copy =>
                 copy.userId.toString() === req.user.id
             );
-            
             return {
                 _id: trade._id,
                 tradingPair: trade.tradingPair,
@@ -229,31 +210,18 @@ router.get('/copy-trades/my-copies', authMiddleware, async (req, res) => {
             };
         });
 
-        res.json({
-            success: true,
-            copiedTrades: formattedTrades
-        });
+        res.json({ success: true, copiedTrades: formattedTrades });
 
     } catch (error) {
         console.error('User Copy Trades History Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Failed to fetch copy trade history" 
-        });
+        res.status(500).json({ success: false, message: "Failed to fetch copy trade history" });
     }
 });
 
-
-// ----------------------------------------------------------------------
-// ⭐ NEW: SUPPORT CHAT ROUTES (USER FACING) ⭐
-// ----------------------------------------------------------------------
-
-// [GET] /api/user/support/conversation/:userId - Fetch the user's chat history
 router.get('/support/conversation/:userId', authMiddleware, async (req, res) => {
     try {
         const { userId } = req.params;
 
-        // Ensure the logged-in user is only viewing their own chat
         if (req.user.id !== userId) {
             return res.status(403).json({ success: false, message: "Forbidden: Cannot view another user's chat." });
         }
@@ -262,7 +230,6 @@ router.get('/support/conversation/:userId', authMiddleware, async (req, res) => 
             .select('sender text createdAt')
             .sort('createdAt');
 
-        // Mark admin replies as read by user
         await Message.updateMany(
             { userId: userId, sender: 'admin', readByUser: false },
             { $set: { readByUser: true } }
@@ -283,7 +250,6 @@ router.get('/support/conversation/:userId', authMiddleware, async (req, res) => 
     }
 });
 
-// [POST] /api/user/support/send - Send a new message from the user
 router.post('/support/send', authMiddleware, async (req, res) => {
     const { message } = req.body;
     const userId = req.user.id;
@@ -291,18 +257,17 @@ router.post('/support/send', authMiddleware, async (req, res) => {
     if (!message || message.trim().length === 0) {
         return res.status(400).json({ success: false, message: 'Message cannot be empty.' });
     }
-    
+
     try {
         const newMessage = new Message({
             userId: userId,
             sender: 'user',
             text: message.trim(),
-            readByAdmin: false, // Mark as UNREAD for admin
+            readByAdmin: false,
             readByUser: true,
         });
 
         await newMessage.save();
-
         res.json({ success: true, message: 'Message sent successfully.' });
 
     } catch (error) {
