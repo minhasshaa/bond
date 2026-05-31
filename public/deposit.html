@@ -3,275 +3,592 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deposit - Trading App</title>
+    <title>Deposit - TradePro</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { 
-            font-family: 'Inter', sans-serif; 
-            padding-bottom: 80px; 
-            /* MATCH DASHBOARD BACKGROUND */
-            background-color: #0c1021;
+        :root {
+            --bg-primary: #050b18;
+            --bg-secondary: #0a1628;
+            --bg-card: #0d1f3c;
+            --accent-blue: #3b82f6;
+            --accent-gold: #f59e0b;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --border-color: rgba(59, 130, 246, 0.15);
+            --text-primary: #f0f4ff;
+            --text-secondary: #8899bb;
         }
 
-        /* 5-ITEM Bottom Nav Style (Fixed) - MATCHED FROM DASHBOARD */
-        .bottom-nav { 
-            position: fixed; 
-            bottom: 0; 
-            left: 0; 
-            width: 100%; 
-            display: flex; 
-            justify-content: space-around; 
-            z-index: 1000; 
-            background-color: #111827; 
-            border-top: 1px solid #374151; 
-            padding: 8px 0; 
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            padding-bottom: 90px;
+            min-height: 100vh;
+            background-image:
+                radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 0%, rgba(245, 158, 11, 0.05) 0%, transparent 50%);
         }
-        .nav-link { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: center; 
-            flex-grow: 1; 
-            text-decoration: none; 
-            color: #9ca3af; 
-            font-weight: 500; 
-            font-size: 0.75rem; /* 12px */
-            transition: all 0.2s ease-in-out; 
-            gap: 4px; 
-            width: 20%; 
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: var(--bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--accent-blue); border-radius: 2px; }
+
+        /* ---- GLASS CARD ---- */
+        .glass-card {
+            background: rgba(13, 31, 60, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 20px;
         }
-        .nav-link svg { 
-            width: 24px; 
-            height: 24px; 
+
+        /* ---- STEP BADGE ---- */
+        .step-badge {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: white;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }
-        .nav-link.active { 
-            /* MATCH DASHBOARD ACTIVE COLOR */
-            color: #4ade80; 
-            font-weight: 600; 
+
+        /* ---- WARNING BOX ---- */
+        .warning-box {
+            background: rgba(245, 158, 11, 0.08);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            border-radius: 14px;
+            padding: 14px 16px;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        /* ---- ADDRESS BOX ---- */
+        .address-box {
+            background: rgba(5, 11, 24, 0.8);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        /* ---- INPUT ---- */
+        .form-input {
+            width: 100%;
+            background: rgba(5, 11, 24, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 13px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus { border-color: rgba(59, 130, 246, 0.5); }
+        .form-input::placeholder { color: var(--text-secondary); }
+        .form-input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+        /* ---- LABEL ---- */
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }
+
+        /* ---- BUTTONS ---- */
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            font-weight: 600;
+            font-size: 15px;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4); }
+        .btn-primary:active { transform: scale(0.99); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        .btn-copy {
+            padding: 8px 16px;
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 10px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            font-family: 'Inter', sans-serif;
+        }
+        .btn-copy:hover { background: rgba(59, 130, 246, 0.25); }
+        .btn-copy.copied {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.3);
+            color: #10b981;
+        }
+
+        /* ---- HISTORY ITEM ---- */
+        .history-item {
+            background: rgba(13, 31, 60, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        /* ---- STATUS BADGE ---- */
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: capitalize;
+            white-space: nowrap;
+        }
+        .status-completed { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+        .status-pending { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
+        .status-rejected { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+
+        /* ---- DIVIDER ---- */
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+
+        /* ---- SECTION LABEL ---- */
+        .section-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        /* ---- SKELETON ---- */
+        .skeleton {
+            background: linear-gradient(90deg, rgba(13,31,60,0.8) 25%, rgba(59,130,246,0.05) 50%, rgba(13,31,60,0.8) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 12px;
+        }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+        /* ---- BOTTOM NAV ---- */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: rgba(10, 22, 40, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border-color);
+            padding: 10px 0 20px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 1000;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 500;
+            flex: 1;
+            transition: all 0.2s;
+            position: relative;
+            padding: 4px 0;
+        }
+        .nav-item svg { width: 22px; height: 22px; transition: all 0.2s; }
+        .nav-item.active { color: var(--accent-blue); }
+        .nav-item.active::before {
+            content: '';
+            position: absolute;
+            top: -10px; left: 50%;
+            transform: translateX(-50%);
+            width: 32px; height: 3px;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 0 0 4px 4px;
+        }
+
+        /* ---- NETWORK CHIP ---- */
+        .network-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #60a5fa;
+        }
+
+        /* ---- CURRENCY CHIPS ---- */
+        .currency-chip {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(13, 31, 60, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
         }
     </style>
 </head>
-<body class="text-gray-100">
+<body>
 
     <script>
-        const token = localStorage.getItem('authToken');
-        if (!token) { window.location.href = '/login.html'; }
+        if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
     </script>
 
-    <div class="container mx-auto p-4 max-w-4xl">
-        <header class="mb-6">
-            <h1 class="text-2xl font-bold text-white">Deposit Crypto</h1>
-            <p class="text-gray-400">Follow the steps below to add funds.</p>
+    <div class="container mx-auto px-4 pt-6 max-w-lg">
+
+        <!-- ===== HEADER ===== -->
+        <header style="margin-bottom: 24px;">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
+                <a href="dashboard.html" style="color:var(--text-secondary); display:flex; align-items:center;">
+                    <svg style="width:20px;height:20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                    </svg>
+                </a>
+                <h1 style="font-size:20px; font-weight:700; color:var(--text-primary);">Deposit</h1>
+            </div>
+            <p style="font-size:13px; color:var(--text-secondary); margin-left:32px;">Add funds to your trading account</p>
         </header>
 
-        <main id="deposit-content" class="space-y-6">
+        <main style="display:flex; flex-direction:column; gap:16px;">
 
-            <div class="p-4 space-y-4">
-                <h2 class="text-xl font-semibold mb-4">Step 1: Send Funds</h2>
-                <div class="bg-orange-900/50 border border-orange-500 text-orange-200 px-4 py-3 rounded-lg mb-4" role="alert">
-                    <div class="flex">
-                        <div class="py-1"><svg class="fill-current h-6 w-6 text-orange-400 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM9 5v6h2V5H9zm0 8v2h2v-2H9z"/></svg></div>
-                        <div>
-                            <p class="font-bold">Important: Use the Correct Network</p>
-                            <p class="text-sm">Send funds using the <strong>Ethereum (ERC-20)</strong> network only. Using any other network will result in a permanent loss of funds.</p>
-                            <p class="text-sm mt-2">Supported currencies: <strong>ETH, USDT, USDC, DAI</strong>.</p>
-                        </div>
+            <!-- ===== STEP 1: SEND FUNDS ===== -->
+            <div class="glass-card">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                    <div class="step-badge">1</div>
+                    <div>
+                        <p style="font-weight:700; font-size:15px; color:var(--text-primary);">Send Funds</p>
+                        <p style="font-size:12px; color:var(--text-secondary);">Transfer crypto to your deposit address</p>
                     </div>
                 </div>
-                <div id="loading-spinner" class="text-center py-4"><p class="text-gray-400">Generating deposit address...</p></div>
-                <div id="error-message-container" class="hidden text-red-400 bg-red-900/50 p-4 rounded-lg"><p id="error-message"></p></div>
-                <div id="address-container" class="hidden">
-                    <p class="text-gray-400 mb-2">Send funds to this address:</p>
-                    <div class="bg-gray-900 p-4 rounded-lg flex items-center justify-between">
-                        <code id="deposit-address" class="text-sm text-yellow-300 break-all"></code>
-                        <button id="copy-button" class="ml-4 px-3 py-1.5 text-sm font-medium bg-green-600 rounded-lg hover:bg-green-700">Copy</button>
+
+                <!-- Warning -->
+                <div class="warning-box" style="margin-bottom:16px;">
+                    <svg style="width:18px;height:18px;color:#f59e0b;flex-shrink:0;margin-top:1px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    <div>
+                        <p style="font-size:13px; font-weight:600; color:#f59e0b; margin-bottom:4px;">Use Correct Network Only</p>
+                        <p style="font-size:12px; color:#d97706; line-height:1.5;">
+                            Send via <strong>Ethereum (ERC-20)</strong> network only. Wrong network = permanent loss of funds.
+                        </p>
                     </div>
+                </div>
+
+                <!-- Network & Currency Info -->
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+                    <span class="section-label" style="margin-right:4px;">Network:</span>
+                    <span class="network-chip">
+                        <span style="width:6px;height:6px;border-radius:50%;background:#3b82f6;display:inline-block;"></span>
+                        ERC-20
+                    </span>
+                    <span class="section-label" style="margin-left:8px; margin-right:4px;">Accepts:</span>
+                    <span class="currency-chip">ETH</span>
+                    <span class="currency-chip">USDT</span>
+                    <span class="currency-chip">USDC</span>
+                    <span class="currency-chip">DAI</span>
+                </div>
+
+                <!-- Address -->
+                <div id="loading-spinner" style="text-align:center; padding:16px 0;">
+                    <div class="skeleton" style="height:16px; width:60%; margin:0 auto 8px;"></div>
+                    <div class="skeleton" style="height:48px; width:100%;"></div>
+                </div>
+
+                <div id="error-message-container" style="display:none;">
+                    <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:12px; padding:12px 16px;">
+                        <p id="error-message" style="font-size:13px; color:#ef4444;"></p>
+                    </div>
+                </div>
+
+                <div id="address-container" style="display:none;">
+                    <p class="section-label" style="margin-bottom:8px;">Your Deposit Address</p>
+                    <div class="address-box">
+                        <code id="deposit-address" style="font-size:12px; color:#60a5fa; word-break:break-all; line-height:1.6; flex:1;"></code>
+                        <button id="copy-button" class="btn-copy">Copy</button>
+                    </div>
+                    <p style="font-size:11px; color:var(--text-secondary); margin-top:8px; text-align:center;">
+                        This address is unique to your account
+                    </p>
                 </div>
             </div>
 
-            <div class="h-px bg-gray-700 mx-4"></div> <div class="p-4 space-y-4">
-                <h2 class="text-xl font-semibold mb-4">Step 2: Submit for Verification</h2>
-                <p class="text-gray-400 mb-4">After sending, enter the amount and paste the Transaction ID (TXID) below.</p>
-                <form id="txid-form" class="space-y-4">
+            <!-- ===== STEP 2: SUBMIT TXID ===== -->
+            <div class="glass-card">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+                    <div class="step-badge">2</div>
                     <div>
-                        <label for="amount-input" class="block text-sm font-medium text-gray-300 mb-1">Amount (USD)</label>
-                        <input type="number" id="amount-input" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm" placeholder="e.g., 50.00" required min="0" step="0.01">
+                        <p style="font-weight:700; font-size:15px; color:var(--text-primary);">Submit for Verification</p>
+                        <p style="font-size:12px; color:var(--text-secondary);">Enter amount and paste your TXID</p>
+                    </div>
+                </div>
+
+                <form id="txid-form" style="display:flex; flex-direction:column; gap:14px;">
+                    <div>
+                        <label class="form-label" for="amount-input">Amount (USD)</label>
+                        <input type="number" id="amount-input" class="form-input" placeholder="e.g. 100.00" required min="0" step="0.01">
                     </div>
                     <div>
-                        <label for="txid-input" class="block text-sm font-medium text-gray-300 mb-1">Transaction ID (TXID)</label>
-                        <input type="text" id="txid-input" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm" placeholder="Paste your TXID here" required>
+                        <label class="form-label" for="txid-input">Transaction ID (TXID)</label>
+                        <input type="text" id="txid-input" class="form-input" placeholder="Paste your transaction hash here" required>
                     </div>
-                    <button type="submit" id="submit-txid-button" class="w-full mt-4 px-4 py-2.5 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700">Submit for Verification</button>
+                    <button type="submit" id="submit-txid-button" class="btn-primary">
+                        Submit for Verification
+                    </button>
                 </form>
-                <div id="form-message" class="mt-4 text-center text-sm"></div>
+
+                <div id="form-message" style="margin-top:12px; text-align:center; font-size:13px; font-weight:500;"></div>
             </div>
 
-            <div class="h-px bg-gray-700 mx-4"></div> <div class="p-4 space-y-4">
-                <h2 class="text-xl font-semibold mb-4">Deposit History</h2>
-                <div id="history-container" class="space-y-3">
-                    <p id="history-loading" class="text-gray-400 text-center">Loading history...</p>
+            <!-- ===== DEPOSIT HISTORY ===== -->
+            <div class="glass-card">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <div style="width:32px;height:32px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);display:flex;align-items:center;justify-content:center;">
+                            <svg style="width:16px;height:16px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                        </div>
+                        <p style="font-weight:700; font-size:15px;">Deposit History</p>
+                    </div>
+                </div>
+
+                <div id="history-container" style="display:flex; flex-direction:column; gap:10px;">
+                    <div class="skeleton" style="height:60px;"></div>
+                    <div class="skeleton" style="height:60px;"></div>
+                    <div class="skeleton" style="height:60px;"></div>
                 </div>
             </div>
+
         </main>
     </div>
 
+    <!-- ===== BOTTOM NAV ===== -->
     <nav class="bottom-nav">
-        <a href="dashboard.html" class="nav-link" id="nav-dashboard">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+        <a href="dashboard.html" class="nav-item" id="nav-dashboard">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+            </svg>
             <span>Home</span>
         </a>
-        <a href="trade.html" class="nav-link" id="nav-trade">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+        <a href="trade.html" class="nav-item" id="nav-trade">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+            </svg>
             <span>Trade</span>
         </a>
-        <a href="deposit.html" class="nav-link" id="nav-deposit">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+        <a href="deposit.html" class="nav-item" id="nav-deposit">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
             <span>Deposit</span>
         </a>
-        <a href="withdraw.html" class="nav-link" id="nav-withdraw">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
-            <span>Withdraw</span>
+        <a href="withdraw.html" class="nav-item" id="nav-withdraw">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+            </svg>
+            <span>Wallet</span>
         </a>
-        <a href="profile.html" class="nav-link" id="nav-profile">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+        <a href="profile.html" class="nav-item" id="nav-profile">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
             <span>Profile</span>
         </a>
     </nav>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // Set active nav link and body class
-            const currentPage = 'deposit'; // Hardcoded for this file
-            document.querySelectorAll('.nav-link').forEach(link => {
-                link.classList.remove('active');
-            });
-            const activeLink = document.getElementById(`nav-${currentPage}`);
-            if (activeLink) activeLink.classList.add('active');
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('nav-deposit').classList.add('active');
 
+        const token = localStorage.getItem('authToken');
+        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
 
-            const token = localStorage.getItem('authToken');
-            // Using the original Authorization header method
-            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const errorContainer = document.getElementById('error-message-container');
+        const errorMessageEl = document.getElementById('error-message');
+        const addressContainer = document.getElementById('address-container');
+        const depositAddressEl = document.getElementById('deposit-address');
+        const copyButton = document.getElementById('copy-button');
+        const txidForm = document.getElementById('txid-form');
+        const txidInput = document.getElementById('txid-input');
+        const amountInput = document.getElementById('amount-input');
+        const formMessage = document.getElementById('form-message');
+        const submitTxidButton = document.getElementById('submit-txid-button');
+        const historyContainer = document.getElementById('history-container');
 
-            const loadingSpinner = document.getElementById('loading-spinner');
-            const errorContainer = document.getElementById('error-message-container');
-            const errorMessageEl = document.getElementById('error-message');
-            const addressContainer = document.getElementById('address-container');
-            const depositAddressEl = document.getElementById('deposit-address');
-            const copyButton = document.getElementById('copy-button');
-            const txidForm = document.getElementById('txid-form');
-            const txidInput = document.getElementById('txid-input');
-            const amountInput = document.getElementById('amount-input');
-            const formMessage = document.getElementById('form-message');
-            const submitTxidButton = document.getElementById('submit-txid-button');
-            const historyContainer = document.getElementById('history-container');
-            const historyLoading = document.getElementById('history-loading');
-
-            const fetchDepositAddress = async () => {
-                try {
-                    const response = await fetch('/api/deposit/address', { headers });
-                    const data = await response.json();
-                    loadingSpinner.classList.add('hidden');
-                    if (data.success) {
-                        depositAddressEl.textContent = data.address;
-                        addressContainer.classList.remove('hidden');
-                    } else {
-                        throw new Error(data.message || 'Could not generate deposit address.');
-                    }
-                } catch (err) {
-                    loadingSpinner.classList.add('hidden');
-                    errorMessageEl.textContent = err.message;
-                    errorContainer.classList.remove('hidden');
+        // ---- FETCH DEPOSIT ADDRESS ----
+        const fetchDepositAddress = async () => {
+            try {
+                const response = await fetch('/api/deposit/address', { headers });
+                const data = await response.json();
+                loadingSpinner.style.display = 'none';
+                if (data.success) {
+                    depositAddressEl.textContent = data.address;
+                    addressContainer.style.display = 'block';
+                } else {
+                    throw new Error(data.message || 'Could not generate deposit address.');
                 }
-            };
+            } catch (err) {
+                loadingSpinner.style.display = 'none';
+                errorMessageEl.textContent = err.message;
+                errorContainer.style.display = 'block';
+            }
+        };
 
-            const fetchDepositHistory = async () => {
-                try {
-                    const response = await fetch('/api/deposit/history', { headers });
-                    const data = await response.json();
-                    historyLoading.classList.add('hidden');
-                    if (data.success && data.history.length > 0) {
-                        historyContainer.innerHTML = '';
-                        data.history.forEach(tx => {
-                            const txDate = new Date(tx.date).toLocaleString();
-                            const statusColor = tx.status === 'completed' ? 'text-green-400' : (tx.status === 'rejected' ? 'text-red-400' : 'text-yellow-400');
-                            const statusText = tx.status.replace('_', ' ');
+        // ---- FETCH DEPOSIT HISTORY ----
+        const fetchDepositHistory = async () => {
+            try {
+                const response = await fetch('/api/deposit/history', { headers });
+                const data = await response.json();
 
-                            const historyItemHTML = `
-                                <div class="bg-gray-900 p-3 rounded-lg flex justify-between items-center text-sm">
-                                    <div>
-                                        <p class="text-gray-400">
-                                            <a href="https://etherscan.io/tx/${tx.txid}" target="_blank" class="text-blue-400 hover:underline truncate" title="${tx.txid}">
-                                                ${tx.txid.substring(0, 10)}...${tx.txid.substring(tx.txid.length - 8)}
-                                            </a>
-                                        </p>
-                                        <p class="text-xs text-gray-500">${txDate}</p>
-                                    </div>
-                                    <div class="font-semibold ${statusColor} capitalize">${statusText}</div>
-                                </div>`;
-                            historyContainer.innerHTML += historyItemHTML;
-                        });
-                    } else {
-                        historyContainer.innerHTML = '<p class="text-gray-500 text-center">No deposit history found.</p>';
-                    }
-                } catch (err) {
-                    historyLoading.classList.add('hidden');
-                    historyContainer.innerHTML = '<p class="text-red-400 text-center">Could not load history.</p>';
-                }
-            };
+                if (data.success && data.history.length > 0) {
+                    historyContainer.innerHTML = '';
+                    data.history.forEach(tx => {
+                        const txDate = new Date(tx.date).toLocaleString();
+                        const shortTxid = tx.txid.length > 18
+                            ? `${tx.txid.substring(0, 10)}...${tx.txid.substring(tx.txid.length - 8)}`
+                            : tx.txid;
 
-            fetchDepositAddress();
-            fetchDepositHistory();
+                        let statusClass = 'status-pending';
+                        let statusText = tx.status.replace(/_/g, ' ');
+                        if (tx.status === 'completed') statusClass = 'status-completed';
+                        if (tx.status === 'rejected') statusClass = 'status-rejected';
 
-            copyButton.addEventListener('click', () => {
-                navigator.clipboard.writeText(depositAddressEl.textContent).then(() => {
-                    copyButton.textContent = 'Copied!';
-                    setTimeout(() => { copyButton.textContent = 'Copy'; }, 2000);
-                });
-            });
+                        const amountText = tx.amount ? `$${parseFloat(tx.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
 
-            txidForm.addEventListener('submit', async (event) => {
-                event.preventDefault();
-                const amount = parseFloat(amountInput.value);
-                const txid = txidInput.value.trim();
-
-                if (isNaN(amount) || amount <= 0) {
-                    formMessage.style.color = '#f87171';
-                    formMessage.textContent = 'Please enter a valid, positive amount.';
-                    return;
-                }
-
-                submitTxidButton.disabled = true;
-                submitTxidButton.textContent = 'Submitting...';
-                formMessage.textContent = '';
-                try {
-                    const response = await fetch('/api/deposit/verify', {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify({ txid: txid, amount: amount })
+                        const item = document.createElement('div');
+                        item.className = 'history-item';
+                        item.innerHTML = `
+                            <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                    <svg style="width:16px;height:16px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                                    </svg>
+                                </div>
+                                <div style="min-width:0;">
+                                    <a href="https://etherscan.io/tx/${tx.txid}" target="_blank"
+                                        style="font-size:13px;font-weight:600;color:#60a5fa;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                        ${shortTxid}
+                                    </a>
+                                    <p style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${txDate}</p>
+                                </div>
+                            </div>
+                            <div style="text-align:right;flex-shrink:0;">
+                                ${amountText ? `<p style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${amountText}</p>` : ''}
+                                <span class="status-badge ${statusClass}">${statusText}</span>
+                            </div>
+                        `;
+                        historyContainer.appendChild(item);
                     });
-                    const result = await response.json();
-                    if (result.success) {
-                        formMessage.style.color = '#34d399';
-                        formMessage.textContent = result.message;
-                        txidInput.value = '';
-                        amountInput.value = '';
-                        fetchDepositHistory();
-                    } else {
-                        throw new Error(result.message || 'Submission failed.');
-                    }
-                } catch (error) {
-                    formMessage.style.color = '#f87171';
-                    formMessage.textContent = error.message;
-                } finally {
-                    submitTxidButton.disabled = false;
-                    submitTxidButton.textContent = 'Submit for Verification';
+                } else {
+                    historyContainer.innerHTML = `
+                        <div style="text-align:center;padding:24px 0;">
+                            <p style="font-size:13px;color:var(--text-secondary);">No deposit history yet.</p>
+                        </div>`;
                 }
+            } catch (err) {
+                historyContainer.innerHTML = `<p style="text-align:center;font-size:13px;color:#ef4444;">Could not load history.</p>`;
+            }
+        };
+
+        fetchDepositAddress();
+        fetchDepositHistory();
+
+        // ---- COPY BUTTON ----
+        copyButton.addEventListener('click', () => {
+            navigator.clipboard.writeText(depositAddressEl.textContent).then(() => {
+                copyButton.textContent = '✓ Copied!';
+                copyButton.classList.add('copied');
+                setTimeout(() => {
+                    copyButton.textContent = 'Copy';
+                    copyButton.classList.remove('copied');
+                }, 2000);
             });
         });
+
+        // ---- SUBMIT TXID ----
+        txidForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const amount = parseFloat(amountInput.value);
+            const txid = txidInput.value.trim();
+
+            if (isNaN(amount) || amount <= 0) {
+                formMessage.style.color = '#ef4444';
+                formMessage.textContent = 'Please enter a valid positive amount.';
+                return;
+            }
+
+            submitTxidButton.disabled = true;
+            submitTxidButton.textContent = 'Submitting...';
+            formMessage.textContent = '';
+
+            try {
+                const response = await fetch('/api/deposit/verify', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ txid, amount })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    formMessage.style.color = '#10b981';
+                    formMessage.textContent = result.message;
+                    txidInput.value = '';
+                    amountInput.value = '';
+                    fetchDepositHistory();
+                } else {
+                    throw new Error(result.message || 'Submission failed.');
+                }
+            } catch (error) {
+                formMessage.style.color = '#ef4444';
+                formMessage.textContent = error.message;
+            } finally {
+                submitTxidButton.disabled = false;
+                submitTxidButton.textContent = 'Submit for Verification';
+            }
+        });
+    });
     </script>
 </body>
 </html>
