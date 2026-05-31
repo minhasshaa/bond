@@ -3,64 +3,193 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up - Trading App</title>
+    <title>Sign Up - TradePro</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .form-input-container { position: relative; }
+        :root {
+            --bg-primary: #050b18;
+            --bg-secondary: #0a1628;
+            --bg-card: #0d1f3c;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --border-color: rgba(59, 130, 246, 0.15);
+            --text-primary: #f0f4ff;
+            --text-secondary: #8899bb;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background-image:
+                radial-gradient(ellipse at 20% 20%, rgba(59,130,246,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(16,185,129,0.05) 0%, transparent 50%);
+        }
+
+        .card {
+            background: rgba(13,31,60,0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 36px 32px;
+            width: 100%;
+            max-width: 460px;
+        }
+
+        .logo-icon {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 20px;
+            box-shadow: 0 8px 24px rgba(59,130,246,0.3);
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }
+
+        .input-wrapper { position: relative; }
+
         .form-input {
             width: 100%;
-            padding: 0.75rem 1rem;
-            padding-right: 3rem; /* Space for the eye icon */
-            margin-top: 0.5rem;
-            color: #e5e7eb;
-            background-color: #374151;
-            border: 1px solid #4b5563;
-            border-radius: 0.5rem;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        .form-input:focus {
+            background: rgba(5,11,24,0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 13px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
             outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+            transition: border-color 0.2s;
+            appearance: none;
         }
+        .form-input:focus { border-color: rgba(59,130,246,0.5); }
+        .form-input::placeholder { color: var(--text-secondary); }
+
+        .form-input-pw { padding-right: 44px; }
+
         .toggle-password {
             position: absolute;
+            right: 14px;
             top: 50%;
-            right: 1rem;
-            transform: translateY(10%);
+            transform: translateY(-50%);
             cursor: pointer;
-            color: #9ca3af;
-            z-index: 10;
+            color: var(--text-secondary);
+            background: none;
+            border: none;
+            display: flex;
+            align-items: center;
+            padding: 0;
         }
+        .toggle-password:hover { color: var(--text-primary); }
+
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            font-weight: 700;
+            font-size: 15px;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 4px 16px rgba(59,130,246,0.3);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59,130,246,0.4); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        .referral-banner {
+            background: rgba(16,185,129,0.08);
+            border: 1px solid rgba(16,185,129,0.2);
+            border-radius: 12px;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #10b981;
+            font-weight: 500;
+        }
+
+        .divider { height: 1px; background: var(--border-color); margin: 4px 0; }
+
+        .msg-success { color: #10b981; font-size: 13px; font-weight: 500; text-align: center; }
+        .msg-error { color: #ef4444; font-size: 13px; font-weight: 500; text-align: center; }
+
+        /* Password strength indicator */
+        .strength-bar {
+            height: 3px;
+            border-radius: 2px;
+            margin-top: 6px;
+            transition: all 0.3s;
+            background: var(--border-color);
+        }
+        .strength-weak { background: #ef4444; width: 33%; }
+        .strength-medium { background: #f59e0b; width: 66%; }
+        .strength-strong { background: #10b981; width: 100%; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen p-4">
+<body>
 
-    <div class="w-full max-w-lg p-8 space-y-6 bg-gray-800 rounded-xl shadow-lg">
-        <h1 class="text-3xl font-bold text-center text-white">Create Your Account</h1>
+    <script>
+        // FIX 2: Redirect already logged in users
+        if (localStorage.getItem('authToken')) window.location.href = '/dashboard.html';
+    </script>
 
-        <form id="signup-form" class="space-y-4">
-            <input type="hidden" id="referralCodeInput" value="">
-            <div id="referral-display" class="bg-gray-700 text-sm p-3 rounded-lg hidden">
-                You were invited by a friend!
+    <div class="card">
+        <!-- Logo -->
+        <div class="logo-icon">
+            <svg style="width:28px;height:28px;color:white;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+            </svg>
+        </div>
+
+        <h1 style="font-size:22px; font-weight:800; text-align:center; color:var(--text-primary); margin-bottom:4px;">Create Account</h1>
+        <p style="font-size:13px; color:var(--text-secondary); text-align:center; margin-bottom:24px;">Join TradePro and start trading today</p>
+
+        <!-- Referral Banner -->
+        <div id="referral-display" style="display:none; margin-bottom:16px;">
+            <div class="referral-banner">
+                <svg style="width:16px;height:16px;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/>
+                </svg>
+                You were invited by a friend! Referral bonus applied.
             </div>
+        </div>
+
+        <form id="signup-form" style="display:flex; flex-direction:column; gap:14px;">
+            <input type="hidden" id="referralCodeInput" value="">
 
             <div>
-                <label for="username" class="text-sm font-medium text-gray-300">Username</label>
+                <label class="form-label">Username</label>
                 <input type="text" id="username" required class="form-input" placeholder="Choose a username">
             </div>
 
             <div>
-                <label for="email" class="text-sm font-medium text-gray-300">Email</label>
+                <label class="form-label">Email Address</label>
                 <input type="email" id="email" required class="form-input" placeholder="you@example.com">
             </div>
 
             <div>
-                <label for="region" class="text-sm font-medium text-gray-300">Region</label>
+                <label class="form-label">Region</label>
                 <select id="region" required class="form-input">
                     <option value="" disabled selected>Select your region</option>
                     <option value="Africa">Africa</option>
@@ -72,119 +201,147 @@
                 </select>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="form-input-container">
-                    <label for="password" class="text-sm font-medium text-gray-300">Password</label>
-                    <input type="password" id="password" required class="form-input" placeholder="••••••••">
-                    <span class="toggle-password" data-target="password">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                    </span>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <div>
+                    <label class="form-label">Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="password" required class="form-input form-input-pw" placeholder="Min. 6 chars">
+                        <button type="button" class="toggle-password" data-target="password">
+                            <svg class="eye-open" style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            <svg class="eye-closed" style="width:18px;height:18px;display:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                                <line stroke-linecap="round" stroke-linejoin="round" stroke-width="2" x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Password strength bar -->
+                    <div class="strength-bar" id="strength-bar"></div>
                 </div>
-                <div class="form-input-container">
-                    <label for="confirmPassword" class="text-sm font-medium text-gray-300">Confirm Password</label>
-                    <input type="password" id="confirmPassword" required class="form-input" placeholder="••••••••">
-                     <span class="toggle-password" data-target="confirmPassword">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                    </span>
+                <div>
+                    <label class="form-label">Confirm Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="confirmPassword" required class="form-input form-input-pw" placeholder="••••••••">
+                        <button type="button" class="toggle-password" data-target="confirmPassword">
+                            <svg class="eye-open" style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            <svg class="eye-closed" style="width:18px;height:18px;display:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                                <line stroke-linecap="round" stroke-linejoin="round" stroke-width="2" x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <button type="submit" class="w-full px-4 py-3 font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 transition-colors duration-300">
-                Sign Up
-            </button>
+            <button type="submit" id="signup-btn" class="btn-primary" style="margin-top:4px;">Create Account</button>
         </form>
 
-        <div id="message" class="text-center text-sm min-h-[20px]"></div>
+        <div id="message" style="margin-top:12px; min-height:20px;"></div>
 
-        <p class="text-sm text-center text-gray-400">
-            Already have an account? 
-            <a href="/login.html" class="font-medium text-blue-400 hover:underline">Log in</a>
+        <div class="divider" style="margin:20px 0;"></div>
+
+        <p style="font-size:13px; color:var(--text-secondary); text-align:center;">
+            Already have an account?
+            <a href="/login.html" style="color:#60a5fa; font-weight:600; text-decoration:none; margin-left:4px;">Sign In</a>
         </p>
     </div>
 
     <script>
-        // --- Referral Code Extraction ---
+        // ---- REFERRAL CODE ----
         const urlParams = new URLSearchParams(window.location.search);
         const refCode = urlParams.get('ref');
-        const referralCodeInput = document.getElementById('referralCodeInput');
-        const referralDisplay = document.getElementById('referral-display');
-        
-        // If code is found in URL, set the hidden input value and display the message
         if (refCode) {
-            referralCodeInput.value = refCode;
-            referralDisplay.classList.remove('hidden');
+            document.getElementById('referralCodeInput').value = refCode;
+            document.getElementById('referral-display').style.display = 'block';
         }
 
-        // --- Password Visibility Toggle Logic ---
-        const setupPasswordToggles = () => {
-            document.querySelectorAll('.toggle-password').forEach(toggle => {
-                if (toggle.classList.contains('listener-attached')) return;
-
-                toggle.onclick = () => {
-                    const targetId = toggle.getAttribute('data-target');
-                    const targetInput = document.getElementById(targetId);
-                    if (!targetInput) return;
-                    
-                    const isPassword = targetInput.type === 'password';
-                    
-                    targetInput.type = isPassword ? 'text' : 'password';
-                    
-                    toggle.innerHTML = isPassword ? 
-                        '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057 5.064-7 9.542-7 1.258 0 2.484.225 3.637.643M19.5 12l-1.5-1.5M4.5 12l1.5-1.5M21 21l-1.5-1.5m-5.49-5.49L21 21"></path></svg>' : // Closed eye icon
-                        '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>'; // Open eye icon
-                };
-                toggle.classList.add('listener-attached');
+        // ---- PASSWORD TOGGLE ----
+        // FIX 3: Same clean toggle as login page
+        function setupPasswordToggles() {
+            document.querySelectorAll('.toggle-password').forEach(btn => {
+                if (btn.dataset.listenerAttached) return;
+                btn.dataset.listenerAttached = 'true';
+                btn.addEventListener('click', () => {
+                    const input = document.getElementById(btn.dataset.target);
+                    if (!input) return;
+                    const isPassword = input.type === 'password';
+                    input.type = isPassword ? 'text' : 'password';
+                    btn.querySelector('.eye-open').style.display = isPassword ? 'none' : 'block';
+                    btn.querySelector('.eye-closed').style.display = isPassword ? 'block' : 'none';
+                });
             });
-        };
+        }
         setupPasswordToggles();
 
-        // --- Original Signup Logic (Updated to include refCode) ---
-        const signupForm = document.getElementById('signup-form');
-        const messageDiv = document.getElementById('message');
+        // ---- PASSWORD STRENGTH INDICATOR ----
+        document.getElementById('password').addEventListener('input', (e) => {
+            const val = e.target.value;
+            const bar = document.getElementById('strength-bar');
+            bar.className = 'strength-bar';
+            if (val.length === 0) return;
+            if (val.length < 6) bar.classList.add('strength-weak');
+            else if (val.length < 10) bar.classList.add('strength-medium');
+            else bar.classList.add('strength-strong');
+        });
 
-        signupForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
+        // ---- SIGNUP ----
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('signup-btn');
+            const messageDiv = document.getElementById('message');
             messageDiv.textContent = '';
-            messageDiv.className = 'text-center text-sm min-h-[20px]';
+            messageDiv.className = '';
 
-            const username = document.getElementById('username').value;
-            const email = document.getElementById('email').value;
+            const username = document.getElementById('username').value.trim();
+            const email = document.getElementById('email').value.trim();
             const region = document.getElementById('region').value;
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
-            // ⭐ FIX: Get the referral code from the hidden input field
-            const refCodeToSend = referralCodeInput.value; 
+            const refCodeToSend = document.getElementById('referralCodeInput').value;
 
-            if (password !== confirmPassword) {
-                messageDiv.textContent = 'Error: Passwords do not match.';
-                messageDiv.classList.add('text-red-400');
+            // FIX 1: Client-side minimum password length check
+            if (password.length < 6) {
+                messageDiv.textContent = 'Password must be at least 6 characters.';
+                messageDiv.className = 'msg-error';
                 return;
             }
 
+            if (password !== confirmPassword) {
+                messageDiv.textContent = 'Passwords do not match.';
+                messageDiv.className = 'msg-error';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Creating Account...';
+
             try {
-                const response = await fetch('/api/auth/register', {
+                const res = await fetch('/api/auth/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    // ⭐ FIX: Include refCodeToSend in the payload
-                    body: JSON.stringify({ username, email, password, confirmPassword, region, refCode: refCodeToSend }),
+                    body: JSON.stringify({ username, email, password, confirmPassword, region, refCode: refCodeToSend })
                 });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || 'Registration failed.');
 
-                const data = await response.json();
+                messageDiv.textContent = data.message || 'Account created! Redirecting...';
+                messageDiv.className = 'msg-success';
+                document.getElementById('signup-form').reset();
+                document.getElementById('strength-bar').className = 'strength-bar';
 
-                if (!response.ok) {
-                    throw new Error(data.message || 'Registration failed');
-                }
+                setTimeout(() => window.location.href = '/login.html', 2000);
 
-                messageDiv.textContent = data.message;
-                messageDiv.classList.add('text-green-400');
-                signupForm.reset();
-                setTimeout(() => {
-                    window.location.href = '/login.html';
-                }, 2000); // Redirect to login after 2 seconds
-
-            } catch (error) {
-                messageDiv.textContent = `Error: ${error.message}`;
-                messageDiv.classList.add('text-red-400');
+            } catch (err) {
+                messageDiv.textContent = err.message;
+                messageDiv.className = 'msg-error';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Account';
             }
         });
     </script>
