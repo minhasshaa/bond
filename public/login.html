@@ -3,352 +3,512 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Trading App</title>
+    <title>Login - TradePro</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        
-        /* Modal Styles */
-        .modal-backdrop {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
+        :root {
+            --bg-primary: #050b18;
+            --bg-secondary: #0a1628;
+            --bg-card: #0d1f3c;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --border-color: rgba(59, 130, 246, 0.15);
+            --text-primary: #f0f4ff;
+            --text-secondary: #8899bb;
         }
 
-        /* Password Toggle Styles */
-        .form-input-container { position: relative; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background-image:
+                radial-gradient(ellipse at 20% 20%, rgba(59,130,246,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(16,185,129,0.05) 0%, transparent 50%);
+        }
+
+        .card {
+            background: rgba(13,31,60,0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 36px 32px;
+            width: 100%;
+            max-width: 420px;
+        }
+
+        .logo-icon {
+            width: 56px; height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 20px;
+            box-shadow: 0 8px 24px rgba(59,130,246,0.3);
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }
+
+        .input-wrapper { position: relative; }
+
         .form-input {
             width: 100%;
-            padding: 0.75rem 1rem;
-            padding-right: 3rem; /* Space for the eye icon */
-            margin-top: 0.5rem;
-            color: #e5e7eb;
-            background-color: #374151;
-            border: 1px solid #4b5563;
-            border-radius: 0.5rem;
-            transition: border-color 0.2s, box-shadow 0.2s;
+            background: rgba(5,11,24,0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 13px 44px 13px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
         }
+        .form-input:focus { border-color: rgba(59,130,246,0.5); }
+        .form-input::placeholder { color: var(--text-secondary); }
+
         .toggle-password {
             position: absolute;
+            right: 14px;
             top: 50%;
-            right: 1rem;
-            transform: translateY(10%);
+            transform: translateY(-50%);
             cursor: pointer;
-            color: #9ca3af;
-            z-index: 10;
+            color: var(--text-secondary);
+            background: none;
+            border: none;
+            display: flex;
+            align-items: center;
+            padding: 0;
         }
+        .toggle-password:hover { color: var(--text-primary); }
+
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            font-weight: 700;
+            font-size: 15px;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 4px 16px rgba(59,130,246,0.3);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59,130,246,0.4); }
+        .btn-primary:active { transform: scale(0.99); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        .btn-ghost {
+            width: 100%;
+            padding: 10px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            transition: color 0.2s;
+        }
+        .btn-ghost:hover { color: var(--text-primary); }
+
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+
+        /* ---- MODAL ---- */
+        .modal-backdrop {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+        .modal-card {
+            background: #0d1f3c;
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 32px 28px;
+            width: 100%; max-width: 400px;
+            animation: popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
+        }
+        @keyframes popIn { 0% { transform:scale(0.85); opacity:0; } 100% { transform:scale(1); opacity:1; } }
+
+        /* ---- STEP INDICATOR ---- */
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .step-dot {
+            width: 28px; height: 28px;
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 700;
+        }
+        .step-dot.active {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+        }
+        .step-dot.inactive {
+            background: rgba(59,130,246,0.1);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+        .step-line {
+            flex: 1; height: 1px;
+            background: var(--border-color);
+        }
+
+        /* ---- MESSAGE ---- */
+        .msg-success { color: #10b981; font-size: 13px; font-weight: 500; text-align: center; }
+        .msg-error { color: #ef4444; font-size: 13px; font-weight: 500; text-align: center; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen">
+<body>
 
-    <div class="w-full max-w-md p-8 space-y-6 bg-gray-800 rounded-xl shadow-lg">
-        <h1 class="text-3xl font-bold text-center text-white">Welcome Back</h1>
+    <script>
+        // FIX 1: Redirect already logged in users
+        if (localStorage.getItem('authToken')) window.location.href = '/dashboard.html';
+    </script>
 
-        <form id="login-form" class="space-y-6">
+    <div class="card">
+        <!-- Logo -->
+        <div class="logo-icon">
+            <svg style="width:28px;height:28px;color:white;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+            </svg>
+        </div>
+
+        <h1 style="font-size:22px; font-weight:800; text-align:center; color:var(--text-primary); margin-bottom:4px;">Welcome Back</h1>
+        <p style="font-size:13px; color:var(--text-secondary); text-align:center; margin-bottom:28px;">Sign in to your trading account</p>
+
+        <form id="login-form" style="display:flex; flex-direction:column; gap:16px;">
             <div>
-                <label for="username" class="text-sm font-medium text-gray-300">Username/Email</label>
-                <input 
-                    type="text" 
-                    id="username" 
-                    required 
-                    class="w-full px-4 py-2 mt-2 text-gray-100 bg-gray-700 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Enter your username or email"
-                >
+                <label class="form-label">Username or Email</label>
+                <div class="input-wrapper">
+                    <input type="text" id="username" required class="form-input" placeholder="Enter username or email" style="padding-right:16px;">
+                </div>
             </div>
 
-            <div class="form-input-container">
-                <label for="password" class="text-sm font-medium text-gray-300">Password</label>
-                <input 
-                    type="password" 
-                    id="password" 
-                    required 
-                    class="w-full px-4 py-2 mt-2 text-gray-100 bg-gray-700 border border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="••••••••"
-                >
-                <span class="toggle-password" data-target="password">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                </span>
-            </div>
-            
-            <div class="flex justify-end">
-                <a href="#" id="forgot-password-link" class="text-sm text-blue-400 hover:underline">Forgot Password?</a>
+            <div>
+                <label class="form-label">Password</label>
+                <div class="input-wrapper">
+                    <input type="password" id="password" required class="form-input" placeholder="••••••••">
+                    <!-- FIX 3: Correct password toggle as button element -->
+                    <button type="button" class="toggle-password" data-target="password">
+                        <svg class="eye-open" style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        <svg class="eye-closed" style="width:18px;height:18px;display:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                            <line stroke-linecap="round" stroke-linejoin="round" stroke-width="2" x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
+            <div style="text-align:right; margin-top:-8px;">
+                <a href="#" id="forgot-password-link" style="font-size:13px; color:#60a5fa; text-decoration:none;">Forgot Password?</a>
+            </div>
 
-            <button type="submit" class="w-full px-4 py-2 font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 transition-colors duration-300">
-                Login
-            </button>
+            <button type="submit" id="login-btn" class="btn-primary">Sign In</button>
         </form>
 
-        <div id="message" class="text-center text-sm"></div>
+        <div id="message" style="margin-top:12px; min-height:20px;"></div>
 
-        <p class="text-sm text-center text-gray-400">
-            Don't have an account? 
-            <a href="/signup.html" class="font-medium text-blue-400 hover:underline">Sign up</a>
+        <div class="divider" style="margin:20px 0;"></div>
+
+        <p style="font-size:13px; color:var(--text-secondary); text-align:center;">
+            Don't have an account?
+            <a href="/signup.html" style="color:#60a5fa; font-weight:600; text-decoration:none; margin-left:4px;">Sign Up</a>
         </p>
     </div>
-    
-    <div id="forgot-password-modal" class="modal-backdrop hidden">
-        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md space-y-6">
-            <h2 class="text-2xl font-bold text-white text-center" id="modal-title">Password Reset</h2>
-            
-            <div id="step-identity" class="space-y-4">
-                <p class="text-gray-400 text-sm">To reset your password, please verify your identity using the details submitted during KYC.</p>
-                <form id="verify-identity-form" class="space-y-4">
-                    <div>
-                        <label for="reset-username" class="text-sm font-medium text-gray-300">Your Username</label>
-                        <input type="text" id="reset-username" required class="form-input" placeholder="Enter your account username">
-                    </div>
-                    <div>
-                        <label for="reset-fullname" class="text-sm font-medium text-gray-300">Full Name (KYC)</label>
-                        <input type="text" id="reset-fullname" required class="form-input" placeholder="Your full name as per ID">
-                    </div>
-                    <div>
-                        <label for="reset-idnumber" class="text-sm font-medium text-gray-300">Identity Number (KYC)</label>
-                        <input type="text" id="reset-idnumber" required class="form-input" placeholder="Your ID/Document Number">
-                    </div>
-                    <button type="submit" id="verify-identity-btn" class="w-full px-4 py-2 font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700">
-                        Verify Identity
-                    </button>
-                </form>
+
+    <!-- ===== FORGOT PASSWORD MODAL ===== -->
+    <div id="forgot-password-modal" class="modal-backdrop" style="display:none;">
+        <div class="modal-card">
+
+            <h2 style="font-size:18px; font-weight:800; color:var(--text-primary); margin-bottom:4px;">Reset Password</h2>
+            <p style="font-size:12px; color:var(--text-secondary); margin-bottom:20px;">Verify your identity to reset your password</p>
+
+            <!-- Step Indicator -->
+            <div class="step-indicator">
+                <div class="step-dot active" id="step-dot-1">1</div>
+                <div class="step-line"></div>
+                <div class="step-dot inactive" id="step-dot-2">2</div>
             </div>
-            
-            <div id="step-password" class="space-y-4 hidden">
-                <p class="text-gray-400 text-sm">Identity verified. Enter and confirm your new password below.</p>
-                <form id="set-new-password-form" class="space-y-4">
-                    <div class="form-input-container">
-                        <label for="new-password" class="text-sm font-medium text-gray-300">New Password</label>
-                        <input type="password" id="new-password" required class="form-input" placeholder="••••••••">
-                        <span class="toggle-password" data-target="new-password">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                        </span>
+
+            <!-- Step 1: Verify Identity -->
+            <div id="step-identity">
+                <form id="verify-identity-form" style="display:flex; flex-direction:column; gap:12px;">
+                    <div>
+                        <label class="form-label">Username or Email</label>
+                        <input type="text" id="reset-username" required class="form-input" style="padding-right:16px;" placeholder="Your account username or email">
                     </div>
-                    <div class="form-input-container">
-                        <label for="confirm-new-password" class="text-sm font-medium text-gray-300">Confirm Password</label>
-                        <input type="password" id="confirm-new-password" required class="form-input" placeholder="••••••••">
-                        <span class="toggle-password" data-target="confirm-new-password">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                        </span>
+                    <div>
+                        <label class="form-label">Full Name (KYC)</label>
+                        <input type="text" id="reset-fullname" required class="form-input" style="padding-right:16px;" placeholder="Full name as per ID">
                     </div>
-                    <button type="submit" id="set-new-password-btn" class="w-full px-4 py-2 font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-                        Update Password
-                    </button>
+                    <div>
+                        <label class="form-label">Identity Number (KYC)</label>
+                        <input type="text" id="reset-idnumber" required class="form-input" style="padding-right:16px;" placeholder="Your ID / Document Number">
+                    </div>
+                    <button type="submit" id="verify-identity-btn" class="btn-primary" style="margin-top:4px;">Verify Identity</button>
                 </form>
             </div>
 
-            <div id="reset-message" class="text-center text-sm min-h-[20px]"></div>
-            
-            <button id="close-modal-btn" class="text-sm text-gray-400 hover:text-white mt-4 w-full">Close</button>
+            <!-- Step 2: Set New Password -->
+            <div id="step-password" style="display:none;">
+                <form id="set-new-password-form" style="display:flex; flex-direction:column; gap:12px;">
+                    <div>
+                        <label class="form-label">New Password</label>
+                        <div class="input-wrapper">
+                            <input type="password" id="new-password" required class="form-input" placeholder="Min. 6 characters">
+                            <button type="button" class="toggle-password" data-target="new-password">
+                                <svg class="eye-open" style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                                <svg class="eye-closed" style="width:18px;height:18px;display:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                                    <line stroke-linecap="round" stroke-linejoin="round" stroke-width="2" x1="1" y1="1" x2="23" y2="23"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label">Confirm New Password</label>
+                        <div class="input-wrapper">
+                            <input type="password" id="confirm-new-password" required class="form-input" placeholder="••••••••">
+                            <button type="button" class="toggle-password" data-target="confirm-new-password">
+                                <svg class="eye-open" style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                                <svg class="eye-closed" style="width:18px;height:18px;display:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                                    <line stroke-linecap="round" stroke-linejoin="round" stroke-width="2" x1="1" y1="1" x2="23" y2="23"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <button type="submit" id="set-new-password-btn" class="btn-primary" style="margin-top:4px;">Update Password</button>
+                </form>
+            </div>
+
+            <div id="reset-message" style="margin-top:12px; min-height:20px;"></div>
+            <button id="close-modal-btn" class="btn-ghost" style="margin-top:8px;">Cancel</button>
         </div>
     </div>
 
     <script>
-        const loginForm = document.getElementById('login-form');
-        const messageDiv = document.getElementById('message');
-        const forgotPasswordLink = document.getElementById('forgot-password-link');
-        const modal = document.getElementById('forgot-password-modal');
-        const closeModalBtn = document.getElementById('close-modal-btn');
-        const resetMessageDiv = document.getElementById('reset-message');
+        // ---- PASSWORD TOGGLE SETUP ----
+        // FIX 3: Toggle using SVG swap instead of innerHTML replacement
+        function setupPasswordToggles() {
+            document.querySelectorAll('.toggle-password').forEach(btn => {
+                if (btn.dataset.listenerAttached) return;
+                btn.dataset.listenerAttached = 'true';
+                btn.addEventListener('click', () => {
+                    const input = document.getElementById(btn.dataset.target);
+                    if (!input) return;
+                    const isPassword = input.type === 'password';
+                    input.type = isPassword ? 'text' : 'password';
+                    btn.querySelector('.eye-open').style.display = isPassword ? 'none' : 'block';
+                    btn.querySelector('.eye-closed').style.display = isPassword ? 'block' : 'none';
+                });
+            });
+        }
+        setupPasswordToggles();
 
+        // ---- STATE ----
+        let currentResetToken = null;
+        let resetUsernameForStep2 = null;
+
+        const modal = document.getElementById('forgot-password-modal');
+        const resetMessageDiv = document.getElementById('reset-message');
         const stepIdentity = document.getElementById('step-identity');
         const stepPassword = document.getElementById('step-password');
-        
-        const verifyIdentityForm = document.getElementById('verify-identity-form');
-        const setNewPasswordForm = document.getElementById('set-new-password-form');
-        const verifyIdentityBtn = document.getElementById('verify-identity-btn');
-        const setNewPasswordBtn = document.getElementById('set-new-password-btn');
+        const stepDot1 = document.getElementById('step-dot-1');
+        const stepDot2 = document.getElementById('step-dot-2');
 
-        // ⭐ NEW STATE VARIABLES for the two-step token flow
-        let currentResetToken = null; 
-        let resetUsernameForStep2 = null; 
-
-        // Helper function for password toggles
-        const setupPasswordToggles = () => {
-            document.querySelectorAll('.toggle-password').forEach(toggle => {
-                toggle.onclick = () => {
-                    const targetId = toggle.getAttribute('data-target');
-                    const targetInput = document.getElementById(targetId);
-                    const isPassword = targetInput.type === 'password';
-                    
-                    targetInput.type = isPassword ? 'text' : 'password';
-                    
-                    // Change the icon 
-                    toggle.innerHTML = isPassword ? 
-                        '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057 5.064-7 9.542-7 1.258 0 2.484.225 3.637.643M19.5 12l-1.5-1.5M4.5 12l1.5-1.5M21 21l-1.5-1.5m-5.49-5.49L21 21"></path></svg>' : // Closed eye icon
-                        '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>'; // Open eye icon
-                };
-            });
-        };
-        setupPasswordToggles(); // Setup toggles for login form on load
-
-        const openModal = () => {
-            modal.classList.remove('hidden');
-            stepIdentity.classList.remove('hidden');
-            stepPassword.classList.add('hidden');
-            resetMessageDiv.textContent = '';
-            
-            // Reset state variables on open
+        // ---- MODAL OPEN/CLOSE ----
+        document.getElementById('forgot-password-link').addEventListener('click', (e) => {
+            e.preventDefault();
             currentResetToken = null;
             resetUsernameForStep2 = null;
-
-            // Reset forms on open
-            verifyIdentityForm.reset();
-            setNewPasswordForm.reset();
-            setupPasswordToggles(); // Setup toggles for modal forms
-        };
-
-        const closeModal = () => {
-            modal.classList.add('hidden');
-            // Clear token regardless of how modal was closed
-            currentResetToken = null; 
-            resetUsernameForStep2 = null; 
-        };
-        
-        // --- Event Listeners for Modal ---
-        forgotPasswordLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            openModal();
-        });
-        closeModalBtn.addEventListener('click', closeModal);
-
-        // --- Identity Verification (Step 1) ---
-        verifyIdentityForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
+            document.getElementById('verify-identity-form').reset();
+            document.getElementById('set-new-password-form').reset();
             resetMessageDiv.textContent = '';
-            resetMessageDiv.classList.remove('text-green-400', 'text-red-400');
-            verifyIdentityBtn.disabled = true;
-            verifyIdentityBtn.textContent = 'Verifying...';
+            resetMessageDiv.className = '';
+            stepIdentity.style.display = 'block';
+            stepPassword.style.display = 'none';
+            stepDot1.className = 'step-dot active';
+            stepDot2.className = 'step-dot inactive';
+            modal.style.display = 'flex';
+            setupPasswordToggles();
+        });
 
-            const username = document.getElementById('reset-username').value;
-            const fullName = document.getElementById('reset-fullname').value;
-            const identityNumber = document.getElementById('reset-idnumber').value;
+        function closeModal() {
+            modal.style.display = 'none';
+            currentResetToken = null;
+            resetUsernameForStep2 = null;
+        }
+        document.getElementById('close-modal-btn').addEventListener('click', closeModal);
+
+        // ---- STEP 1: VERIFY IDENTITY ----
+        document.getElementById('verify-identity-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('verify-identity-btn');
+            resetMessageDiv.textContent = '';
+            resetMessageDiv.className = '';
+            btn.disabled = true;
+            btn.textContent = 'Verifying...';
+
+            const username = document.getElementById('reset-username').value.trim();
+            const fullName = document.getElementById('reset-fullname').value.trim();
+            const identityNumber = document.getElementById('reset-idnumber').value.trim();
 
             try {
-                // API call to verify identity (username, name, ID)
-                const response = await fetch('/api/auth/reset-password/verify-identity', {
+                const res = await fetch('/api/auth/reset-password/verify-identity', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, fullName, identityNumber }),
+                    body: JSON.stringify({ username, fullName, identityNumber })
                 });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || 'Verification failed.');
 
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.message || 'Verification failed');
-                
-                // ⭐ NEW: Store the token received from the server (Step 1 success)
-                currentResetToken = data.resetToken; 
-                // ⭐ NEW: Store username for use in Step 2
+                currentResetToken = data.resetToken;
                 resetUsernameForStep2 = username;
 
-                // Success: Move to step 2 (Set new password)
-                stepIdentity.classList.add('hidden');
-                stepPassword.classList.remove('hidden');
-                resetMessageDiv.textContent = 'Identity verified successfully. Proceed to set new password.';
-                resetMessageDiv.classList.add('text-green-400');
-                
-            } catch (error) {
-                resetMessageDiv.textContent = `Error: ${error.message}`;
-                resetMessageDiv.classList.add('text-red-400');
+                stepIdentity.style.display = 'none';
+                stepPassword.style.display = 'block';
+                stepDot1.className = 'step-dot inactive';
+                stepDot2.className = 'step-dot active';
+
+                resetMessageDiv.textContent = 'Identity verified. Set your new password.';
+                resetMessageDiv.className = 'msg-success';
+
+            } catch (err) {
+                resetMessageDiv.textContent = err.message;
+                resetMessageDiv.className = 'msg-error';
             } finally {
-                verifyIdentityBtn.disabled = false;
-                verifyIdentityBtn.textContent = 'Verify Identity';
+                btn.disabled = false;
+                btn.textContent = 'Verify Identity';
             }
         });
 
-        // --- Set New Password (Step 2) ---
-        setNewPasswordForm.addEventListener('submit', async (e) => {
+        // ---- STEP 2: SET NEW PASSWORD ----
+        document.getElementById('set-new-password-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            const btn = document.getElementById('set-new-password-btn');
             resetMessageDiv.textContent = '';
-            resetMessageDiv.classList.remove('text-green-400', 'text-red-400');
-            setNewPasswordBtn.disabled = true;
-            setNewPasswordBtn.textContent = 'Updating...';
-            
-            // ⭐ MODIFIED: Use the stored username and token
-            const username = resetUsernameForStep2; 
+            resetMessageDiv.className = '';
+
             const newPassword = document.getElementById('new-password').value;
             const confirmPassword = document.getElementById('confirm-new-password').value;
-            const resetToken = currentResetToken; // ⭐ CRUCIAL: Get the token from the variable
-            
-            if (!resetToken || !username) {
-                resetMessageDiv.textContent = 'Error: Verification state is missing. Please restart the process.';
-                resetMessageDiv.classList.add('text-red-400');
-                setNewPasswordBtn.disabled = false;
-                setNewPasswordBtn.textContent = 'Update Password';
+
+            if (!currentResetToken || !resetUsernameForStep2) {
+                resetMessageDiv.textContent = 'Session expired. Please restart the process.';
+                resetMessageDiv.className = 'msg-error';
+                return;
+            }
+
+            // FIX: Client-side minimum password length check
+            if (newPassword.length < 6) {
+                resetMessageDiv.textContent = 'Password must be at least 6 characters.';
+                resetMessageDiv.className = 'msg-error';
                 return;
             }
 
             if (newPassword !== confirmPassword) {
-                resetMessageDiv.textContent = 'Error: New passwords do not match.';
-                resetMessageDiv.classList.add('text-red-400');
-                setNewPasswordBtn.disabled = false;
-                setNewPasswordBtn.textContent = 'Update Password';
+                resetMessageDiv.textContent = 'Passwords do not match.';
+                resetMessageDiv.className = 'msg-error';
                 return;
             }
 
+            btn.disabled = true;
+            btn.textContent = 'Updating...';
+
             try {
-                // ⭐ CRUCIAL: Include the resetToken in the payload for Step 2
-                const response = await fetch('/api/auth/reset-password/update-password', {
+                const res = await fetch('/api/auth/reset-password/update-password', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, newPassword, resetToken }), // Pass the token!
+                    body: JSON.stringify({
+                        username: resetUsernameForStep2,
+                        newPassword,
+                        resetToken: currentResetToken
+                    })
                 });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || 'Password update failed.');
 
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.message || 'Password update failed');
-                
-                // Final Success
-                resetMessageDiv.textContent = 'Password updated successfully. You can now log in.';
-                resetMessageDiv.classList.add('text-green-400');
-                setNewPasswordForm.reset();
-                setTimeout(closeModal, 3000); 
+                resetMessageDiv.textContent = 'Password updated! Redirecting to login...';
+                resetMessageDiv.className = 'msg-success';
+                document.getElementById('set-new-password-form').reset();
+                setTimeout(closeModal, 2500);
 
-            } catch (error) {
-                resetMessageDiv.textContent = `Error: ${error.message}`;
-                resetMessageDiv.classList.add('text-red-400');
+            } catch (err) {
+                resetMessageDiv.textContent = err.message;
+                resetMessageDiv.className = 'msg-error';
             } finally {
-                setNewPasswordBtn.disabled = false;
-                setNewPasswordBtn.textContent = 'Update Password';
-                // ⭐ NEW: Clear token regardless of success or fail to prevent token reuse
-                currentResetToken = null; 
+                btn.disabled = false;
+                btn.textContent = 'Update Password';
+                // Token clear after use
+                currentResetToken = null;
             }
         });
 
-
-        // --- Original Login Logic ---
-        loginForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
+        // ---- LOGIN ----
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const messageDiv = document.getElementById('message');
             messageDiv.textContent = '';
-            messageDiv.className = 'text-center text-sm';
+            messageDiv.className = '';
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
 
-            const username = document.getElementById('username').value;
+            const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
 
             try {
-                // This request now supports login with username or email (due to server-side fix)
-                const response = await fetch('/api/auth/login', {
+                const res = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password }),
+                    body: JSON.stringify({ username, password })
                 });
-
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.message || 'Login failed');
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || 'Login failed.');
 
                 localStorage.setItem('authToken', data.token);
                 window.location.href = '/dashboard.html';
 
-            } catch (error) {
-                messageDiv.textContent = `Error: ${error.message}`;
-                messageDiv.classList.add('text-red-400');
+            } catch (err) {
+                messageDiv.textContent = err.message;
+                messageDiv.className = 'msg-error';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
             }
         });
     </script>
