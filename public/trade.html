@@ -293,20 +293,10 @@
     }
     .cancel-btn:hover { background: rgba(245,158,11,0.2); }
 
-    /* ---- COPY TRADE CARD ---- */
+    /* ---- COPY TRADE CARD (Premium Base Style) ---- */
     .copy-card {
-        background: rgba(13,31,60,0.6);
-        border: 1px solid rgba(59,130,246,0.2);
-        border-radius: 16px;
-        padding: 16px;
         transition: all 0.2s;
     }
-    .copy-card:hover { border-color: rgba(59,130,246,0.4); }
-    .copy-card.expiring {
-        border-color: rgba(239,68,68,0.3);
-        background: rgba(239,68,68,0.05);
-    }
-
     .copy-btn {
         width: 100%;
         padding: 11px;
@@ -946,7 +936,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-        function renderCopyTrades() {
+    // 🚀 NEW PREMIUM DESIGN COPY TRADES FUNCTION
+    function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
         if (availableCopyTrades.length === 0) {
             noCopyTrades.style.display = 'block';
@@ -962,20 +953,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const minutesLeft = Math.max(0, Math.floor(diffMs / 60000));
             const isExpiring = minutesLeft < 5;
 
-            // 🚀 NEW: Progress Bar Percentage (Shrinks as time decreases)
             const progressPercent = Math.max(2, Math.min(100, (minutesLeft / 15) * 100));
-            
-            // 🚀 NEW: Dynamic 'Hot' Badge if trade uses 10% or more balance
             const isPopular = trade.percentage >= 10; 
 
-            const isUp = trade.direction === 'CALL';
+            const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
             const directionColor = isUp ? '#10b981' : '#ef4444';
             const directionBg = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
 
             const card = document.createElement('div');
-            
-            // 🚀 NEW: Premium Gradient Design Card
-            card.className = `copy-card${isExpiring ? ' expiring' : ''}`;
+            card.className = `copy-card`;
             card.style.position = 'relative';
             card.style.overflow = 'hidden';
             card.style.background = 'linear-gradient(145deg, rgba(13,31,60,0.8) 0%, rgba(5,11,24,0.95) 100%)';
@@ -994,7 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                         <div>
                             <div style="display:flex; align-items:center; gap:6px;">
-                                <p style="font-weight:800; font-size:16px; color:var(--text-primary); letter-spacing:-0.5px;">${trade.tradingPair}</p>
+                                <p style="font-weight:800; font-size:16px; color:var(--text-primary); letter-spacing:-0.5px;">${trade.tradingPair || trade.asset}</p>
                                 ${isPopular ? `<span style="background:linear-gradient(90deg, #f59e0b, #ef4444); color:white; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; box-shadow:0 0 8px rgba(245,158,11,0.4);">🔥 Hot</span>` : ''}
                             </div>
                             <div style="display:flex; align-items:center; gap:4px; margin-top:2px;">
@@ -1006,12 +992,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div style="text-align:right;">
                         <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Executes In</p>
-                        <p style="font-size:18px; font-weight:800; color:${isExpiring ? '#ef4444' : '#60a5fa'}; font-family:monospace; line-height:1.2;">${minutesLeft}m</p>
+                        <p class="live-copy-timer" data-exec="${executionTime}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">--:--</p>
                     </div>
                 </div>
 
                 <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:4px; margin-bottom:14px; overflow:hidden; position:relative; z-index:1;">
-                    <div style="width:${progressPercent}%; height:100%; background:linear-gradient(90deg, ${isExpiring ? '#ef4444, #f87171' : '#3b82f6, #8b5cf6'}); border-radius:4px; transition:width 1s ease; box-shadow:0 0 8px ${isExpiring ? 'rgba(239,68,68,0.5)' : 'rgba(59,130,246,0.5)'};"></div>
+                    <div class="live-copy-bar" data-exec="${executionTime}" style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
                 </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; position:relative; z-index:1;">
@@ -1025,7 +1011,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
 
-                <button data-id="${trade._id}" data-asset="${trade.tradingPair}" class="copy-btn" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;">
+                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;">
                     <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                     Copy Expert Trade
                 </button>
@@ -1035,7 +1021,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                // Spinning Loader Animation on Click
                 btn.innerHTML = `<svg class="animate-spin" style="width:16px;height:16px;margin-right:6px;" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Copying...`;
                 btn.disabled = true;
                 socket.emit('copy_trade', {
@@ -1045,7 +1030,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
-
 
     // ---- TRADE HISTORY ----
     function createTradeRow(trade) {
@@ -1153,18 +1137,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { notMerge: true });
     }
 
-        function updateChart(candles, currentCandle) {
+    function updateChart(candles, currentCandle) {
         const { data, dates } = buildChartData(candles, currentCandle);
         if (!data.length) return;
         
         myChart.setOption({ 
             xAxis: { data: dates }, 
             series: [{ data }],
-            // Nayi candle aane par auto-scroll logic
             dataZoom: [{ 
                 type: 'inside', 
-                startValue: Math.max(0, dates.length - 25), // Puraani 25 candles dikhaye ga
-                endValue: dates.length - 1 // Focus hamesha latest candle par rakhega
+                startValue: Math.max(0, dates.length - 25),
+                endValue: dates.length - 1 
             }]
         });
     }
@@ -1186,6 +1169,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('resize', () => myChart.resize());
 
     // ---- SOCKET EVENTS ----
+    let serverTimeOffset = 0;
+
     socket.on('init', (data) => {
         marketData = data.marketData;
         const assets = Object.keys(marketData);
@@ -1203,23 +1188,25 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUIForCurrentAsset();
     });
 
-    // ✨ Yahan par NEW LIVE PRICE DATA logic hai ✨
     socket.on('price_update', (data) => {
         const { pair, price, timestamp } = data;
+        
+        // 🚀 LIVE ENGINE TIME SYNC
+        serverTimeOffset = timestamp - Date.now();
 
         assetPrices[pair] = price;
 
         if (marketData[pair]) {
             let currentCandle = marketData[pair].currentCandle;
             
-            const now = new Date(timestamp); // 🚀 Binance ka theek waqt
+            const now = new Date(timestamp); 
             now.setSeconds(0, 0); 
 
             if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
                 
                 let newOpen = price;
                 if (currentCandle) {
-                    newOpen = currentCandle.close; // Pichli close price ko naya open banayein (Gap Khatam)
+                    newOpen = currentCandle.close; 
                     if (!marketData[pair].candles) marketData[pair].candles = [];
                     marketData[pair].candles.push(currentCandle);
                     if (marketData[pair].candles.length > 50) marketData[pair].candles.shift();
@@ -1251,7 +1238,6 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
             lastPrice = newPrice;
 
-            // 🚀 NAYA TIMER: Binance ke waqt ke mutabiq
             const seconds = new Date(timestamp).getSeconds();
             const countdown = 60 - seconds;
             countdownSecondsElem.textContent = `${countdown}s`;
@@ -1311,7 +1297,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.disabled = false;
-            if (btn.textContent === 'Copying...') btn.textContent = 'Copy This Trade';
+            if (btn.textContent === 'Copying...') btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
         });
     });
 
@@ -1326,7 +1312,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setTradeButtonsDisabled(false);
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.disabled = false;
-            if (btn.textContent === 'Copying...') btn.textContent = 'Copy This Trade';
+            if (btn.textContent === 'Copying...') btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
         });
     });
 
@@ -1474,6 +1460,41 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     }, 30000);
+
+    // 🚀 NEW: LIVE SYNC ENGINE FOR TIMERS
+    setInterval(() => {
+        const accurateNow = Date.now() + serverTimeOffset;
+
+        document.querySelectorAll('.live-copy-timer').forEach(el => {
+            const execTime = parseInt(el.getAttribute('data-exec'));
+            const diffMs = execTime - accurateNow;
+            
+            if (diffMs <= 0) {
+                el.textContent = "00:00";
+                return;
+            }
+            
+            const mins = Math.floor(diffMs / 60000);
+            const secs = Math.floor((diffMs % 60000) / 1000);
+            el.textContent = `${mins}m ${secs.toString().padStart(2, '0')}s`;
+            el.style.color = mins < 5 ? '#ef4444' : '#60a5fa';
+        });
+
+        document.querySelectorAll('.live-copy-bar').forEach(el => {
+            const execTime = parseInt(el.getAttribute('data-exec'));
+            const diffMs = execTime - accurateNow;
+            const minsLeft = Math.max(0, diffMs / 60000);
+            
+            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
+            el.style.width = `${progressPercent}%`;
+            
+            if (minsLeft < 5) {
+                el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+                el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)';
+            }
+        });
+    }, 1000);
+
 });
 </script>
 </body>
