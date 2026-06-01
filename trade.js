@@ -136,7 +136,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0015; // 0.15% manipulation
+            const MANIPULATION_PERCENTAGE = 0.0005; // 0.05% manipulation
             const SMOOTHING_TIME_MS = 15000; // Takes 15 seconds to fully apply offset
 
             // ==========================================
