@@ -1131,11 +1131,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { notMerge: true });
     }
 
-    function updateChart(candles, currentCandle) {
+        function updateChart(candles, currentCandle) {
         const { data, dates } = buildChartData(candles, currentCandle);
         if (!data.length) return;
-        myChart.setOption({ xAxis: { data: dates }, series: [{ data }] });
+        
+        myChart.setOption({ 
+            xAxis: { data: dates }, 
+            series: [{ data }],
+            // Nayi candle aane par auto-scroll logic
+            dataZoom: [{ 
+                type: 'inside', 
+                startValue: Math.max(0, dates.length - 25), // Puraani 25 candles dikhaye ga
+                endValue: dates.length - 1 // Focus hamesha latest candle par rakhega
+            }]
+        });
     }
+
 
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset]) {
