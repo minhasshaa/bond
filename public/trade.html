@@ -1196,24 +1196,27 @@ document.addEventListener('DOMContentLoaded', () => {
             const now = new Date(timestamp || Date.now());
             now.setSeconds(0, 0); // Remove seconds to check start of the minute
 
-            if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
-                // Agar pichli candle thi to usay history mein daal do
+                        if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
+                
+                // 🚀 FIX: Gap Issue - Nayi candle ka 'open' pichli candle ke 'close' se start karo
+                let newOpen = price;
                 if (currentCandle) {
+                    newOpen = currentCandle.close; // Attach to previous close
                     if (!marketData[pair].candles) marketData[pair].candles = [];
                     marketData[pair].candles.push(currentCandle);
                     if (marketData[pair].candles.length > 50) marketData[pair].candles.shift();
                 }
                 
-                // Nayi candle shuru karo
                 currentCandle = {
                     timestamp: now.toISOString(),
-                    open: price,
-                    high: price,
-                    low: price,
+                    open: newOpen,
+                    high: Math.max(newOpen, price), // Wicks adjusted to avoid visual break
+                    low: Math.min(newOpen, price),
                     close: price
                 };
                 marketData[pair].currentCandle = currentCandle;
             } else {
+
                 // Agar purana minute hi chal raha hai to uski value update karo
                 currentCandle.close = price;
                 if (price > currentCandle.high) currentCandle.high = price;
