@@ -772,8 +772,7 @@
                 return;
             }
 
-            const minutes = parseInt(selectedTimeBtn.dataset.minutes);
-            const executionTime = new Date(new Date().getTime() + minutes * 60 * 1000).toISOString();
+            const minutesOffset = parseInt(selectedTimeBtn.dataset.minutes); // 🚀 FIX: Sirf minutes bhej rahe hain
             const adminKey = getAdminKey();
             if (!adminKey) { showLogin(); return; }
 
@@ -783,7 +782,8 @@
                 const response = await fetch(`${ADMIN_API_BASE_URL}/copy-trade/create`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-admin-key': adminKey },
-                    body: JSON.stringify({ tradingPair, direction, percentage: parseFloat(percentage), executionTime })
+                    // 🚀 FIX: executionTime ki bajaye minutes bhej rahe hain taake server apna time khud nikal le
+                    body: JSON.stringify({ tradingPair, direction, percentage: parseFloat(percentage), minutes: minutesOffset }) 
                 });
                 const data = await response.json();
                 if (data.success) {
