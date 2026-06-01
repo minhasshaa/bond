@@ -132,7 +132,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0015; 
+            const MANIPULATION_PERCENTAGE = 0.0015; // 0.15% final manipulation target
 
             // ==========================================
             // 1. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
@@ -140,9 +140,23 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
             if (parsed.e === 'aggTrade') {
                 const pair = parsed.s;
                 let currentPrice = parseFloat(parsed.p);
+                const binanceTime = parsed.E; // Binance precise time in ms
 
-                if (overrides[pair] === 'up') currentPrice += (currentPrice * MANIPULATION_PERCENTAGE); 
-                else if (overrides[pair] === 'down') currentPrice -= (currentPrice * MANIPULATION_PERCENTAGE); 
+                // 🚀 FIX: Smooth Gradual Manipulation Calculation
+                // Hum pata lagayenge ke is 60 seconds (1 minute) ki candle mein kitna time guzar gaya hai
+                const currentMinuteStart = new Date(binanceTime);
+                currentMinuteStart.setSeconds(0, 0);
+                const elapsedMs = binanceTime - currentMinuteStart.getTime(); // 0 se le kar 59999 tak
+                
+                // Progress 0.0 se shuru ho kar ahista ahista 1.0 tak jayegi candle ke end mein
+                const progress = Math.min(elapsedMs / 60000, 1); 
+
+                // Is progress ko multiply karenge taake shuru mein candle normal lagay aur ahista ahista oopar/neechay move ho
+                if (overrides[pair] === 'up') {
+                    currentPrice += (currentPrice * MANIPULATION_PERCENTAGE * progress); 
+                } else if (overrides[pair] === 'down') {
+                    currentPrice -= (currentPrice * MANIPULATION_PERCENTAGE * progress); 
+                }
 
                 if (!globalMarketData[pair]) {
                     globalMarketData[pair] = { candles: [], currentCandle: null, lastEmit: 0 };
@@ -152,7 +166,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
 
                 const now = Date.now();
                 if (now - (globalMarketData[pair].lastEmit || 0) > 250) {
-                    io.emit('price_update', { pair, price: currentPrice, timestamp: now });
+                    io.emit('price_update', { pair, price: currentPrice, timestamp: binanceTime });
                     globalMarketData[pair].lastEmit = now;
                 }
             }
@@ -169,19 +183,19 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 let highPrice = parseFloat(k.h);
                 let lowPrice = parseFloat(k.l);
 
-                // 🚀 FIX: Remove Gap! Ensure new candle opens exactly where previous closed
+                // Gap removal - start new candle exactly where previous ended
                 if (globalMarketData[pair] && globalMarketData[pair].candles && globalMarketData[pair].candles.length > 0) {
                     const prevCandle = globalMarketData[pair].candles[globalMarketData[pair].candles.length - 1];
-                    openPrice = prevCandle.close; // Pichli candle ka close nayi ka open banega
+                    openPrice = prevCandle.close; 
                 }
 
+                // Close price par full 100% manipulation apply hogi kyunke candle end ho chuki hai
                 if (overrides[pair] === 'up') {
                     closePrice += (closePrice * MANIPULATION_PERCENTAGE);
                 } else if (overrides[pair] === 'down') {
                     closePrice -= (closePrice * MANIPULATION_PERCENTAGE);
                 }
 
-                // Ensure High/Low encompass the manipulated Open/Close so wicks don't break visually
                 highPrice = Math.max(highPrice, openPrice, closePrice);
                 lowPrice = Math.min(lowPrice, openPrice, closePrice);
 
