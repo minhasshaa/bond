@@ -104,6 +104,7 @@
                         <thead class="bg-gray-700">
                             <tr>
                                 <th class="p-3 text-left text-sm font-semibold">User Info</th>
+                                <th class="p-3 text-center text-sm font-semibold">KYC</th>
                                 <th class="p-3 text-left text-sm font-semibold">Balance</th>
                                 <th class="p-3 text-left text-sm font-semibold">Total Deposits</th>
                                 <th class="p-3 text-left text-sm font-semibold">Trade Volume</th>
@@ -325,7 +326,6 @@
         let currentOpenChatUsername = null;
 
         // ---- SAFE TEXT HELPER ----
-        // FIX 1 & 3: Prevent XSS by using textContent instead of innerHTML for user data
         function safeText(str) {
             const div = document.createElement('div');
             div.appendChild(document.createTextNode(str || ''));
@@ -368,6 +368,27 @@
             }
         }
 
+        // ---- KYC ICON HELPER FUNCTION ----
+        function getKycBadge(status) {
+            if (status === 'verified' || status === 'approved') {
+                return `<div class="text-green-500 flex justify-center" title="Verified">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        </div>`;
+            } else if (status === 'rejected') {
+                return `<div class="text-red-500 flex justify-center" title="Rejected">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </div>`;
+            } else if (status === 'review' || status === 'under_review' || status === 'pending') {
+                return `<div class="text-yellow-400 flex justify-center" title="Under Review">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>`;
+            } else {
+                return `<div class="text-gray-500 flex justify-center" title="Not Applied">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                        </div>`;
+            }
+        }
+
         // ---- CORE DATA FETCH ----
         const fetchData = async () => {
             const adminKey = getAdminKey();
@@ -397,7 +418,6 @@
                     const pendingDeposits = user.transactions.filter(tx => tx.status === 'pending_review');
                     let depositsHTML = pendingDeposits.length > 0 ? '' : '<p class="text-gray-500 text-xs">None</p>';
                     pendingDeposits.forEach(tx => {
-                        // FIX 4: Validate amount before using — default to 0 if missing
                         const depositAmount = (parseFloat(tx.amount) || 0).toFixed(2);
                         depositsHTML += `
                             <div class="my-2 p-2 bg-gray-700 rounded">
@@ -440,6 +460,7 @@
 
                     row.innerHTML = `
                         <td class="p-3 align-top text-sm"><strong>${safeText(user.username)}</strong></td>
+                        <td class="p-3 align-top text-center">${getKycBadge(user.kycStatus)}</td>
                         <td class="p-3 align-top text-sm font-mono">${formattedBalance}</td>
                         <td class="p-3 align-top text-sm font-mono">${formattedDeposits}</td>
                         <td class="p-3 align-top text-sm font-mono">${formattedVolume}</td>
@@ -589,7 +610,6 @@
                     chatItem.dataset.userId = chat.userId;
                     chatItem.dataset.username = chat.username;
 
-                    // FIX 3: Use textContent to prevent XSS in chat list
                     const nameEl = document.createElement('p');
                     nameEl.className = 'font-bold text-white';
                     nameEl.textContent = chat.username;
@@ -608,7 +628,6 @@
                     openChatsList.appendChild(chatItem);
                 });
 
-                // FIX 5: Use event delegation instead of attaching per-item listeners
                 openChatsList.addEventListener('click', (e) => {
                     const item = e.target.closest('div[data-user-id]');
                     if (!item) return;
@@ -628,7 +647,6 @@
             currentOpenChatUserId = userId;
             currentOpenChatUsername = username;
 
-            // Safe textContent — no XSS risk
             currentChatUser.textContent = `Chat with: ${username}`;
             chatMessages.innerHTML = '';
 
@@ -671,7 +689,6 @@
             }
         }
 
-        // FIX 1: Safe message rendering using textContent — prevents XSS
         function appendChatMessage(sender, text, timestamp) {
             const isUser = sender === 'user';
             const wrapper = document.createElement('div');
@@ -682,7 +699,7 @@
 
             const textEl = document.createElement('p');
             textEl.className = 'text-sm font-medium';
-            textEl.textContent = text; // FIX 1: textContent prevents XSS
+            textEl.textContent = text; 
 
             const timeEl = document.createElement('p');
             timeEl.className = `text-xs mt-1 ${isUser ? 'text-blue-200' : 'text-gray-400'}`;
@@ -694,7 +711,6 @@
             chatMessages.appendChild(wrapper);
         }
 
-        // FIX 2 & 7: Clean send button state management
         adminChatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const message = adminChatInput.value.trim();
@@ -702,7 +718,6 @@
 
             const adminKey = getAdminKey();
 
-            // FIX 7: Disable button instead of changing input value
             adminChatSendBtn.disabled = true;
             adminChatSendBtn.textContent = 'Sending...';
             adminChatInput.disabled = true;
@@ -719,7 +734,6 @@
                     adminChatInput.value = '';
                     appendChatMessage('admin', message, new Date().toISOString());
                     chatMessages.scrollTop = chatMessages.scrollHeight;
-                    // FIX 6: Only refresh chat list count, not full reload
                     updateChatListUnreadCount(currentOpenChatUserId);
                 } else {
                     alert(`Failed to send: ${data.message}`);
@@ -728,7 +742,6 @@
                 console.error('Error sending message:', error);
                 alert('Network error while sending message.');
             } finally {
-                // FIX 7: Restore button state cleanly
                 adminChatSendBtn.disabled = false;
                 adminChatSendBtn.textContent = 'Send';
                 adminChatInput.disabled = false;
@@ -736,7 +749,6 @@
             }
         });
 
-        // FIX 6: Update only the unread count badge instead of full list reload
         function updateChatListUnreadCount(userId) {
             const item = document.querySelector(`#open-chats-list div[data-user-id="${userId}"]`);
             if (!item) return;
@@ -942,7 +954,6 @@
                     const tradeCard = document.createElement('div');
                     tradeCard.className = `p-4 rounded-lg border ${isExpiringSoon ? 'bg-red-900/20 border-red-600' : 'bg-gray-700/50 border-gray-600'}`;
 
-                    // FIX 5: Use event delegation — no window.deleteCopyTrade global
                     tradeCard.innerHTML = `
                         <div class="flex justify-between items-start mb-2">
                             <div>
@@ -970,7 +981,6 @@
                     activeCopyTrades.appendChild(tradeCard);
                 });
 
-                // FIX 5: Event delegation for delete buttons
                 activeCopyTrades.addEventListener('click', async (e) => {
                     const btn = e.target.closest('.delete-copy-trade-btn');
                     if (!btn) return;
