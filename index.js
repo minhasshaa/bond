@@ -1,4 +1,4 @@
-// index.js - FINAL CORRECTED VERSION FOR PUBLIC DATA STABILITY
+// index.js - FINAL CORRECTED VERSION
 // ------------------ DEPENDENCIES ------------------
 require("dotenv").config();
 const express = require("express");
@@ -7,12 +7,9 @@ const socketIo = require("socket.io");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
-// const Binance = require("node-binance-api"); // Removed as we use direct axios calls for public data
-const jwt = require('jsonwebtoken'); 
+const jwt = require('jsonwebtoken');
 const axios = require('axios');
-// >>> START KYC ADDITIONS <<<
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
-// >>> END KYC ADDITIONS <<<
 
 // ------------------ CONFIG & CONSTANTS ------------------
 const TRADE_PAIRS = [
@@ -21,18 +18,17 @@ const TRADE_PAIRS = [
 ];
 module.exports.TRADE_PAIRS = TRADE_PAIRS;
 
-// admin override flags (kept in main server since candle generator uses them)
 const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
 
-// >>> START AZURE CONFIGURATION (CLEANED) <<<
+// ------------------ AZURE CONFIGURATION ------------------
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
 
 let blobServiceClient = null;
-let azureEnabled = false; 
+let azureEnabled = false;
 
 if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
     try {
@@ -45,29 +41,26 @@ if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
             sharedKeyCredential
         );
         azureEnabled = true;
-        console.log("✅ Azure Blob Storage Client Initialized (Enabled).");
+        console.log("✅ Azure Blob Storage Client Initialized.");
     } catch (e) {
-        console.error("❌ Azure Client Initialization failed. KYC upload will be disabled.", e.message);
-        blobServiceClient = null;
-        azureEnabled = false;
+        console.error("❌ Azure Client Initialization failed.", e.message);
     }
 } else {
-    console.warn("⚠️ WARNING: Azure Storage credentials not found. KYC upload will be disabled.");
+    console.warn("⚠️ Azure Storage credentials not found. KYC upload disabled.");
 }
-// >>> END AZURE CONFIGURATION <<<
 
 // ------------------ MODELS & ROUTES ------------------
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
-const Message = require('./models/Message'); 
+const Message = require('./models/Message');
 
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const depositRoutes = require("./routes/deposit");
 const adminRoutes = require("./routes/admin");
 const withdrawRoutes = require("./routes/withdraw");
-const kycRoutes = require("./routes/kyc"); 
+const kycRoutes = require("./routes/kyc");
 
 // ------------------ APP + SERVER + IO ------------------
 const app = express();
@@ -80,7 +73,7 @@ const io = socketIo(server, {
 });
 
 const marketData = {};
-const ticker24hData = {}; 
+const ticker24hData = {};
 
 TRADE_PAIRS.forEach(pair => {
     marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
@@ -89,9 +82,6 @@ TRADE_PAIRS.forEach(pair => {
 
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
-
-// ------------------ BINANCE CLIENT (REMOVED: Using direct Axios calls instead) ------------------
-// const binance = new Binance().options({...}); 
 
 // ------------------ MIDDLEWARE ------------------
 app.use(cors());
@@ -102,73 +92,53 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/deposit", depositRoutes);
-
 app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY, azureEnabled }));
-
 app.use("/api/withdraw", withdrawRoutes);
-
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
-
-// --------------------------------------------------------------------------------------------------
-// Fetch and store 24h Ticker Data (Uses public REST API)
-// --------------------------------------------------------------------------------------------------
+// ------------------ 24H TICKER ------------------
 async function fetchAndStore24hTicker() {
-    const API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
-    
     try {
-        // Now using public REST endpoint via axios
-        const response = await axios.get(API_URL); 
+        const response = await axios.get('https://api.binance.com/api/v3/ticker/24hr');
         const tickers = response.data;
-
         if (!tickers || !Array.isArray(tickers)) return;
-
         for (const ticker of tickers) {
             if (TRADE_PAIRS.includes(ticker.symbol)) {
                 ticker24hData[ticker.symbol] = {
-                    changePercent: parseFloat(ticker.priceChangePercent) 
+                    changePercent: parseFloat(ticker.priceChangePercent)
                 };
             }
         }
-        console.log(`✅ Updated 24h Ticker Data for ${TRADE_PAIRS.length} pairs.`);
-
+        console.log(`✅ Updated 24h Ticker Data.`);
     } catch (err) {
-        // Improved logging for network issues
         if (err.response) {
-            console.error(`❌ Failed to fetch 24h ticker data (HTTP ${err.response.status}):`, err.response.data || err.message);
+            console.error(`❌ Failed to fetch 24h ticker (HTTP ${err.response.status}):`, err.message);
         } else {
-             console.error("❌ Failed to fetch 24h ticker data (Axios Error):", err.message);
+            console.error("❌ Failed to fetch 24h ticker:", err.message);
         }
     }
 }
-// --------------------------------------------------------------------------------------------------
 
-
-// ----- DASHBOARD DATA FUNCTIONS START (MODIFIED) -----
+// ------------------ DASHBOARD DATA ------------------
 async function getDashboardData(userId) {
     const user = await User.findById(userId).select('username balance');
-    if (!user) {
-        throw new Error('User not found.');
-    }
+    if (!user) throw new Error('User not found.');
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const recentTrades = await Trade.find({ 
-        userId: userId, 
+    const recentTrades = await Trade.find({
+        userId: userId,
         status: 'closed',
-        closeTime: { $gte: startOfToday } 
+        closeTime: { $gte: startOfToday }
     });
 
     const todayPnl = recentTrades.reduce((total, trade) => total + (trade.pnl || 0), 0);
 
-    const assets = TRADE_PAIRS;
-    const marketInfo = assets.map(pair => {
+    const marketInfo = TRADE_PAIRS.map(pair => {
         const data = marketData[pair];
         if (!data || typeof data.currentPrice !== 'number') return null;
-
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
-
         return {
             name: pair.replace('USDT', ''),
             ticker: `${pair.replace('USDT', '')}/USD`,
@@ -182,36 +152,52 @@ async function getDashboardData(userId) {
         username: user.username,
         balance: user.balance,
         todayPnl: parseFloat(todayPnl.toFixed(2)),
-        recentTrades: [], 
+        recentTrades: recentTrades.map(trade => ({
+            asset: trade.asset,
+            pnl: parseFloat((trade.pnl || 0).toFixed(2)),
+            result: trade.result
+        })),
         assets: marketInfo
     };
 }
 
+// ------------------ SOCKET.IO AUTH MIDDLEWARE ------------------
 io.use((socket, next) => {
     const token = socket.handshake.auth.token;
-    if (!token) {
-        return next(new Error("Authentication Error: Token not provided."));
-    }
+    if (!token) return next(new Error("Authentication Error: Token not provided."));
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        socket.decoded = decoded; 
+        socket.decoded = decoded;
         next();
     } catch (ex) {
         return next(new Error("Authentication Error: Invalid token."));
     }
 });
 
+// ------------------ SOCKET.IO CONNECTION ------------------
+// FIX: Rate limiter for dashboard data requests
+const dashboardRequestTracker = {};
+const DASHBOARD_REQUEST_LIMIT_MS = 5000;
+
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
-        console.log(`Socket ${socket.id} (dashboard) joined room ${socket.decoded.id}`);
+        console.log(`Socket ${socket.id} joined room ${socket.decoded.id}`);
     }
 
     socket.on('request_dashboard_data', async () => {
         try {
             const userId = socket.decoded.id;
+
+            // FIX: Rate limit dashboard data requests
+            const now = Date.now();
+            if (dashboardRequestTracker[userId] && now - dashboardRequestTracker[userId] < DASHBOARD_REQUEST_LIMIT_MS) {
+                return;
+            }
+            dashboardRequestTracker[userId] = now;
+
             const dashboardData = await getDashboardData(userId);
             socket.emit('dashboard_data', { success: true, data: dashboardData });
         } catch (error) {
@@ -224,25 +210,20 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
-// ----- DASHBOARD DATA FUNCTIONS END -----
 
-
-// ------------------ CANDLE / MARKET DATA LOGIC (CRITICAL FIX APPLIED) ------------------
+// ------------------ MARKET DATA ------------------
 async function initializeMarketData() {
     console.log("📈 Initializing market data from Binance...");
-    await fetchAndStore24hTicker(); 
-    
+    await fetchAndStore24hTicker();
+
     for (const pair of TRADE_PAIRS) {
         try {
-            // ⭐ FIX 1: Use public REST API for SPOT Candlestick Data (No authentication needed)
             const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1m&limit=200`);
             const klines = response.data;
-            
-            // ⭐ FIX 2: Ensure klines is a valid array before attempting to map it.
+
             if (!Array.isArray(klines)) {
-                // Now logs the actual data received to help debug if needed
-                console.error(`❌ Failed to load initial candles for ${pair}: Received non-array data. Skipping pair. Data: ${JSON.stringify(klines).substring(0, 100)}...`);
-                continue; 
+                console.error(`❌ Failed to load candles for ${pair}: Non-array data received.`);
+                continue;
             }
 
             marketData[pair].candles = klines.map(k => ({
@@ -253,40 +234,38 @@ async function initializeMarketData() {
                 low: parseFloat(k[3]),
                 close: parseFloat(k[4]),
             }));
+
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
-            console.log(`✅ Loaded ${marketData[pair].candles.length} historical candles for ${pair}.`);
-            
+            console.log(`✅ Loaded ${marketData[pair].candles.length} candles for ${pair}.`);
+
         } catch (err) {
-            console.error(`❌ Failed to load initial candles for ${pair}:`, err.message);
+            console.error(`❌ Failed to load candles for ${pair}:`, err.message);
         }
     }
 }
 
 async function updateMarketData() {
     try {
-        // ⭐ FIX 3: Use public REST API for Ticker Prices (No authentication needed)
         const response = await axios.get('https://api.binance.com/api/v3/ticker/price');
         const tickerPrices = response.data;
-        
-        // Convert the array of objects into a simple map for easy lookup
+
         const prices = tickerPrices.reduce((acc, curr) => {
             acc[curr.symbol] = curr.price;
             return acc;
         }, {});
-        
+
         const now = new Date();
         const currentMinuteStart = new Date(now);
         currentMinuteStart.setSeconds(0, 0);
         currentMinuteStart.setMilliseconds(0);
 
         for (const pair of TRADE_PAIRS) {
-            // Look up price from the map
             if (prices[pair]) marketData[pair].currentPrice = parseFloat(prices[pair]);
 
             const md = marketData[pair];
             const currentPrice = md.currentPrice || 0;
-            if (!currentPrice) continue; 
+            if (!currentPrice) continue;
 
             const isNewMinute = !md.currentCandle || md.currentCandle.timestamp.getTime() !== currentMinuteStart.getTime();
 
@@ -304,21 +283,33 @@ async function updateMarketData() {
                             completed.close = openP - priceChange;
                             completed.low = Math.min(completed.low, completed.close);
                         }
-                        console.log(`🔴 OVERRIDE: Forcing ${pair} to CLOSE ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
+                        console.log(`🔴 OVERRIDE: ${pair} forced ${override.toUpperCase()} => ${completed.close.toFixed(6)}`);
                         candleOverride[pair] = null;
                     }
                     md.candles.push(completed);
                     if (md.candles.length > 200) md.candles.shift();
-                    await Candle.updateOne({ asset: pair, timestamp: completed.timestamp }, { $set: completed }, { upsert: true });
+                    await Candle.updateOne(
+                        { asset: pair, timestamp: completed.timestamp },
+                        { $set: completed },
+                        { upsert: true }
+                    );
                 }
-                md.currentCandle = { asset: pair, timestamp: currentMinuteStart, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice };
+                md.currentCandle = {
+                    asset: pair,
+                    timestamp: currentMinuteStart,
+                    open: currentPrice,
+                    high: currentPrice,
+                    low: currentPrice,
+                    close: currentPrice
+                };
             } else {
                 md.currentCandle.high = Math.max(md.currentCandle.high, currentPrice);
                 md.currentCandle.low = Math.min(md.currentCandle.low, currentPrice);
                 md.currentCandle.close = currentPrice;
             }
+
             const allCandles = [...md.candles, md.currentCandle];
-            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice: currentPrice });
+            io.emit("market_data", { asset: pair, candles: allCandles, currentPrice });
         }
     } catch (err) {
         console.error("Error in updateMarketData:", err.message);
@@ -327,10 +318,8 @@ async function updateMarketData() {
 
 function startMarketDataPolling() {
     console.log("✅ Starting market data polling every second...");
-    // Update every second for real-time price updates
-    setInterval(updateMarketData, 1000); 
-    // Fetch 24h ticker data every 60 seconds
-    setInterval(fetchAndStore24hTicker, 60000); 
+    setInterval(updateMarketData, 1000);
+    setInterval(fetchAndStore24hTicker, 60000);
 }
 
 // ------------------ PRICE UPDATE BROADCAST ------------------
@@ -343,16 +332,14 @@ setInterval(() => {
     for (const pair of TRADE_PAIRS) {
         const md = marketData[pair];
         const changeValue = ticker24hData[pair] ? ticker24hData[pair].changePercent : 0;
-        
-        // Dashboard format
+
         const tickerForClient = `${pair.replace('USDT', '')}/USD`;
         payloadDashboard[tickerForClient] = {
             price: md.currentPrice,
-            change: parseFloat(changeValue.toFixed(2)), 
+            change: parseFloat(changeValue.toFixed(2)),
             countdown: secondsUntilNextMinute
         };
 
-        // Trading format (unchanged, still uses current price)
         payloadTrading[pair] = {
             price: md.currentPrice,
             countdown: secondsUntilNextMinute,
@@ -360,12 +347,12 @@ setInterval(() => {
         };
     }
 
-    io.emit("price_update", payloadTrading);         
+    io.emit("price_update", payloadTrading);
     io.emit("dashboard_price_update", payloadDashboard);
 }, 1000);
 
 // ------------------ DB + STARTUP ------------------
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+mongoose.connect(process.env.MONGO_URI);
 const db = mongoose.connection;
 db.on("error", console.error.bind(console, "MongoDB connection error:"));
 
@@ -375,34 +362,34 @@ db.once("open", async () => {
     try {
         const TradeModel = mongoose.model('Trade');
         const UserModel = mongoose.model('User');
-        
+
         const tradeUpdateResult = await TradeModel.updateMany(
-            { 
+            {
                 status: { $ne: 'closed' },
                 $or: [
                     { activationTimestamp: { $not: { $type: 9 } } },
-                    { activationTimestamp: { $exists: false } }, 
-                    { activationTimestamp: null } 
+                    { activationTimestamp: { $exists: false } },
+                    { activationTimestamp: null }
                 ]
             },
-            { 
-                $set: { 
-                    status: 'closed', 
+            {
+                $set: {
+                    status: 'closed',
                     closeTime: new Date(),
-                    pnl: 0 
-                } 
+                    pnl: 0
+                }
             }
         );
-        console.log(`🧹 Safely closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
+        console.log(`🧹 Closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
 
         const userUpdateResult = await UserModel.updateMany(
             { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
             { $set: { createdAt: new Date() } }
         );
-        console.log(`🧹 Safely fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
+        console.log(`🧹 Fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
 
     } catch (error) {
-        console.error("Warning: Pre-boot database cleanup failed. Proceeding with trade initialization.", error.message);
+        console.error("Pre-boot cleanup failed. Proceeding anyway.", error.message);
     }
 
     await initializeMarketData();
@@ -414,15 +401,16 @@ db.once("open", async () => {
     } else if (typeof tradeModule === "function") {
         tradeModule(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
     } else {
-        console.error("Trade module export not recognized. Expected function or object with initialize()");
+        console.error("Trade module export not recognized.");
     }
 });
 
 // ------------------ CATCH-ALL / STATIC SERVE ------------------
 app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ message: 'API endpoint not found.' });
-    const filePath = path.join(__dirname, 'public', req.path);
+    // FIX: Path traversal check BEFORE building file path
     if (req.path.includes('..')) return res.status(403).send('Forbidden');
+    const filePath = path.join(__dirname, 'public', req.path);
     res.sendFile(filePath, (err) => {
         if (err) res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
     });
@@ -430,4 +418,22 @@ app.get('*', (req, res) => {
 
 // ------------------ START SERVER ------------------
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`✅ Server is running and listening on port ${PORT}`));
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+// ------------------ KEEP-ALIVE PING ------------------
+// Prevents server from sleeping on free hosting (Render, Railway, etc.)
+const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL;
+
+if (KEEP_ALIVE_URL) {
+    setInterval(async () => {
+        try {
+            await axios.get(KEEP_ALIVE_URL);
+            console.log(`✅ Keep-alive ping sent to ${KEEP_ALIVE_URL}`);
+        } catch (err) {
+            console.warn(`⚠️ Keep-alive ping failed:`, err.message);
+        }
+    }, 14 * 60 * 1000); // Every 14 minutes
+    console.log(`✅ Keep-alive initialized for ${KEEP_ALIVE_URL}`);
+} else {
+    console.warn('⚠️ KEEP_ALIVE_URL not set in .env');
+}
