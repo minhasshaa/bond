@@ -1,10 +1,7 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
-const WebSocket = require('ws'); // Added WebSocket library
+const WebSocket = require('ws'); 
 const AdminCopyTrade = require('./models/AdminCopyTrade');
-
-// Import candleOverride from your main index.js so Admin Panel commands work
-const { candleOverride } = require('../index'); 
 
 // Global reference for marketData
 let globalMarketData = {};
@@ -121,15 +118,17 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
         try {
             const parsed = JSON.parse(data);
             if (parsed.e === 'kline') {
-                const pair = parsed.s; // e.g., BTCUSDT
+                const pair = parsed.s; 
                 const k = parsed.k;
                 
                 let currentPrice = parseFloat(k.c);
                 const openPrice = parseFloat(k.o);
 
                 // --- ADMIN PANEL MARKET CONTROL LOGIC ---
-                // Agar Admin ne override set kiya hai, to live price manipulate karein
+                // Import here dynamically to avoid Circular Dependency Path Error
+                const { candleOverride } = require('./index'); 
                 const overrides = candleOverride || {};
+
                 if (overrides[pair] === 'up') {
                     // Force UP: Ensure close is artificially higher than open
                     currentPrice = openPrice + (openPrice * 0.0005); 
