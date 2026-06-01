@@ -914,6 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // 🚀 NEW PREMIUM DESIGN COPY TRADES FUNCTION
     function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
         if (availableCopyTrades.length === 0) {
@@ -923,17 +924,16 @@ document.addEventListener('DOMContentLoaded', () => {
         noCopyTrades.style.display = 'none';
 
         availableCopyTrades.forEach(trade => {
-            // 🚀 MAGIC FIX: Admin ke seconds ko ignore kar ke candle time (00 seconds) par lock karna
-            const exactExecutionDate = new Date(trade.executionTime);
-            exactExecutionDate.setSeconds(0, 0); 
-            const executionTime = exactExecutionDate.getTime(); 
+            // Safe Date Parse
+            const executionTime = new Date(trade.executionTime).getTime(); 
 
+            // Simple calculation for initial display
             const now = Date.now(); 
             const diffMs = executionTime - now;
-            const minutesLeft = Math.max(0, Math.floor(diffMs / 60000));
-            const isExpiring = minutesLeft < 5;
+            const minutesLeft = Math.max(0, Math.ceil(diffMs / 60000));
+            const isExpiring = diffMs < 300000;
 
-            const progressPercent = Math.max(2, Math.min(100, (minutesLeft / 15) * 100));
+            const progressPercent = Math.max(2, Math.min(100, (diffMs / 900000) * 100)); // Total 15 mins (900000ms)
             const isPopular = trade.percentage >= 10; 
 
             const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
@@ -972,12 +972,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div style="text-align:right;">
                         <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Executes In</p>
-                        <p class="live-copy-timer" data-exec="${executionTime}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">--:--</p>
+                        <p class="live-copy-timer" data-exec="${executionTime}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">${minutesLeft}m</p>
                     </div>
                 </div>
 
                 <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:4px; margin-bottom:14px; overflow:hidden; position:relative; z-index:1;">
-                    <div class="live-copy-bar" data-exec="${executionTime}" style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
+                    <div class="live-copy-bar" data-exec="${executionTime}" style="width:${progressPercent}%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
                 </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; position:relative; z-index:1;">
@@ -1448,25 +1448,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const diffMs = execTime - accurateNow;
             
             if (diffMs <= 0) {
-                el.textContent = "00:00";
+                el.textContent = "0m";
                 return;
             }
             
-            const mins = Math.floor(diffMs / 60000);
-            const secs = Math.floor((diffMs % 60000) / 1000);
-            el.textContent = `${mins}m ${secs.toString().padStart(2, '0')}s`;
-            el.style.color = mins < 5 ? '#ef4444' : '#60a5fa';
+            // 🚀 FIX: Only show minutes (e.g. 2m)
+            const mins = Math.ceil(diffMs / 60000);
+            el.textContent = `${mins}m`;
+            el.style.color = mins <= 5 ? '#ef4444' : '#60a5fa';
         });
 
         document.querySelectorAll('.live-copy-bar').forEach(el => {
             const execTime = parseInt(el.getAttribute('data-exec'));
             const diffMs = execTime - accurateNow;
-            const minsLeft = Math.max(0, diffMs / 60000);
             
-            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
+            const totalMs = 15 * 60 * 1000; // 15 mins
+            const progressPercent = Math.max(0, Math.min(100, (diffMs / totalMs) * 100));
+            
             el.style.width = `${progressPercent}%`;
             
-            if (minsLeft < 5) {
+            if (diffMs < 300000) { // less than 5 mins
                 el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
                 el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)';
             }
