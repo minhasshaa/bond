@@ -945,8 +945,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadingPlaceholder.style.display = 'none';
         }
     }
-
-    function renderCopyTrades() {
+function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
         if (availableCopyTrades.length === 0) {
             noCopyTrades.style.display = 'block';
@@ -955,9 +954,13 @@ document.addEventListener('DOMContentLoaded', () => {
         noCopyTrades.style.display = 'none';
 
         availableCopyTrades.forEach(trade => {
-            const now = new Date();
-            const executionTime = new Date(trade.executionTime);
-            const minutesLeft = Math.max(0, Math.floor((executionTime - now) / 60000));
+            // 🚀 FIX: Server-side time (ISO format) ko UTC-aware tarike se parse karna
+            const now = Date.now(); 
+            const executionTime = new Date(trade.executionTime).getTime(); 
+            
+            // Difference in milliseconds
+            const diffMs = executionTime - now;
+            const minutesLeft = Math.max(0, Math.floor(diffMs / 60000));
             const isExpiring = minutesLeft < 5;
 
             const isUp = trade.direction === 'CALL';
@@ -982,16 +985,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         <p style="font-size:14px; font-weight:700; color:${isExpiring ? '#ef4444' : '#60a5fa'};">${minutesLeft}m</p>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
-                    <div style="background:rgba(5,11,24,0.5);border:1px solid var(--border-color);border-radius:10px;padding:8px 10px;">
-                        <p style="font-size:11px; color:var(--text-secondary);">Percentage</p>
-                        <p style="font-size:14px; font-weight:700; color:#f59e0b;">${trade.percentage}%</p>
-                    </div>
-                    <div style="background:rgba(5,11,24,0.5);border:1px solid var(--border-color);border-radius:10px;padding:8px 10px;">
-                        <p style="font-size:11px; color:var(--text-secondary);">Of Your Balance</p>
-                        <p style="font-size:14px; font-weight:700; color:#10b981;">${trade.percentage}% used</p>
-                    </div>
-                </div>
                 <button data-id="${trade._id}" data-asset="${trade.tradingPair}" class="copy-btn">
                     Copy This Trade
                 </button>
@@ -999,18 +992,16 @@ document.addEventListener('DOMContentLoaded', () => {
             copyTradesContainer.appendChild(card);
         });
 
+        // Copy button event listeners... (baki code same)
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 btn.textContent = 'Copying...';
                 btn.disabled = true;
-                socket.emit('copy_trade', {
-                    copyTradeId: btn.dataset.id,
-                    asset: btn.dataset.asset
-                });
+                socket.emit('copy_trade', { copyTradeId: btn.dataset.id, asset: btn.dataset.asset });
             });
         });
     }
-
+    
     // ---- TRADE HISTORY ----
     function createTradeRow(trade) {
         tradeHistoryData[trade._id] = trade;
