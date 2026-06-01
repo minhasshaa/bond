@@ -1,4 +1,4 @@
-Const express = require('express');
+const express = require('express');
 const mongoose = require('mongoose');
 const { 
     BlobSASPermissions,
@@ -10,16 +10,13 @@ const {
 const User = require('../models/User');
 const Trade = require('../models/Trade');
 const AdminCopyTrade = require('../models/AdminCopyTrade');
-const Message = require('../models/Message'); // ⭐ FIX: Moved Message import here
+const Message = require('../models/Message');
 
-// Rely on index.js to provide these global constants
 const { candleOverride, TRADE_PAIRS } = require('../index'); 
 
-// The entire module is now a function that accepts Azure dependencies
 module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled = false, STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY }) {
     const router = express.Router();
 
-    // Admin security middleware (remains the same)
     const adminAuth = (req, res, next) => {
         const adminKey = req.headers['x-admin-key'];
         if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
@@ -30,9 +27,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
     router.use(adminAuth);
 
-    // ----------------------------------------------------------------------
-    // [GET] /api/admin/data - General Admin Dashboard Data (Unchanged)
-    // ----------------------------------------------------------------------
     router.get('/data', async (req, res) => {
         const { search } = req.query;
         try {
@@ -45,7 +39,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 .select('_id username balance totalDeposits totalTradeVolume referredBy transactions createdAt kycStatus')
                 .populate('referredBy', 'username');
 
-            // Calculate total volume by pair and direction
             const tradeVolume = await Trade.aggregate([
                 { $match: { status: { $in: ['pending', 'active', 'scheduled'] } } },
                 { 
@@ -61,7 +54,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 marketStatus[pair] = candleOverride[pair] || 'auto'; 
             });
             
-            // Calculate pending deposits and withdrawals with amounts
             const usersWithPending = await Promise.all(users.map(async (user) => {
                 const pendingDeposits = user.transactions?.filter(tx => 
                     tx.type === 'deposit' && tx.status === 'pending_review'
@@ -82,7 +74,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 };
             }));
 
-
             res.json({ success: true, users: usersWithPending, tradeVolume, marketStatus, tradePairs: TRADE_PAIRS });
 
         } catch (error) {
@@ -91,13 +82,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-    // ----------------------------------------------------------------------
-    // KYC MANAGEMENT ENDPOINTS 
-    // ----------------------------------------------------------------------
-
-    // [GET] /api/admin/kyc/pending-users - Get users awaiting KYC review
     router.get('/kyc/pending-users', async (req, res) => {
-        // ⭐ FIX: This logic relies on the injected Azure dependencies
         if (!blobServiceClient || !KYC_CONTAINER_NAME || !azureEnabled) {
             return res.status(200).json({ success: false, message: 'Azure Storage not configured for KYC review. Cannot fetch documents.' });
         }
@@ -111,42 +96,28 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             }).select('username kycStatus kycDocuments fullName identityNumber createdAt');
 
             const usersWithUrls = await Promise.all(usersToReview.map(async (user) => {
-
-                // Helper to generate secure SAS URLs
                 const getSignedUrl = async (blobPath) => {
                     if (!blobPath || !STORAGE_ACCOUNT_NAME || !STORAGE_ACCOUNT_KEY) return null;
-
                     try {
-                        // 1. Create credential using the raw key passed from index.js
                         const sharedKeyCredential = new StorageSharedKeyCredential(
                             STORAGE_ACCOUNT_NAME,
                             STORAGE_ACCOUNT_KEY
                         );
-                        
-                        // 2. Create BlobClient using the raw key
                         const blobClient = new BlobClient(
                              `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net/${KYC_CONTAINER_NAME}/${blobPath}`,
                             sharedKeyCredential
                         );
-
-                        // 3. Define Start/Expiry Times with Clock Skew Buffer
                         const startTime = new Date();
-                        startTime.setMinutes(startTime.getMinutes() - 5); // CRITICAL: 5 minutes buffer into the past
-                        
+                        startTime.setMinutes(startTime.getMinutes() - 5); 
                         const expiresOn = new Date();
-                        expiresOn.setMinutes(expiresOn.getMinutes() + 30); // Valid for 30 minutes
-
-                        // 4. Generate SAS token using the BlobClient method (stable and reliable)
+                        expiresOn.setMinutes(expiresOn.getMinutes() + 30); 
                         const sasToken = await blobClient.generateSasUrl({
-                            permissions: BlobSASPermissions.parse("r"), // Read permission
+                            permissions: BlobSASPermissions.parse("r"),
                             startsOn: startTime, 
                             expiresOn: expiresOn,
                         });
-                        
                         return sasToken; 
-
                     } catch (error) {
-                        console.error(`Error generating SAS URL for ${blobPath}:`, error.message);
                         return null; 
                     }
                 };
@@ -170,7 +141,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 };
             }));
 
-            // Filter out users who somehow got status 'review' without documents
             res.json({ success: true, users: usersWithUrls.filter(u => u.documents.front || u.documents.back || u.documents.selfie) });
 
         } catch (error) {
@@ -179,8 +149,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-
-    // [POST] /api/admin/kyc/update - Update a user's KYC status
     router.post('/kyc/update', async (req, res) => {
         const { userId, newStatus, reason } = req.body;
 
@@ -202,7 +170,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             }
 
             await user.save();
-
             res.json({ success: true, message: `KYC status updated to ${newStatus}.` });
 
         } catch (error) {
@@ -210,10 +177,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.status(500).json({ success: false, message: 'Failed to update KYC status.' });
         }
     });
-    
-    // ----------------------------------------------------------------------
-    // DEPOSIT/WITHDRAWAL MANAGEMENT ENDPOINTS (Unchanged)
-    // ----------------------------------------------------------------------
 
     router.post('/approve-deposit', async (req, res) => {
         const { userId, txid, amount } = req.body;
@@ -225,9 +188,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         session.startTransaction();
 
         try {
-            // Find user and include referredBy field for commission check
             const user = await User.findById(userId)
-                .select('username balance totalDeposits transactions referredBy') // Select necessary fields
+                .select('username balance totalDeposits transactions referredBy')
                 .session(session);
 
             if (!user) {
@@ -251,12 +213,9 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
             
-            // --- 1. REFERRAL COMMISSION CHECK ---
-            // Determine if the deposit makes totalDeposits non-zero, indicating it's the first deposit.
             const isFirstDeposit = (user.totalDeposits || 0) === 0; 
             const depositAmount = amount;
 
-            // --- 2. UPDATE USER AND TRANSACTION ---
             user.balance += depositAmount;
             user.totalDeposits += depositAmount;
 
@@ -264,23 +223,21 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             transaction.processedAt = new Date();
             transaction.amount = depositAmount;
 
-            await user.save({ session }); // Save user's deposit update
+            await user.save({ session }); 
 
-            // --- 3. AWARD COMMISSION (If conditions met) ---
             if (isFirstDeposit && user.referredBy) {
-                const commissionRate = 0.07; // 7% commission
+                const commissionRate = 0.07; 
                 const commissionAmount = depositAmount * commissionRate;
                 const referrerId = user.referredBy;
 
-                // Atomically update referrer's account within the same transaction session
                 await User.findByIdAndUpdate(referrerId, {
                     $inc: { 
                         balance: commissionAmount,
                         referralCommissions: commissionAmount 
                     },
-                    $push: { // Add a transaction record to the referrer's account
+                    $push: { 
                         transactions: {
-                            txid: `REFCOMM-${txid}`, // Unique ID based on original transaction
+                            txid: `REFCOMM-${txid}`, 
                             type: 'commission',
                             amount: commissionAmount,
                             status: 'completed',
@@ -288,9 +245,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                             note: `Referral commission for ${user.username}'s first deposit.`
                         }
                     }
-                }, { session, new: true }); // Pass the session and return the updated doc (though not used here)
-
-                console.log(`AWARDED: $${commissionAmount.toFixed(2)} (7%) commission to referrer ID: ${referrerId} for a $${depositAmount.toFixed(2)} deposit.`);
+                }, { session, new: true }); 
             }
 
             await session.commitTransaction();
@@ -301,7 +256,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
-            console.error('Deposit Approval Error (Referral Commission Failed):', error);
+            console.error('Deposit Approval Error:', error);
             res.status(500).json({ success: false, message: "Deposit approval failed due to a server error. Funds rolled back." });
         }
     });
@@ -364,7 +319,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
 
-            // NOTE: The balance was already deducted on user's request.
             transaction.status = 'completed';
             transaction.processedAt = new Date();
 
@@ -409,10 +363,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 });
             }
 
-            // Refund the user's balance
             user.balance += transaction.amount;
-
-            // Update transaction status
             transaction.status = 'rejected';
             transaction.processedAt = new Date();
 
@@ -430,10 +381,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-    // ----------------------------------------------------------------------
-    // MANUAL USER CREDIT (Unchanged)
-    // ----------------------------------------------------------------------
-
     router.post('/credit-user', async (req, res) => {
         const { username, amount } = req.body;
         const creditAmount = parseFloat(amount);
@@ -450,7 +397,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
 
             user.balance += creditAmount;
 
-            // Add transaction record with proper schema
             const transactionData = {
                 txid: `ADMIN-${Date.now()}`,
                 type: creditAmount > 0 ? 'manual_credit' : 'manual_debit',
@@ -474,10 +420,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-    // ----------------------------------------------------------------------
-    // REFERRAL COMMISSION (Manual) - UNCHANGED
-    // ----------------------------------------------------------------------
-
     router.post('/give-commission', async (req, res) => {
         const { username, amount } = req.body;
         const commissionAmount = parseFloat(amount);
@@ -495,7 +437,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             user.balance += commissionAmount;
             user.referralCommissions += commissionAmount;
 
-            // Add transaction record with proper schema
             const transactionData = {
                 txid: `COMM-${Date.now()}`,
                 type: 'commission',
@@ -519,10 +460,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-    // ----------------------------------------------------------------------
-    // MARKET CONTROL (Unchanged)
-    // ----------------------------------------------------------------------
-
     router.post('/market-control', (req, res) => {
         const { pair, direction } = req.body;
 
@@ -534,7 +471,7 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             return res.status(400).json({ success: false, message: "Invalid trading pair." });
         }
 
-        candleOverride[pair] = direction; // Update the global state
+        candleOverride[pair] = direction; 
 
         const message = direction ? `Market control set to ${direction.toUpperCase()} for ${pair}.` : `Market control disabled for ${pair}.`;
         res.json({ success: true, message });
@@ -543,7 +480,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
     router.get('/market-control/status', (req, res) => {
         const status = {};
         TRADE_PAIRS.forEach(pair => {
-            // Read the current state
             status[pair] = candleOverride[pair] || 'auto'; 
         });
 
@@ -552,18 +488,15 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             marketStatus: status
         });
     });
-    
-    // ----------------------------------------------------------------------
-    // COPY TRADE MANAGEMENT ROUTES (Unchanged)
-    // ----------------------------------------------------------------------
 
+    // 🚀 NEW FIX: copy-trade/create route updated
     router.post('/copy-trade/create', async (req, res) => {
-        const { tradingPair, direction, percentage, executionTime } = req.body;
+        const { tradingPair, direction, percentage, minutes } = req.body;
 
-        if (!tradingPair || !direction || !percentage || !executionTime) {
+        if (!tradingPair || !direction || !percentage || !minutes) {
             return res.status(400).json({ 
                 success: false, 
-                message: "Missing required fields: tradingPair, direction, percentage, executionTime" 
+                message: "Missing required fields: tradingPair, direction, percentage, minutes" 
             });
         }
 
@@ -582,11 +515,15 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
 
         try {
+            // 🚀 Server khud executionTime calculate kar raha hai
+            const executionTime = new Date(Date.now() + (parseInt(minutes) * 60 * 1000));
+            executionTime.setSeconds(0, 0); 
+
             const copyTrade = new AdminCopyTrade({
                 tradingPair: tradingPair.toUpperCase(),
                 direction: direction.toUpperCase(),
                 percentage: parseFloat(percentage),
-                executionTime: new Date(executionTime),
+                executionTime: executionTime,
                 createdBy: req.headers['x-admin-user-id'] || new mongoose.Types.ObjectId()
             });
 
@@ -711,20 +648,13 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-
-    // ----------------------------------------------------------------------
-    // ⭐ NEW: SUPPORT CHAT ROUTES (ADMIN FACING) ⭐
-    // ----------------------------------------------------------------------
-
-    // [GET] /api/admin/support/open - Get list of users with unread messages
     router.get('/support/open', async (req, res) => {
         try {
-            // Find unique user IDs that have unread messages sent by the user
             const unreadChats = await Message.aggregate([
                 { $match: { sender: 'user', readByAdmin: false } },
                 {
                     $group: {
-                        _id: '$userId', // Group by userId
+                        _id: '$userId', 
                         unreadCount: { $sum: 1 },
                         lastMessageTime: { $max: '$createdAt' }
                     }
@@ -736,7 +666,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 return res.json({ success: true, openChats: [] });
             }
 
-            // Get the last message sent by anyone for each conversation
             const conversations = await Promise.all(unreadChats.map(async (chat) => {
                 const user = await User.findById(chat._id).select('username');
                 
@@ -766,7 +695,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-    // [GET] /api/admin/support/messages/:userId - Get conversation and mark as read
     router.get('/support/messages/:userId', async (req, res) => {
         const { userId } = req.params;
 
@@ -779,7 +707,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 return res.json({ success: true, messages: [] });
             }
 
-            // Mark all user messages in this conversation as read by admin
             await Message.updateMany(
                 { userId: userId, sender: 'user', readByAdmin: false },
                 { $set: { readByAdmin: true } }
@@ -800,7 +727,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
     });
 
-    // [POST] /api/admin/support/send - Send a reply from the admin
     router.post('/support/send', async (req, res) => {
         const { userId, message } = req.body;
 
@@ -809,7 +735,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
         }
 
         try {
-            // Find the user to ensure the ID is valid
             const user = await User.findById(userId).select('username');
             if (!user) {
                 return res.status(404).json({ success: false, message: 'User not found.' });
@@ -819,8 +744,8 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
                 userId: userId,
                 sender: 'admin',
                 text: message.trim(),
-                readByAdmin: true, // Always read by admin
-                readByUser: false, // Mark as UNREAD for the user
+                readByAdmin: true, 
+                readByUser: false, 
             });
 
             await newMessage.save();
@@ -832,7 +757,6 @@ module.exports = function({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled 
             res.status(500).json({ success: false, message: 'Failed to send reply.' });
         }
     });
-
 
     return router;
 };
