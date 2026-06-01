@@ -20,7 +20,8 @@
     "node-binance-api": "^0.13.1",
     "nodemailer": "^6.9.14",
     "socket.io": "^4.7.5",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "ws": "^8.17.0"
   },
   "author": "",
   "license": "ISC"
