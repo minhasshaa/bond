@@ -914,20 +914,6 @@ document.addEventListener('DOMContentLoaded', () => {
         balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
     }
 
-    // ---- LOCAL COUNTDOWN TIMER ----
-    // Backend se bar bar seconds check karne ki bajaye, mobile ki clock se khud minute ka time nikalein
-    setInterval(() => {
-        const now = new Date();
-        const seconds = now.getSeconds();
-        const countdown = 60 - seconds;
-
-        countdownSecondsElem.textContent = `${countdown}s`;
-        countdownSecondsElem.className = 'timer-value';
-        
-        if (countdown <= 10) countdownSecondsElem.classList.add('critical');
-        else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
-    }, 1000);
-
     // ---- COPY TRADES ----
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
@@ -1185,23 +1171,19 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('price_update', (data) => {
         const { pair, price, timestamp } = data;
 
-        // 1. Array Update: Live Price ko store karo
         assetPrices[pair] = price;
 
-        // 2. Chart Logic: Naye aane walay price se candle ko khud update (grow/shrink) karo
         if (marketData[pair]) {
             let currentCandle = marketData[pair].currentCandle;
             
-            // Check karo kya naya minute shuru ho gaya hai?
-            const now = new Date(timestamp || Date.now());
-            now.setSeconds(0, 0); // Remove seconds to check start of the minute
+            const now = new Date(timestamp); // 🚀 Binance ka theek waqt
+            now.setSeconds(0, 0); 
 
-                        if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
+            if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
                 
-                // 🚀 FIX: Gap Issue - Nayi candle ka 'open' pichli candle ke 'close' se start karo
                 let newOpen = price;
                 if (currentCandle) {
-                    newOpen = currentCandle.close; // Attach to previous close
+                    newOpen = currentCandle.close; // Pichli close price ko naya open banayein (Gap Khatam)
                     if (!marketData[pair].candles) marketData[pair].candles = [];
                     marketData[pair].candles.push(currentCandle);
                     if (marketData[pair].candles.length > 50) marketData[pair].candles.shift();
@@ -1210,14 +1192,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentCandle = {
                     timestamp: now.toISOString(),
                     open: newOpen,
-                    high: Math.max(newOpen, price), // Wicks adjusted to avoid visual break
+                    high: Math.max(newOpen, price), 
                     low: Math.min(newOpen, price),
                     close: price
                 };
                 marketData[pair].currentCandle = currentCandle;
             } else {
-
-                // Agar purana minute hi chal raha hai to uski value update karo
                 currentCandle.close = price;
                 if (price > currentCandle.high) currentCandle.high = price;
                 if (price < currentCandle.low) currentCandle.low = price;
@@ -1226,10 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
             marketData[pair].currentPrice = price;
         }
 
-        // 3. UI Update: Agar user yahi coin (Asset) dekh raha hai, to screen par price change karo
         if (pair === currentAsset) {
-            
-            // Price text update (with Green/Red Flash)
             const newPrice = price;
             currentPriceElem.classList.remove('price-up', 'price-down');
             if (lastPrice !== 0 && newPrice !== lastPrice) {
@@ -1238,15 +1215,22 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
             lastPrice = newPrice;
 
-            // Chart update (sirf thori dair baad taake mobile hang na ho)
+            // 🚀 NAYA TIMER: Binance ke waqt ke mutabiq
+            const seconds = new Date(timestamp).getSeconds();
+            const countdown = 60 - seconds;
+            countdownSecondsElem.textContent = `${countdown}s`;
+            countdownSecondsElem.className = 'timer-value';
+            if (countdown <= 10) countdownSecondsElem.classList.add('critical');
+            else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
+
             const currentTime = Date.now();
-            if (currentTime - lastChartDrawTime > 150) { // Max 6 frames per second
+            if (currentTime - lastChartDrawTime > 150) { 
                 updateChart(marketData[pair].candles, marketData[pair].currentCandle);
                 lastChartDrawTime = currentTime;
             }
         }
     });
-
+    
     socket.on('trade_pending', (data) => {
         updateBalance(data.balance);
         addTradeToHistory(data.trade);
