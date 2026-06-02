@@ -139,8 +139,8 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0005; 
-            const SMOOTHING_TIME_MS = 15000; 
+            const MANIPULATION_PERCENTAGE = 0.010; 
+            const SMOOTHING_TIME_MS = 20000; 
 
             // 🚀 1. LIVE TICKER DATA (24H Percentage)
             if (parsed.e === '24hrTicker') {
