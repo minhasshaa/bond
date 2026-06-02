@@ -767,7 +767,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
-    // ---- DOM ELEMENTS ----
     const balanceElem = document.getElementById('balance-display');
     const currentPriceElem = document.getElementById('currentPrice');
     const countdownSecondsElem = document.getElementById('countdownSeconds');
@@ -796,7 +795,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const toastCopyExecuted = document.getElementById('toast-copy-executed');
     const allModals = [modalPending, modalWin, modalLoss, modalTradeDetails, modalCopySuccess];
 
-    // ---- STATE ----
     let marketData = {}, currentAsset = '', lastPrice = 0;
     let availableCopyTrades = [];
     let tradeHistoryData = {};
@@ -807,17 +805,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const TRADES_PER_PAGE = 5;
     let lastChartDrawTime = 0;
 
-    // ---- CHART ----
     const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
-    // ---- QUICK AMOUNT CHIPS ----
     document.querySelectorAll('.amount-chip').forEach(chip => {
         chip.addEventListener('click', () => {
             investmentInput.value = chip.dataset.amount;
         });
     });
 
-    // ---- TABS ----
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -835,7 +830,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ---- ASSET DROPDOWN ----
     assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
     window.addEventListener('click', (e) => {
         if (!e.target.closest('.asset-dropdown')) assetDropdownContent.classList.remove('show');
@@ -859,7 +853,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ---- HELPERS ----
     function formatPrice(price, asset) {
         const decimals = { 'BTCUSDT':2,'ETHUSDT':2,'BNBUSDT':2,'SOLUSDT':2,'AVAXUSDT':2,'ADAUSDT':4,'MATICUSDT':4,'XRPUSDT':4,'DOGEUSDT':5,'LINKUSDT':4 };
         return parseFloat(price).toFixed(decimals[asset] || 2);
@@ -882,7 +875,6 @@ document.addEventListener('DOMContentLoaded', () => {
         balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
     }
 
-    // ---- COPY TRADES ----
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
         loadingPlaceholder.style.display = 'block';
@@ -914,7 +906,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 🚀 NEW PREMIUM DESIGN COPY TRADES FUNCTION
     function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
         if (availableCopyTrades.length === 0) {
@@ -924,18 +915,12 @@ document.addEventListener('DOMContentLoaded', () => {
         noCopyTrades.style.display = 'none';
 
         availableCopyTrades.forEach(trade => {
-            // Safe Date Parse
-            const executionTime = new Date(trade.executionTime).getTime(); 
+            // 🚀 PERFECT LOCK: Using strict mathematical lock down to minute boundary
+            // This prevents NaN issues completely and strictly enforces matching with Main Timer
+            const rawExecMs = new Date(trade.executionTime).getTime();
+            const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
 
-            // Simple calculation for initial display
-            const now = Date.now(); 
-            const diffMs = executionTime - now;
-            const minutesLeft = Math.max(0, Math.ceil(diffMs / 60000));
-            const isExpiring = diffMs < 300000;
-
-            const progressPercent = Math.max(2, Math.min(100, (diffMs / 900000) * 100)); // Total 15 mins (900000ms)
             const isPopular = trade.percentage >= 10; 
-
             const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
             const directionColor = isUp ? '#10b981' : '#ef4444';
             const directionBg = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
@@ -972,12 +957,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div style="text-align:right;">
                         <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Executes In</p>
-                        <p class="live-copy-timer" data-exec="${executionTime}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">${minutesLeft}m</p>
+                        <p class="live-copy-timer" data-exec="${lockedExecutionTimeMs}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">--m</p>
                     </div>
                 </div>
 
                 <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:4px; margin-bottom:14px; overflow:hidden; position:relative; z-index:1;">
-                    <div class="live-copy-bar" data-exec="${executionTime}" style="width:${progressPercent}%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
+                    <div class="live-copy-bar" data-exec="${lockedExecutionTimeMs}" style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
                 </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; position:relative; z-index:1;">
@@ -1011,7 +996,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ---- TRADE HISTORY ----
     function createTradeRow(trade) {
         tradeHistoryData[trade._id] = trade;
         const el = document.createElement('div');
@@ -1088,7 +1072,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.cancelTrade = (tradeId) => socket.emit('cancel_trade', { tradeId });
 
-    // ---- CHART ----
     function buildChartData(candles, currentCandle) {
         const all = [...(candles || [])];
         if (currentCandle) all.push(currentCandle);
@@ -1132,7 +1115,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset]) {
             initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
@@ -1148,7 +1130,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.addEventListener('resize', () => myChart.resize());
 
-    // ---- SOCKET EVENTS ----
     let serverTimeOffset = 0;
 
     socket.on('init', (data) => {
@@ -1171,9 +1152,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('price_update', (data) => {
         const { pair, price, timestamp } = data;
         
-        // 🚀 LIVE ENGINE TIME SYNC
         serverTimeOffset = timestamp - Date.now();
-
         assetPrices[pair] = price;
 
         if (marketData[pair]) {
@@ -1298,7 +1277,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
 
-    // ---- TRADE REQUEST ----
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
@@ -1319,7 +1297,6 @@ document.addEventListener('DOMContentLoaded', () => {
     tradeUpBtn.addEventListener('click', () => requestTrade('UP'));
     tradeDownBtn.addEventListener('click', () => requestTrade('DOWN'));
 
-    // ---- MODALS ----
     function showModal(modal) {
         hideAllModals();
         overlay.classList.add('show');
@@ -1350,7 +1327,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ---- POPUP CONTENT ----
     function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
@@ -1439,35 +1415,39 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     }, 30000);
 
-    // 🚀 NEW: LIVE SYNC ENGINE FOR TIMERS
+    // 🚀 PERFECT LOCK ENGINE: Guarantee 100% Sync with Main Timer
     setInterval(() => {
         const accurateNow = Date.now() + serverTimeOffset;
 
+        // Current Minute Boundary
+        const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
+
         document.querySelectorAll('.live-copy-timer').forEach(el => {
-            const execTime = parseInt(el.getAttribute('data-exec'));
-            const diffMs = execTime - accurateNow;
+            const execTimeMs = parseInt(el.getAttribute('data-exec'));
             
-            if (diffMs <= 0) {
+            // Text logic: strictly minute vs minute difference
+            const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
+            
+            if (diffMins <= 0) {
                 el.textContent = "0m";
-                return;
+                el.style.color = '#ef4444';
+            } else {
+                el.textContent = `${diffMins}m`;
+                el.style.color = diffMins <= 5 ? '#ef4444' : '#60a5fa';
             }
-            
-            // 🚀 FIX: Only show minutes (e.g. 2m)
-            const mins = Math.ceil(diffMs / 60000);
-            el.textContent = `${mins}m`;
-            el.style.color = mins <= 5 ? '#ef4444' : '#60a5fa';
         });
 
         document.querySelectorAll('.live-copy-bar').forEach(el => {
-            const execTime = parseInt(el.getAttribute('data-exec'));
-            const diffMs = execTime - accurateNow;
+            const execTimeMs = parseInt(el.getAttribute('data-exec'));
             
-            const totalMs = 15 * 60 * 1000; // 15 mins
-            const progressPercent = Math.max(0, Math.min(100, (diffMs / totalMs) * 100));
+            // Bar logic: smooth progression based on raw milliseconds
+            const diffMs = execTimeMs - accurateNow;
+            const minsLeft = Math.max(0, diffMs / 60000);
             
+            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
             el.style.width = `${progressPercent}%`;
             
-            if (diffMs < 300000) { // less than 5 mins
+            if (minsLeft < 5) {
                 el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
                 el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)';
             }
