@@ -283,7 +283,7 @@
     .cancel-btn:hover { background: rgba(245,158,11,0.2); }
 
     .copy-card {
-        transition: all 0.2s;
+        transition: all 0.5s ease;
     }
     .copy-btn {
         width: 100%;
@@ -917,17 +917,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
+        noCopyTrades.style.display = 'none';
+
         if (availableCopyTrades.length === 0) {
             noCopyTrades.style.display = 'block';
             return;
         }
-        noCopyTrades.style.display = 'none';
+
+        let validTradesRendered = 0;
 
         availableCopyTrades.forEach(trade => {
             const rawExecMs = new Date(trade.executionTime).getTime();
             const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
 
-            // 🚀 NEW LOGIC: Check if this user has ALREADY copied this trade
+            // 🚀 FIX: Agar time pehle hi khatam ho chuka hai (Zero par hai), to list mein add hi na karein
+            const accurateNow = Date.now() + serverTimeOffset;
+            const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
+            if (lockedExecutionTimeMs <= currentMinuteMs) return; // Skip this card
+
+            validTradesRendered++;
+
             const isAlreadyCopied = Object.values(tradeHistoryData).some(t => 
                 t.originalCopyTradeId === trade._id && 
                 (t.status === 'scheduled' || t.status === 'pending' || t.status === 'active')
@@ -998,9 +1007,13 @@ document.addEventListener('DOMContentLoaded', () => {
             copyTradesContainer.appendChild(card);
         });
 
+        // 🚀 FIX: Agar filter honay ke baad koi trade na bache to no trades show karo
+        if (validTradesRendered === 0) {
+            noCopyTrades.style.display = 'block';
+        }
+
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                // If it's already copied (should be disabled anyway, but safety check)
                 if(btn.classList.contains('copied')) return;
 
                 btn.innerHTML = `<svg class="animate-spin" style="width:16px;height:16px;margin-right:6px;" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Copying...`;
@@ -1240,7 +1253,6 @@ document.addEventListener('DOMContentLoaded', () => {
         addTradeToHistory(data.trade);
         showScheduledPopup(data.trade);
         
-        // Refresh trades to disable the copied button automatically
         if (activeTab === 'copy-trade') fetchCopyTrades();
     });
 
@@ -1271,17 +1283,14 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus('Trade cancelled.', 'gray');
         setTradeButtonsDisabled(false);
         
-        // Refresh to re-enable copy buttons if a copied trade was cancelled
         if (activeTab === 'copy-trade') fetchCopyTrades();
     });
 
-    // 🚀 NEW: Update Buttons Immediately on Success
     socket.on('copy_trade_success', (data) => {
         showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
         
         document.querySelectorAll('.copy-btn').forEach(btn => {
             if (btn.textContent.includes('Copying...')) {
-                // Instantly turn to Copied
                 btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅`;
                 btn.disabled = true;
                 btn.classList.add('copied');
@@ -1297,7 +1306,6 @@ document.addEventListener('DOMContentLoaded', () => {
         addTradeToHistory(data.trade);
     });
 
-    // 🚀 NEW: Revert Button if Error Occurs
     socket.on('error', (data) => {
         showStatus(`Error: ${data.message}`, 'red');
         setTradeButtonsDisabled(false);
@@ -1449,6 +1457,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     }, 30000);
 
+    // 🚀 NEW: AUTO REMOVE ZERO TIMER ENGINE
     setInterval(() => {
         const accurateNow = Date.now() + serverTimeOffset;
         const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
@@ -1458,8 +1467,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
             
             if (diffMins <= 0) {
-                el.textContent = "0m";
-                el.style.color = '#ef4444';
+                // 🚀 FIX: Jab timer zero ho jaye, to fade out karke card ko remove kar do
+                const card = el.closest('.copy-card');
+                if (card) {
+                    card.style.transition = 'opacity 0.5s ease';
+                    card.style.opacity = '0';
+                    setTimeout(() => {
+                        card.remove();
+                        const container = document.getElementById('copyTradesContainer');
+                        const noTradesMsg = document.getElementById('noCopyTrades');
+                        // Agar sab trades khatam ho jayen to "No trades" wala message show karein
+                        if (container && container.children.length === 0 && noTradesMsg) {
+                            noTradesMsg.style.display = 'block';
+                        }
+                    }, 500);
+                }
             } else {
                 el.textContent = `${diffMins}m`;
                 el.style.color = diffMins <= 5 ? '#ef4444' : '#60a5fa';
