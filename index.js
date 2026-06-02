@@ -1,5 +1,4 @@
-// index.js - FINAL CORRECTED VERSION
-// ------------------ DEPENDENCIES ------------------
+// index.js - BLAZING FAST LOAD VERSION
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
@@ -11,7 +10,6 @@ const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { BlobServiceClient, StorageSharedKeyCredential } = require("@azure/storage-blob");
 
-// ------------------ CONFIG & CONSTANTS ------------------
 const TRADE_PAIRS = [
     'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
     'ADAUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','MATICUSDT'
@@ -22,7 +20,6 @@ const candleOverride = {};
 TRADE_PAIRS.forEach(pair => { candleOverride[pair] = null; });
 module.exports.candleOverride = candleOverride;
 
-// ------------------ AZURE CONFIGURATION ------------------
 const STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME;
 const STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY;
 const KYC_CONTAINER_NAME = process.env.KYC_CONTAINER_NAME || 'id-document-uploads';
@@ -32,24 +29,15 @@ let azureEnabled = false;
 
 if (STORAGE_ACCOUNT_NAME && STORAGE_ACCOUNT_KEY) {
     try {
-        const sharedKeyCredential = new StorageSharedKeyCredential(
-            STORAGE_ACCOUNT_NAME,
-            STORAGE_ACCOUNT_KEY
-        );
-        blobServiceClient = new BlobServiceClient(
-            `https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net`,
-            sharedKeyCredential
-        );
+        const sharedKeyCredential = new StorageSharedKeyCredential(STORAGE_ACCOUNT_NAME, STORAGE_ACCOUNT_KEY);
+        blobServiceClient = new BlobServiceClient(`https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net`, sharedKeyCredential);
         azureEnabled = true;
         console.log("✅ Azure Blob Storage Client Initialized.");
     } catch (e) {
         console.error("❌ Azure Client Initialization failed.", e.message);
     }
-} else {
-    console.warn("⚠️ Azure Storage credentials not found. KYC upload disabled.");
 }
 
-// ------------------ MODELS & ROUTES ------------------
 const User = require("./models/User");
 const Trade = require("./models/Trade");
 const Candle = require("./models/candles");
@@ -61,26 +49,21 @@ const adminRoutes = require("./routes/admin");
 const withdrawRoutes = require("./routes/withdraw");
 const kycRoutes = require("./routes/kyc");
 
-// ------------------ APP + SERVER + IO ------------------
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 const marketData = {};
-
 TRADE_PAIRS.forEach(pair => {
-    marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null };
+    marketData[pair] = { currentPrice: 0, candles: [], currentCandle: null, last24hChange: 0 };
 });
 
 module.exports.marketData = marketData;
 app.set('marketData', marketData);
+global.last24hTickerDataShared = {};
 
-// ------------------ MIDDLEWARE ------------------
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -93,48 +76,91 @@ app.use("/api/admin", adminRoutes({ blobServiceClient, KYC_CONTAINER_NAME, STORA
 app.use("/api/withdraw", withdrawRoutes);
 app.use("/api/kyc", kycRoutes({ blobServiceClient, KYC_CONTAINER_NAME, azureEnabled }));
 
-
-// ------------------ SOCKET.IO AUTH MIDDLEWARE ------------------
 io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
-    if (!token) return next(new Error("Authentication Error: Token not provided."));
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error("Authentication Error: No token"));
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         socket.decoded = decoded;
         next();
     } catch (ex) {
-        return next(new Error("Authentication Error: Invalid token."));
+        return next(new Error("Authentication Error: Invalid token"));
     }
 });
 
-// ------------------ SOCKET.IO CONNECTION ------------------
 io.on('connection', (socket) => {
-    console.log(`User connected: ${socket.id}`);
-
     if (socket.decoded && socket.decoded.id) {
         socket.join(socket.decoded.id);
-        console.log(`Socket ${socket.id} joined room ${socket.decoded.id}`);
     }
 
-    // Note: Dashboard data and live prices are now 100% handled by Trade.js 
-    // to prevent duplicate events and IP bans!
+    socket.on('request_dashboard_data', async () => {
+        try {
+            const userId = socket.decoded.id;
+            const freshUser = await User.findById(userId);
+            if (!freshUser) return;
 
-    socket.on('disconnect', () => {
-        console.log(`User disconnected: ${socket.id}`);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+
+            const todayTrades = await Trade.find({ 
+                userId: freshUser._id, 
+                status: "closed", 
+                closeTime: { $gte: today, $lt: tomorrow } 
+            });
+
+            const todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+            const assetsInfo = [
+                { ticker: 'BTC/USDT', name: 'Bitcoin' },
+                { ticker: 'ETH/USDT', name: 'Ethereum' },
+                { ticker: 'BNB/USDT', name: 'Binance Coin' },
+                { ticker: 'SOL/USDT', name: 'Solana' },
+                { ticker: 'XRP/USDT', name: 'Ripple' },
+                { ticker: 'ADA/USDT', name: 'Cardano' },
+                { ticker: 'DOGE/USDT', name: 'Dogecoin' },
+                { ticker: 'AVAX/USDT', name: 'Avalanche' },
+                { ticker: 'LINK/USDT', name: 'Chainlink' },
+                { ticker: 'MATIC/USDT', name: 'Polygon' }
+            ];
+
+            const assets = assetsInfo.map(info => {
+                const rawPair = info.ticker.replace('/', '');
+                const price = marketData[rawPair]?.currentPrice || 0;
+                const change = global.last24hTickerDataShared[rawPair] || marketData[rawPair]?.last24hChange || 0;
+                return {
+                    ticker: info.ticker,
+                    name: info.name,
+                    price: price,
+                    change: change
+                };
+            });
+
+            socket.emit('dashboard_data', {
+                success: true,
+                data: {
+                    username: freshUser.username,
+                    balance: freshUser.balance,
+                    todayPnl: parseFloat(todayPnl.toFixed(2)),
+                    assets: assets
+                }
+            });
+        } catch (error) {
+            console.error("Dashboard emission error:", error);
+        }
     });
 });
 
-// ------------------ INITIALIZE HISTORICAL CANDLES ------------------
-// Runs ONLY ONCE on boot. Will not cause HTTP 418 IP Ban.
 async function initializeMarketData() {
-    console.log("📈 Initializing historical candles from Binance...");
-
-    for (const pair of TRADE_PAIRS) {
+    console.log("📈 Initializing backend candle cache memory in BACKGROUND...");
+    
+    // 🚀 BLAZING FAST: Fetch all 10 pairs concurrently instead of one by one
+    const fetchPromises = TRADE_PAIRS.map(async (pair) => {
         try {
-            const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1m&limit=200`);
+            const response = await axios.get(`https://api.binance.com/api/v3/klines?symbol=${pair}&interval=1m&limit=100`);
             const klines = response.data;
-
-            if (!Array.isArray(klines)) continue;
+            if (!Array.isArray(klines)) return;
 
             marketData[pair].candles = klines.map(k => ({
                 asset: pair,
@@ -147,69 +173,33 @@ async function initializeMarketData() {
 
             const lastCandle = marketData[pair].candles[marketData[pair].candles.length - 1];
             marketData[pair].currentPrice = lastCandle.close;
-
         } catch (err) {
-            console.error(`❌ Failed to load historical candles for ${pair} (Ignore if temporarily banned):`, err.message);
+            // Silently ignore to not spam logs
         }
-    }
-    console.log("✅ Historical data loading complete. Handing over to Live WebSockets in Trade.js!");
+    });
+
+    await Promise.all(fetchPromises);
+    console.log("✅ Background memory load complete!");
 }
 
-// ------------------ DB + STARTUP ------------------
 mongoose.connect(process.env.MONGO_URI);
 const db = mongoose.connection;
 db.on("error", console.error.bind(console, "MongoDB connection error:"));
 
 db.once("open", async () => {
-    console.log("✅ Connected to MongoDB");
+    console.log("✅ Connected to MongoDB Database");
+    
+    // 🚀 FIX: Removed the "await" keyword. Server ab kisi cheez ka intezar nahi karega, foran boot hoga!
+    initializeMarketData(); 
 
-    try {
-        const TradeModel = mongoose.model('Trade');
-        const UserModel = mongoose.model('User');
-
-        const tradeUpdateResult = await TradeModel.updateMany(
-            {
-                status: { $ne: 'closed' },
-                $or: [
-                    { activationTimestamp: { $not: { $type: 9 } } },
-                    { activationTimestamp: { $exists: false } },
-                    { activationTimestamp: null }
-                ]
-            },
-            {
-                $set: {
-                    status: 'closed',
-                    closeTime: new Date(),
-                    pnl: 0
-                }
-            }
-        );
-        console.log(`🧹 Closed ${tradeUpdateResult.modifiedCount} corrupted trade records.`);
-
-        const userUpdateResult = await UserModel.updateMany(
-            { $or: [{ createdAt: { $not: { $type: 9 } } }, { createdAt: { $exists: false } }, { createdAt: null }] },
-            { $set: { createdAt: new Date() } }
-        );
-        console.log(`🧹 Fixed ${userUpdateResult.modifiedCount} corrupted user date records.`);
-
-    } catch (error) {
-        console.error("Pre-boot cleanup failed. Proceeding anyway.", error.message);
-    }
-
-    await initializeMarketData();
-
-    // Start Trade Module (Live WebSockets)
     const tradeModule = require("./trade");
     if (typeof tradeModule.initialize === "function") {
         tradeModule.initialize(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
     } else if (typeof tradeModule === "function") {
         tradeModule(io, User, Trade, marketData, TRADE_PAIRS, candleOverride);
-    } else {
-        console.error("Trade module export not recognized.");
     }
 });
 
-// ------------------ CATCH-ALL / STATIC SERVE ------------------
 app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ message: 'API endpoint not found.' });
     if (req.path.includes('..')) return res.status(403).send('Forbidden');
@@ -219,21 +209,12 @@ app.get('*', (req, res) => {
     });
 });
 
-// ------------------ START SERVER ------------------
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`✅ Core Cluster active on port ${PORT}`));
 
-// ------------------ KEEP-ALIVE PING ------------------
 const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL;
-
 if (KEEP_ALIVE_URL) {
     setInterval(async () => {
-        try {
-            await axios.get(KEEP_ALIVE_URL);
-            console.log(`✅ Keep-alive ping sent to ${KEEP_ALIVE_URL}`);
-        } catch (err) {
-            console.warn(`⚠️ Keep-alive ping failed:`, err.message);
-        }
-    }, 14 * 60 * 1000); // Every 14 minutes
-    console.log(`✅ Keep-alive initialized for ${KEEP_ALIVE_URL}`);
+        try { await axios.get(KEEP_ALIVE_URL); } catch (err) {}
+    }, 14 * 60 * 1000);
 }
