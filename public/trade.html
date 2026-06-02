@@ -300,7 +300,16 @@
         box-shadow: 0 4px 12px rgba(16,185,129,0.25);
     }
     .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
-    .copy-btn:disabled { background: rgba(107,114,128,0.3); cursor: not-allowed; transform: none; box-shadow: none; color: var(--text-secondary); }
+    .copy-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
+
+    /* 🚀 NEW: Design for Copied Button */
+    .copy-btn.copied {
+        background: rgba(16, 185, 129, 0.15) !important;
+        border: 1px solid rgba(16, 185, 129, 0.3) !important;
+        color: #10b981 !important;
+        box-shadow: none !important;
+        cursor: not-allowed;
+    }
 
     @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
     @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
@@ -915,10 +924,14 @@ document.addEventListener('DOMContentLoaded', () => {
         noCopyTrades.style.display = 'none';
 
         availableCopyTrades.forEach(trade => {
-            // 🚀 PERFECT LOCK: Using strict mathematical lock down to minute boundary
-            // This prevents NaN issues completely and strictly enforces matching with Main Timer
             const rawExecMs = new Date(trade.executionTime).getTime();
             const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
+
+            // 🚀 NEW LOGIC: Check if this user has ALREADY copied this trade
+            const isAlreadyCopied = Object.values(tradeHistoryData).some(t => 
+                t.originalCopyTradeId === trade._id && 
+                (t.status === 'scheduled' || t.status === 'pending' || t.status === 'active')
+            );
 
             const isPopular = trade.percentage >= 10; 
             const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
@@ -976,9 +989,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
 
-                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;">
-                    <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    Copy Expert Trade
+                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn ${isAlreadyCopied ? 'copied' : ''}" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;" ${isAlreadyCopied ? 'disabled' : ''}>
+                    ${isAlreadyCopied ? 
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅` : 
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`}
                 </button>
             `;
             copyTradesContainer.appendChild(card);
@@ -986,6 +1000,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                // If it's already copied (should be disabled anyway, but safety check)
+                if(btn.classList.contains('copied')) return;
+
                 btn.innerHTML = `<svg class="animate-spin" style="width:16px;height:16px;margin-right:6px;" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Copying...`;
                 btn.disabled = true;
                 socket.emit('copy_trade', {
@@ -1222,6 +1239,9 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBalance(data.balance);
         addTradeToHistory(data.trade);
         showScheduledPopup(data.trade);
+        
+        // Refresh trades to disable the copied button automatically
+        if (activeTab === 'copy-trade') fetchCopyTrades();
     });
 
     socket.on('trade_active', (data) => {
@@ -1250,13 +1270,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (row) row.remove();
         showStatus('Trade cancelled.', 'gray');
         setTradeButtonsDisabled(false);
+        
+        // Refresh to re-enable copy buttons if a copied trade was cancelled
+        if (activeTab === 'copy-trade') fetchCopyTrades();
     });
 
+    // 🚀 NEW: Update Buttons Immediately on Success
     socket.on('copy_trade_success', (data) => {
         showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
+        
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.disabled = false;
-            if (btn.textContent === 'Copying...') btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
+            if (btn.textContent.includes('Copying...')) {
+                // Instantly turn to Copied
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅`;
+                btn.disabled = true;
+                btn.classList.add('copied');
+            } else if (!btn.classList.contains('copied')) {
+                btn.disabled = false;
+            }
         });
     });
 
@@ -1266,12 +1297,15 @@ document.addEventListener('DOMContentLoaded', () => {
         addTradeToHistory(data.trade);
     });
 
+    // 🚀 NEW: Revert Button if Error Occurs
     socket.on('error', (data) => {
         showStatus(`Error: ${data.message}`, 'red');
         setTradeButtonsDisabled(false);
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.disabled = false;
-            if (btn.textContent === 'Copying...') btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
+            if (btn.textContent.includes('Copying...')) {
+                btn.disabled = false;
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
+            }
         });
     });
 
@@ -1415,17 +1449,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     }, 30000);
 
-    // 🚀 PERFECT LOCK ENGINE: Guarantee 100% Sync with Main Timer
     setInterval(() => {
         const accurateNow = Date.now() + serverTimeOffset;
-
-        // Current Minute Boundary
         const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
 
         document.querySelectorAll('.live-copy-timer').forEach(el => {
             const execTimeMs = parseInt(el.getAttribute('data-exec'));
-            
-            // Text logic: strictly minute vs minute difference
             const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
             
             if (diffMins <= 0) {
@@ -1439,8 +1468,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.querySelectorAll('.live-copy-bar').forEach(el => {
             const execTimeMs = parseInt(el.getAttribute('data-exec'));
-            
-            // Bar logic: smooth progression based on raw milliseconds
             const diffMs = execTimeMs - accurateNow;
             const minsLeft = Math.max(0, diffMs / 60000);
             
