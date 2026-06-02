@@ -1,33 +1,13 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const WebSocket = require('ws'); 
-const https = require('https'); // 🚀 NEW: HTTPS for Binance Ticker API
 const AdminCopyTrade = require('./models/AdminCopyTrade');
 
 // Global reference for marketData
 let globalMarketData = {};
 
-// 🚀 NEW: Fetch 24-Hour Ticker Data (Percentage Change)
+// 🚀 FIX: Store Live 24h Percentage from WebSocket (No HTTP requests that get blocked)
 let last24hTickerData = {};
-
-function fetch24hTickerData() {
-    https.get('https://api.binance.com/api/v3/ticker/24hr', (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-            try {
-                const parsed = JSON.parse(data);
-                parsed.forEach(ticker => {
-                    last24hTickerData[ticker.symbol] = parseFloat(ticker.priceChangePercent);
-                });
-            } catch (e) {}
-        });
-    }).on('error', (e) => {});
-}
-
-// Har 10 second baad percentage update hoti rahegi
-setInterval(fetch24hTickerData, 10000);
-fetch24hTickerData(); 
 
 // --- Copy Trade Execution Logic ---
 async function executeCopyTrade(io, User, Trade, copyTradeId) {
@@ -137,13 +117,14 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
         console.warn("Could not load index.js for overrides.");
     }
 
-    const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade`).join('/');
+    // 🚀 FIX: Included @ticker in streams to get 24h percentages LIVE!
+    const streams = TRADE_PAIRS.map(p => `${p.toLowerCase()}@kline_1m/${p.toLowerCase()}@aggTrade/${p.toLowerCase()}@ticker`).join('/');
     const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
     
     let ws = new WebSocket(wsUrl);
 
     ws.on('open', () => {
-        console.log('✅ Connected to Binance WebSockets for Live Market Data');
+        console.log('✅ Connected to Binance WebSockets (Price + Ticker)');
     });
 
     ws.on('message', async (message) => {
@@ -161,8 +142,14 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
             const MANIPULATION_PERCENTAGE = 0.0005; 
             const SMOOTHING_TIME_MS = 15000; 
 
-            // 1. ULTRA-FAST TICK-BY-TICK PRICE
-            if (parsed.e === 'aggTrade') {
+            // 🚀 1. LIVE TICKER DATA (24H Percentage)
+            if (parsed.e === '24hrTicker') {
+                const pair = parsed.s;
+                last24hTickerData[pair] = parseFloat(parsed.P); // 'P' is price change percent in Binance
+            }
+
+            // 2. ULTRA-FAST TICK-BY-TICK PRICE
+            else if (parsed.e === 'aggTrade') {
                 const pair = parsed.s;
                 let realPrice = parseFloat(parsed.p);
                 const binanceTime = parsed.E; 
@@ -197,7 +184,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                     // Update Trade App
                     io.emit('price_update', { pair, price: currentPrice, timestamp: binanceTime });
                     
-                    // 🚀 NEW: Update Dashboard App Live Prices
+                    // Update Dashboard App Live Prices and Percentages
                     const formattedPair = pair.replace('USDT', '/USDT');
                     io.emit('dashboard_price_update', {
                         [formattedPair]: {
@@ -210,7 +197,7 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 }
             }
 
-            // 2. CANDLESTICK DATA & SETTLEMENT
+            // 3. CANDLESTICK DATA & SETTLEMENT
             else if (parsed.e === 'kline') {
                 const pair = parsed.s; 
                 const k = parsed.k;
@@ -337,7 +324,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                 marketData: globalMarketData
             });
 
-            // 🚀 NEW: DASHBOARD DATA HANDLER
+            // 🚀 DASHBOARD DATA HANDLER
             socket.on('request_dashboard_data', async () => {
                 try {
                     const freshUser = await User.findById(userId);
@@ -375,7 +362,7 @@ async function initialize(io, User, Trade, marketData, TRADE_PAIRS) {
                             ticker: info.ticker,
                             name: info.name,
                             price: globalMarketData[rawPair]?.currentPrice || 0,
-                            change: last24hTickerData[rawPair] || 0 // Accurate 24h%
+                            change: last24hTickerData[rawPair] || 0 // Live percentage from WebSocket!
                         };
                     });
 
