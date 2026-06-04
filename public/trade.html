@@ -9,17 +9,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
     :root {
-        --bg-primary: #0b0e11;
-        --bg-secondary: #1a1e26;
-        --bg-card: #161b22;
-        --bg-panel: rgba(22, 27, 34, 0.92);
+        --bg-primary: #050b18;
+        --bg-secondary: #0a1628;
+        --bg-card: #0d1f3c;
         --accent-blue: #3b82f6;
         --accent-gold: #f59e0b;
-        --accent-green: #00c076;
-        --accent-red: #ea3941;
-        --border-color: rgba(255,255,255,0.06);
-        --text-primary: #eaecef;
-        --text-secondary: #848e9c;
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --border-color: rgba(59, 130, 246, 0.15);
+        --text-primary: #f0f4ff;
+        --text-secondary: #8899bb;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -28,202 +27,193 @@
         font-family: 'Inter', sans-serif;
         background-color: var(--bg-primary);
         color: var(--text-primary);
+        padding-bottom: 90px;
         min-height: 100vh;
-        overflow-x: hidden;
-        padding-bottom: 70px;
+        background-image:
+            radial-gradient(ellipse at 20% 0%, rgba(59,130,246,0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 80% 0%, rgba(245,158,11,0.05) 0%, transparent 50%);
     }
 
-    ::-webkit-scrollbar { width: 3px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: var(--accent-blue); border-radius: 2px; }
 
-    /* ========== TOP BAR ========== */
-    .top-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        background: var(--bg-secondary);
-        border-bottom: 1px solid var(--border-color);
-        position: sticky;
-        top: 0;
-        z-index: 100;
+    .glass-card {
+        background: rgba(13,31,60,0.6);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 16px;
     }
-    .asset-selector {
+
+    /* ========== TOP HEADER ========== */
+    .trade-header {
+        background: rgba(13,31,60,0.8);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+
+    .asset-dropdown { position: relative; display: inline-block; }
+    .asset-dropdown-btn {
+        background: rgba(5,11,24,0.8);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 8px 14px;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 15px;
+        cursor: pointer;
         display: flex;
         align-items: center;
         gap: 8px;
-        cursor: pointer;
-        position: relative;
+        font-family: 'Inter', sans-serif;
+        transition: border-color 0.2s;
     }
-    .asset-name {
-        font-weight: 800;
-        font-size: 16px;
-        color: var(--text-primary);
-        letter-spacing: -0.3px;
-    }
-    .asset-chevron {
-        width: 16px; height: 16px;
-        color: var(--text-secondary);
-        transition: transform 0.2s;
-    }
-    .asset-selector.open .asset-chevron { transform: rotate(180deg); }
-    .asset-dropdown {
+    .asset-dropdown-btn:hover { border-color: rgba(59,130,246,0.4); }
+    .asset-dropdown-content {
         display: none;
         position: absolute;
-        top: 100%;
-        left: 0;
-        margin-top: 8px;
-        background: #1e222d;
+        background: #0a1628;
         border: 1px solid var(--border-color);
-        border-radius: 12px;
-        min-width: 180px;
-        z-index: 200;
+        border-radius: 14px;
+        min-width: 160px;
+        z-index: 100;
+        margin-top: 6px;
         padding: 6px;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+        box-shadow: 0 16px 40px rgba(0,0,0,0.5);
     }
-    .asset-dropdown.show { display: block; }
-    .asset-dropdown a {
-        display: block;
-        padding: 10px 12px;
+    .asset-dropdown-content a {
         color: var(--text-secondary);
+        padding: 9px 12px;
         text-decoration: none;
+        display: block;
+        border-radius: 8px;
         font-size: 13px;
         font-weight: 500;
-        border-radius: 8px;
         transition: all 0.15s;
     }
-    .asset-dropdown a:hover { background: rgba(255,255,255,0.04); color: var(--text-primary); }
-    .asset-dropdown a.active { color: var(--accent-green); background: rgba(0,192,118,0.08); }
+    .asset-dropdown-content a:hover {
+        background: rgba(59,130,246,0.1);
+        color: var(--text-primary);
+    }
+    .show { display: block; }
 
-    .price-block { text-align: right; }
-    .live-price {
-        font-size: 22px;
+    .current-price {
+        font-size: 28px;
         font-weight: 800;
+        color: var(--text-primary);
         font-family: 'Inter', monospace;
         letter-spacing: -0.5px;
-        transition: color 0.3s;
     }
-    .live-price.up { color: var(--accent-green); }
-    .live-price.down { color: var(--accent-red); }
-    .live-price.neutral { color: var(--text-primary); }
-    .balance-display {
-        font-size: 11px;
-        color: var(--text-secondary);
-        margin-top: 1px;
-    }
-    .balance-amount { color: var(--accent-green); font-weight: 700; }
 
-    /* ========== CHART ZONE ========== */
-    .chart-zone {
+    .timer-box {
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.2);
+        border-radius: 12px;
+        padding: 10px 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 12px;
+    }
+    .timer-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: white;
+        font-family: 'Inter', monospace;
+    }
+    .timer-value.warning { color: #f59e0b; }
+    .timer-value.critical { color: #ef4444; animation: blink 0.5s infinite; }
+    @keyframes blink { 50% { opacity: 0.6; } }
+
+    /* ========== CHART ========== */
+    .chart-wrapper {
         position: relative;
-        width: 100%;
-        background: var(--bg-primary);
+        background: rgba(13,31,60,0.6);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        overflow: hidden;
+        margin-bottom: 16px;
     }
     #tv-chart-container {
         width: 100%;
-        height: 420px;
+        height: 380px;
     }
 
-    /* Timer bar on chart */
-    .chart-timer-bar {
-        position: absolute;
-        bottom: 30px;
-        left: 12px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        background: rgba(0,0,0,0.65);
-        backdrop-filter: blur(8px);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 6px 12px;
-        z-index: 10;
-    }
-    .timer-dot {
-        width: 8px; height: 8px;
-        border-radius: 50%;
-        background: var(--accent-green);
-        animation: pulse-dot 1.5s infinite;
-    }
-    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
-    .timer-text {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--text-primary);
-        font-family: 'Inter', monospace;
-    }
-    .timer-text.warning { color: #f59e0b; }
-    .timer-text.critical { color: #ea3941; animation: blink 0.5s infinite; }
-    @keyframes blink { 50% { opacity:0.5; } }
-
-    /* Go to realtime button */
     .go-realtime-btn {
         position: absolute;
-        bottom: 30px;
+        bottom: 12px;
         right: 12px;
         z-index: 10;
         background: rgba(59,130,246,0.15);
         border: 1px solid rgba(59,130,246,0.3);
         color: #60a5fa;
-        padding: 6px 12px;
-        border-radius: 8px;
+        padding: 7px 14px;
+        border-radius: 10px;
         font-size: 11px;
         font-weight: 700;
         cursor: pointer;
         font-family: 'Inter', sans-serif;
         display: none;
         align-items: center;
-        gap: 5px;
+        gap: 6px;
         transition: all 0.2s;
+        backdrop-filter: blur(10px);
     }
     .go-realtime-btn:hover { background: rgba(59,130,246,0.25); }
     .go-realtime-btn.show { display: flex; }
 
-    /* ========== TRADING PANEL (Quotex Style) ========== */
-    .trade-panel {
-        background: var(--bg-secondary);
-        border-top: 1px solid var(--border-color);
-        padding: 14px 12px;
-    }
-
-    .panel-tabs {
+    /* ========== TABS ========== */
+    .tab-container {
+        background: rgba(5,11,24,0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 4px;
         display: flex;
         gap: 4px;
-        background: rgba(0,0,0,0.3);
-        border-radius: 10px;
-        padding: 3px;
-        margin-bottom: 14px;
+        margin-bottom: 16px;
     }
-    .panel-tab {
+    .tab-btn {
         flex: 1;
-        padding: 8px;
-        border-radius: 8px;
+        padding: 9px 12px;
+        border-radius: 10px;
         border: none;
         background: transparent;
         color: var(--text-secondary);
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 600;
         cursor: pointer;
-        font-family: 'Inter', sans-serif;
         transition: all 0.2s;
-    }
-    .panel-tab.active { background: var(--bg-card); color: var(--text-primary); }
-
-    /* Amount Section */
-    .amount-section { margin-bottom: 14px; }
-    .amount-row {
+        font-family: 'Inter', sans-serif;
         display: flex;
         align-items: center;
-        background: var(--bg-card);
+        justify-content: center;
+        gap: 6px;
+    }
+    .tab-btn.active {
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        color: white;
+        box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+    }
+
+    /* ========== TRADE PANEL ========== */
+    .amount-input-wrapper {
+        display: flex;
+        align-items: center;
+        background: rgba(5,11,24,0.8);
         border: 1px solid var(--border-color);
         border-radius: 12px;
         overflow: hidden;
+        margin-bottom: 10px;
     }
     .amount-adj-btn {
-        width: 44px; height: 44px;
+        width: 44px;
+        height: 48px;
         border: none;
-        background: rgba(255,255,255,0.03);
+        background: rgba(59,130,246,0.06);
         color: var(--text-primary);
         font-size: 20px;
         font-weight: 600;
@@ -233,219 +223,177 @@
         justify-content: center;
         transition: background 0.15s;
         font-family: 'Inter', sans-serif;
+        flex-shrink: 0;
     }
-    .amount-adj-btn:hover { background: rgba(255,255,255,0.07); }
-    .amount-field {
+    .amount-adj-btn:hover { background: rgba(59,130,246,0.12); }
+
+    .amount-input {
         flex: 1;
         background: transparent;
         border: none;
+        border-left: 1px solid var(--border-color);
+        border-right: 1px solid var(--border-color);
+        padding: 13px 16px;
         color: var(--text-primary);
-        font-size: 18px;
-        font-weight: 700;
-        text-align: center;
+        font-size: 16px;
+        font-weight: 600;
         font-family: 'Inter', sans-serif;
         outline: none;
+        text-align: center;
     }
-    .amount-field::placeholder { color: #555; }
+    .amount-input::placeholder { color: var(--text-secondary); font-weight: 400; }
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
     input[type="number"] { -moz-appearance: textfield; }
 
-    .quick-amounts {
-        display: flex;
-        gap: 6px;
-        margin-top: 8px;
-    }
-    .quick-chip {
-        flex: 1;
-        padding: 6px;
-        background: rgba(255,255,255,0.03);
-        border: 1px solid var(--border-color);
+    .amount-chip {
+        padding: 6px 14px;
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.2);
         border-radius: 8px;
-        color: var(--text-secondary);
-        font-size: 11px;
+        color: #60a5fa;
+        font-size: 12px;
         font-weight: 600;
         cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        text-align: center;
         transition: all 0.15s;
+        font-family: 'Inter', sans-serif;
     }
-    .quick-chip:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+    .amount-chip:hover {
+        background: rgba(59,130,246,0.2);
+        border-color: rgba(59,130,246,0.4);
+    }
 
-    /* Payout Display */
     .payout-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 8px 12px;
-        background: rgba(0,192,118,0.06);
-        border: 1px solid rgba(0,192,118,0.1);
-        border-radius: 10px;
+        padding: 10px 14px;
+        background: rgba(16,185,129,0.06);
+        border: 1px solid rgba(16,185,129,0.12);
+        border-radius: 12px;
         margin-bottom: 14px;
     }
-    .payout-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+    .payout-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
     .payout-value { font-size: 18px; font-weight: 800; color: var(--accent-green); }
 
-    /* UP/DOWN Buttons */
-    .trade-actions {
-        display: flex;
-        gap: 10px;
-    }
-    .btn-trade {
+    .btn-up {
         flex: 1;
-        padding: 16px 12px;
+        padding: 16px;
+        background: linear-gradient(135deg, #10b981, #059669);
         border: none;
         border-radius: 14px;
         color: white;
-        font-size: 15px;
+        font-size: 16px;
         font-weight: 800;
         cursor: pointer;
+        transition: all 0.2s;
         font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 16px rgba(16,185,129,0.3);
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        transition: all 0.2s;
-        position: relative;
-        overflow: hidden;
     }
-    .btn-trade::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: rgba(255,255,255,0);
-        transition: background 0.2s;
-    }
-    .btn-trade:hover::after { background: rgba(255,255,255,0.06); }
-    .btn-trade:disabled { opacity: 0.45; cursor: not-allowed; }
-    .btn-trade:disabled::after { display: none; }
+    .btn-up:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
+    .btn-up:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    .btn-up {
-        background: linear-gradient(180deg, #00c076 0%, #00a86b 100%);
-        box-shadow: 0 4px 20px rgba(0,192,118,0.3);
-    }
     .btn-down {
-        background: linear-gradient(180deg, #ea3941 0%, #d22a32 100%);
-        box-shadow: 0 4px 20px rgba(234,57,65,0.3);
-    }
-
-    .trade-status {
-        text-align: center;
-        margin-top: 10px;
-        font-size: 12px;
-        font-weight: 600;
-        min-height: 18px;
-    }
-
-    /* ========== COPY TRADE PANEL ========== */
-    #copy-trade-panel { display: none; }
-
-    .copy-card {
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
+        flex: 1;
+        padding: 16px;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        border: none;
         border-radius: 14px;
-        padding: 14px;
-        margin-bottom: 10px;
-        position: relative;
-        overflow: hidden;
+        color: white;
+        font-size: 16px;
+        font-weight: 800;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 16px rgba(239,68,68,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
     }
+    .btn-down:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239,68,68,0.4); }
+    .btn-down:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* ========== TRADE HISTORY ========== */
+    .trade-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        background: rgba(5,11,24,0.5);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .trade-row:hover {
+        background: rgba(59,130,246,0.06);
+        border-color: rgba(59,130,246,0.25);
+    }
+
+    .badge {
+        padding: 3px 9px;
+        border-radius: 7px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .badge-win { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+    .badge-loss { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+    .badge-active { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
+    .badge-pending { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+    .badge-default { background: rgba(136,153,187,0.12); color: var(--text-secondary); border: 1px solid var(--border-color); }
+
+    .cancel-btn {
+        padding: 3px 8px;
+        background: rgba(245,158,11,0.12);
+        border: 1px solid rgba(245,158,11,0.2);
+        color: #f59e0b;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        margin-left: 6px;
+        transition: all 0.15s;
+    }
+    .cancel-btn:hover { background: rgba(245,158,11,0.2); }
+
+    /* ========== COPY TRADE ========== */
+    .copy-card { transition: all 0.2s; }
     .copy-btn {
         width: 100%;
-        padding: 10px;
-        background: linear-gradient(135deg, var(--accent-green), #00a86b);
+        padding: 11px;
+        background: linear-gradient(135deg, #10b981, #059669);
         border: none;
         border-radius: 10px;
         color: white;
         font-weight: 700;
         font-size: 13px;
         cursor: pointer;
-        font-family: 'Inter', sans-serif;
         transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 12px rgba(16,185,129,0.25);
     }
-    .copy-btn:hover { filter: brightness(1.1); }
-    .copy-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
+    .copy-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
     .copy-btn.copied {
-        background: rgba(0,192,118,0.12) !important;
-        border: 1px solid rgba(0,192,118,0.25) !important;
-        color: var(--accent-green) !important;
+        background: rgba(16, 185, 129, 0.15) !important;
+        border: 1px solid rgba(16, 185, 129, 0.3) !important;
+        color: #10b981 !important;
+        box-shadow: none !important;
+        cursor: not-allowed;
     }
 
-    /* ========== TRADE HISTORY ========== */
-    .history-section {
-        padding: 14px 12px;
-    }
-    .section-title {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 12px;
-    }
-    .section-title h3 { font-size: 14px; font-weight: 700; }
-
-    .trade-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        margin-bottom: 6px;
-        cursor: pointer;
-        transition: all 0.15s;
-    }
-    .trade-row:hover { background: rgba(255,255,255,0.03); }
-
-    .badge {
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-    .badge-win { background: rgba(0,192,118,0.12); color: var(--accent-green); }
-    .badge-loss { background: rgba(234,57,65,0.12); color: var(--accent-red); }
-    .badge-active { background: rgba(245,158,11,0.12); color: #f59e0b; }
-    .badge-pending { background: rgba(59,130,246,0.12); color: #60a5fa; }
-    .badge-default { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
-
-    .cancel-btn {
-        padding: 3px 7px;
-        background: rgba(245,158,11,0.1);
-        border: 1px solid rgba(245,158,11,0.2);
-        color: #f59e0b;
-        border-radius: 5px;
-        font-size: 10px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        margin-left: 5px;
-    }
-
-    .btn-load-more {
-        width: 100%;
-        padding: 10px;
-        background: rgba(255,255,255,0.03);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        color: var(--text-secondary);
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        transition: all 0.2s;
-        margin-top: 6px;
-    }
-    .btn-load-more:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-    .btn-load-more:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    .skeleton {
-        background: linear-gradient(90deg, var(--bg-card) 25%, rgba(255,255,255,0.02) 50%, var(--bg-card) 75%);
-        background-size: 200% 100%;
-        animation: shimmer 1.5s infinite;
-        border-radius: 10px;
-    }
-    @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
+    /* ========== PRICE FLASH ========== */
+    @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
+    @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
+    .price-up { animation: flash-up 0.5s ease-out; border-radius: 6px; }
+    .price-down { animation: flash-down 0.5s ease-out; border-radius: 6px; }
 
     /* ========== MODALS ========== */
     .modal-overlay {
@@ -469,46 +417,47 @@
     .modal.show { display: flex; }
 
     .modal-card {
-        background: var(--bg-secondary);
+        background: #0d1f3c;
         border: 1px solid var(--border-color);
-        border-radius: 20px;
-        padding: 28px 24px;
-        width: 100%; max-width: 340px;
+        border-radius: 24px;
+        padding: 32px 28px;
+        width: 100%; max-width: 360px;
         text-align: center;
         animation: popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
         position: relative;
         overflow: hidden;
     }
-    .modal-card.win-card { border-color: rgba(0,192,118,0.4); }
-    .modal-card.loss-card { border-color: rgba(234,57,65,0.3); }
+    .modal-card.win-card { border-color: rgba(16,185,129,0.4); }
+    .modal-card.loss-card { border-color: rgba(239,68,68,0.3); }
     @keyframes popIn { 0% { transform:scale(0.85); opacity:0; } 100% { transform:scale(1); opacity:1; } }
 
     .modal-icon {
-        width: 56px; height: 56px;
-        border-radius: 16px;
+        width: 64px; height: 64px;
+        border-radius: 20px;
         display: flex; align-items: center; justify-content: center;
-        margin: 0 auto 16px;
+        margin: 0 auto 20px;
     }
 
     .btn-modal-close {
         width: 100%;
-        padding: 12px;
+        padding: 13px;
         border: none;
-        border-radius: 12px;
+        border-radius: 14px;
         color: white;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 15px;
         cursor: pointer;
         font-family: 'Inter', sans-serif;
-        margin-top: 16px;
+        margin-top: 20px;
         transition: all 0.2s;
     }
+    .btn-modal-close:hover { transform: translateY(-1px); }
 
     .detail-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 8px 0;
+        padding: 10px 0;
         border-bottom: 1px solid var(--border-color);
     }
     .detail-row:last-child { border-bottom: none; }
@@ -516,7 +465,7 @@
     /* ========== TOASTS ========== */
     .toast {
         position: fixed;
-        top: 16px; left: 50%;
+        top: 20px; left: 50%;
         transform: translateX(-50%);
         z-index: 9999;
         display: none;
@@ -526,24 +475,24 @@
         animation: slideDown 0.4s ease-out;
     }
     @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
     .toast-inner {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 10px 18px;
-        border-radius: 12px;
+        gap: 10px;
+        padding: 12px 20px;
+        border-radius: 14px;
         font-weight: 600;
-        font-size: 13px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-        background: rgba(22,27,34,0.95);
-        border: 1px solid var(--border-color);
+        font-size: 14px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
 
-    .live-dot { animation: pulse-dot 1.5s infinite; }
+    .live-dot { animation: pulse-live 1.5s infinite; }
+    @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
     .confetti-particle {
         position: absolute;
-        width: 6px; height: 12px;
+        width: 8px; height: 14px;
         opacity: 0;
         animation: confetti-fall 2s ease-out forwards;
     }
@@ -552,19 +501,47 @@
         100% { transform: translateY(320px) rotateZ(360deg); opacity: 0; }
     }
 
-    @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(0,192,118,0.08); } }
-    @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(234,57,65,0.08); } }
-    .price-flash-up { animation: flash-up 0.4s ease-out; }
-    .price-flash-down { animation: flash-down 0.4s ease-out; }
+    .btn-load-more {
+        width: 100%;
+        padding: 10px;
+        background: rgba(59,130,246,0.08);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.2s;
+        margin-top: 8px;
+    }
+    .btn-load-more:hover { background: rgba(59,130,246,0.15); color: var(--text-primary); }
+    .btn-load-more:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .section-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+    }
+
+    .skeleton {
+        background: linear-gradient(90deg, rgba(13,31,60,0.8) 25%, rgba(59,130,246,0.05) 50%, rgba(13,31,60,0.8) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 10px;
+    }
+    @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 
     /* ========== BOTTOM NAV ========== */
     .bottom-nav {
         position: fixed;
         bottom: 0; left: 0; right: 0;
-        background: rgba(22,27,34,0.97);
-        backdrop-filter: blur(16px);
+        background: rgba(10,22,40,0.95);
+        backdrop-filter: blur(20px);
         border-top: 1px solid var(--border-color);
-        padding: 8px 0 18px;
+        padding: 10px 0 20px;
         display: flex;
         justify-content: space-around;
         align-items: center;
@@ -572,38 +549,23 @@
     }
     .nav-item {
         display: flex; flex-direction: column;
-        align-items: center; gap: 3px;
+        align-items: center; gap: 4px;
         text-decoration: none;
         color: var(--text-secondary);
-        font-size: 10px; font-weight: 500;
-        flex: 1;
-        padding: 3px 0;
-        transition: all 0.2s;
+        font-size: 11px; font-weight: 500;
+        flex: 1; transition: all 0.2s;
+        position: relative; padding: 4px 0;
     }
-    .nav-item svg { width: 20px; height: 20px; }
-    .nav-item.active { color: var(--accent-green); }
+    .nav-item svg { width: 22px; height: 22px; }
+    .nav-item.active { color: var(--accent-blue); }
     .nav-item.active::before {
         content: '';
         position: absolute;
-        top: 0; left: 50%;
+        top: -10px; left: 50%;
         transform: translateX(-50%);
-        width: 28px; height: 2px;
-        background: var(--accent-green);
-        border-radius: 0 0 3px 3px;
-    }
-
-    /* Responsive - Desktop */
-    @media (min-width: 768px) {
-        .main-layout {
-            display: grid;
-            grid-template-columns: 1fr 320px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .chart-zone { grid-column: 1; }
-        #tv-chart-container { height: 520px; }
-        .trade-panel { grid-column: 2; grid-row: 1; border-left: 1px solid var(--border-color); border-top: none; }
-        .history-section { grid-column: 1 / -1; }
+        width: 32px; height: 3px;
+        background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        border-radius: 0 0 4px 4px;
     }
 </style>
 </head>
@@ -613,112 +575,154 @@
     if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
 </script>
 
-<!-- ===== TOP BAR ===== -->
-<div class="top-bar">
-    <div class="asset-selector" id="assetSelector">
-        <span class="asset-name" id="selectedAssetName">Loading...</span>
-        <svg class="asset-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
-        </svg>
-        <div class="asset-dropdown" id="assetDropdown"></div>
-    </div>
-    <div class="price-block">
-        <div id="livePrice" class="live-price neutral">-.--</div>
-        <div class="balance-display">Balance: <span class="balance-amount" id="balanceDisplay">$0.00</span></div>
-    </div>
-</div>
+<div class="container mx-auto px-4 pt-5 max-w-5xl" style="padding: 16px; max-width: 700px; margin: 0 auto;">
 
-<!-- ===== MAIN LAYOUT ===== -->
-<div class="main-layout">
-
-    <!-- CHART -->
-    <div class="chart-zone">
-        <div id="tv-chart-container"></div>
-
-        <div class="chart-timer-bar">
-            <div class="timer-dot"></div>
-            <span class="timer-text" id="countdownTimer">--s</span>
+    <!-- HEADER -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>
+            <h1 style="font-size:20px; font-weight:800; color:var(--text-primary);">Trading</h1>
+            <p style="font-size:12px; color:var(--text-secondary);">Live binary options market</p>
         </div>
+        <div style="text-align:right;">
+            <p style="font-size:11px; color:var(--text-secondary);">Balance</p>
+            <p id="balance-display" style="font-size:20px; font-weight:800; color:#10b981;">$0.00</p>
+        </div>
+    </div>
 
-        <button class="go-realtime-btn" id="goRealtimeBtn" title="Go to latest candle">
+    <!-- ASSET + PRICE -->
+    <div class="trade-header">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div class="asset-dropdown">
+                <button id="assetDropdownBtn" class="asset-dropdown-btn">
+                    <span id="selectedAssetSpan">Select Asset</span>
+                    <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div id="assetDropdownContent" class="asset-dropdown-content"></div>
+            </div>
+            <div style="text-align:right;">
+                <p class="section-label" style="margin-bottom:2px;">Current Price</p>
+                <p id="currentPrice" class="current-price">-.--</p>
+            </div>
+        </div>
+        <div class="timer-box">
+            <span style="font-size:12px; font-weight:600; color:#60a5fa;">NEXT CANDLE IN</span>
+            <span id="countdownSeconds" class="timer-value">--</span>
+        </div>
+    </div>
+
+    <!-- TRADINGVIEW CHART -->
+    <div class="chart-wrapper">
+        <div id="tv-chart-container"></div>
+        <button class="go-realtime-btn" id="goRealtimeBtn">
             <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 5l7 7-7 7M5 5l7 7-7 7"/>
             </svg>
-            Live
+            Go to Live
         </button>
     </div>
 
-    <!-- TRADE PANEL -->
-    <div class="trade-panel">
-        <div class="panel-tabs">
-            <button class="panel-tab active" data-tab="trade">⚡ Trade</button>
-            <button class="panel-tab" data-tab="copy">📋 Copy Trade</button>
+    <!-- TABS -->
+    <div class="tab-container">
+        <button class="tab-btn active" data-tab="trade">
+            <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+            </svg>
+            Live Trade
+        </button>
+        <button class="tab-btn" data-tab="copy-trade">
+            <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
+            </svg>
+            Copy Trade
+        </button>
+    </div>
+
+    <!-- LIVE TRADE PANEL -->
+    <div id="trade-content" class="glass-card" style="margin-bottom:16px;">
+        <p class="section-label" style="margin-bottom:12px;">Investment Amount</p>
+
+        <div class="amount-input-wrapper">
+            <button class="amount-adj-btn" id="amountMinus">−</button>
+            <input type="number" id="investmentAmount" min="0.5" step="0.01"
+                class="amount-input" placeholder="Enter amount (min $0.50)" value="10">
+            <button class="amount-adj-btn" id="amountPlus">+</button>
         </div>
 
-        <!-- Live Trade -->
-        <div id="trade-panel">
-            <div class="amount-section">
-                <div class="amount-row">
-                    <button class="amount-adj-btn" id="amountMinus">−</button>
-                    <input type="number" id="investmentAmount" class="amount-field" min="0.5" step="0.01" placeholder="0.00" value="10">
-                    <button class="amount-adj-btn" id="amountPlus">+</button>
-                </div>
-                <div class="quick-amounts">
-                    <button class="quick-chip" data-amount="5">$5</button>
-                    <button class="quick-chip" data-amount="10">$10</button>
-                    <button class="quick-chip" data-amount="25">$25</button>
-                    <button class="quick-chip" data-amount="50">$50</button>
-                    <button class="quick-chip" data-amount="100">$100</button>
-                </div>
-            </div>
-
-            <div class="payout-row">
-                <span class="payout-label">PAYOUT</span>
-                <span class="payout-value">~87%</span>
-            </div>
-
-            <div class="trade-actions">
-                <button id="tradeUp" class="btn-trade btn-up">
-                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
-                    </svg>
-                    UP
-                </button>
-                <button id="tradeDown" class="btn-trade btn-down">
-                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
-                    </svg>
-                    DOWN
-                </button>
-            </div>
-            <div class="trade-status" id="tradeStatus"></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+            <button class="amount-chip" data-amount="10">$10</button>
+            <button class="amount-chip" data-amount="25">$25</button>
+            <button class="amount-chip" data-amount="50">$50</button>
+            <button class="amount-chip" data-amount="100">$100</button>
+            <button class="amount-chip" data-amount="250">$250</button>
         </div>
 
-        <!-- Copy Trade -->
-        <div id="copy-trade-panel">
-            <div id="loadingPlaceholder" style="text-align:center;padding:16px 0;">
-                <div class="skeleton" style="height:70px;margin-bottom:8px;"></div>
-                <div class="skeleton" style="height:70px;"></div>
-            </div>
-            <div id="noCopyTrades" style="display:none;text-align:center;padding:20px 0;">
-                <p style="font-size:13px;color:var(--text-secondary);">No copy trades available.</p>
-            </div>
-            <div id="copyTradesContainer"></div>
-            <div id="copyTradeStatus" style="margin-top:8px;text-align:center;font-size:12px;"></div>
+        <div class="payout-row">
+            <span class="payout-label">ESTIMATED PAYOUT</span>
+            <span class="payout-value">~87%</span>
         </div>
+
+        <div style="display:flex; gap:10px;">
+            <button id="tradeUp" class="btn-up">
+                <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+                </svg>
+                UP
+            </button>
+            <button id="tradeDown" class="btn-down">
+                <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                </svg>
+                DOWN
+            </button>
+        </div>
+
+        <div id="tradeStatus" style="margin-top:12px; min-height:20px; text-align:center; font-size:13px; font-weight:600;"></div>
+    </div>
+
+    <!-- COPY TRADE PANEL -->
+    <div id="copy-trade-content" class="glass-card" style="display:none; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+            <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(59,130,246,0.3);">
+                <svg style="width:16px;height:16px;color:white;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
+                </svg>
+            </div>
+            <div>
+                <p style="font-weight:700; font-size:15px;">Available Copy Trades</p>
+                <p style="font-size:11px; color:var(--text-secondary);">Follow expert traders automatically</p>
+            </div>
+        </div>
+
+        <div id="loadingPlaceholder" style="text-align:center; padding:24px 0;">
+            <div class="skeleton" style="height:80px; margin-bottom:10px;"></div>
+            <div class="skeleton" style="height:80px;"></div>
+        </div>
+
+        <div id="noCopyTrades" style="display:none; text-align:center; padding:24px 0;">
+            <p style="font-size:13px; color:var(--text-secondary);">No copy trades available right now.</p>
+            <p style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Check back soon!</p>
+        </div>
+
+        <div id="copyTradesContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <div id="copyTradeStatus" style="margin-top:10px; text-align:center; font-size:13px; font-weight:500;"></div>
     </div>
 
     <!-- TRADE HISTORY -->
-    <div class="history-section">
-        <div class="section-title">
-            <svg width="16" height="16" fill="none" stroke="#848e9c" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
-            <h3>Trade History</h3>
+    <div class="glass-card">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <div style="width:32px;height:32px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);display:flex;align-items:center;justify-content:center;">
+                <svg style="width:16px;height:16px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+            </div>
+            <p style="font-weight:700; font-size:15px;">Trade History</p>
         </div>
-        <div id="tradeHistoryContainer"></div>
+        <div id="tradeHistoryContainer" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto;"></div>
         <button id="loadMoreTradesBtn" class="btn-load-more" style="display:none;">Load More</button>
     </div>
+
 </div>
 
 <!-- ===== MODALS ===== -->
@@ -727,92 +731,122 @@
 <div id="modal-pending" class="modal">
     <div class="modal-card">
         <div class="modal-icon" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);">
-            <svg width="24" height="24" fill="none" stroke="#60a5fa" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <svg style="width:28px;height:28px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
         </div>
-        <h2 id="pending-title" style="font-size:18px;font-weight:800;margin-bottom:6px;">Trade Pending</h2>
-        <p style="font-size:13px;color:var(--text-secondary);line-height:1.6;">
-            Your <span id="pending-amount" style="color:var(--text-primary);font-weight:700;">$0</span> trade on
-            <span id="pending-asset" style="color:#60a5fa;font-weight:700;">ASSET</span>
-            <span id="pending-time-container" style="display:none;"> executes at <span id="pending-time" style="color:var(--text-primary);font-weight:700;"></span></span>
+        <h2 id="pending-title" style="font-size:20px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">Trade Pending</h2>
+        <p style="font-size:14px; color:var(--text-secondary); line-height:1.6;">
+            Your <span id="pending-amount" style="color:var(--text-primary); font-weight:700;">$0.00</span> trade on
+            <span id="pending-asset" style="color:#60a5fa; font-weight:700;">ASSET</span>
+            <span id="pending-time-container" style="display:none;">
+                executes at <span id="pending-time" style="color:var(--text-primary); font-weight:700;">00:00</span>
+            </span>
         </p>
-        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#3b82f6,#2563eb);">Got it</button>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#3b82f6,#2563eb); box-shadow:0 4px 16px rgba(59,130,246,0.3);">Got it</button>
     </div>
 </div>
 
 <div id="modal-win" class="modal">
     <div class="modal-card win-card">
         <div id="confetti-container" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>
-        <div class="modal-icon" style="background:rgba(0,192,118,0.1);border:1px solid rgba(0,192,118,0.2);">
-            <svg width="24" height="24" fill="none" stroke="#00c076" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div class="modal-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);">
+            <svg style="width:28px;height:28px;color:#10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
         </div>
-        <h2 style="font-size:26px;font-weight:800;color:var(--accent-green);margin-bottom:6px;">YOU WON!</h2>
-        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">Trade Closed Successfully</p>
-        <div style="background:rgba(0,192,118,0.08);border:1px solid rgba(0,192,118,0.15);border-radius:12px;padding:12px;">
-            <p id="win-amount" style="font-size:26px;font-weight:800;color:var(--accent-green);">+$0</p>
+        <h2 style="font-size:28px; font-weight:800; color:#10b981; margin-bottom:8px;">YOU WON!</h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Trade Closed Successfully</p>
+        <div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:14px;padding:14px;">
+            <p id="win-amount" style="font-size:28px; font-weight:800; color:#10b981;">+$0.00</p>
         </div>
-        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#00c076,#00a86b);">Awesome!</button>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 16px rgba(16,185,129,0.3);">Awesome!</button>
     </div>
 </div>
 
 <div id="modal-loss" class="modal">
     <div class="modal-card loss-card">
-        <div class="modal-icon" style="background:rgba(234,57,65,0.1);border:1px solid rgba(234,57,65,0.2);">
-            <svg width="24" height="24" fill="none" stroke="#ea3941" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div class="modal-icon" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);">
+            <svg style="width:28px;height:28px;color:#ef4444;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
         </div>
-        <h2 style="font-size:22px;font-weight:800;color:var(--accent-red);margin-bottom:6px;">Trade Closed</h2>
-        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">Better luck next time!</p>
-        <div style="background:rgba(234,57,65,0.06);border:1px solid rgba(234,57,65,0.15);border-radius:12px;padding:12px;">
-            <p id="loss-amount" style="font-size:22px;font-weight:800;color:var(--accent-red);">-$0</p>
+        <h2 style="font-size:24px; font-weight:800; color:#ef4444; margin-bottom:8px;">Trade Closed</h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Better luck next time!</p>
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:14px;padding:14px;">
+            <p id="loss-amount" style="font-size:24px; font-weight:800; color:#ef4444;">-$0.00</p>
         </div>
-        <button class="btn-modal-close btn-close" style="background:rgba(234,57,65,0.12);border:1px solid rgba(234,57,65,0.25);color:var(--accent-red);">Close</button>
+        <button class="btn-modal-close btn-close" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;">Close</button>
     </div>
 </div>
 
 <div id="modal-trade-details" class="modal">
     <div class="modal-card" style="text-align:left;">
-        <p style="font-size:16px;font-weight:800;margin-bottom:14px;">Trade Details</p>
-        <div class="detail-row"><span style="font-size:12px;color:var(--text-secondary);">Asset</span><span id="detail-asset" style="font-size:12px;font-weight:700;">-</span></div>
-        <div class="detail-row"><span style="font-size:12px;color:var(--text-secondary);">Trade Time</span><span id="detail-trade-time" style="font-size:12px;font-weight:600;">-</span></div>
-        <div class="detail-row"><span style="font-size:12px;color:var(--text-secondary);">Entry Price</span><span id="detail-opening-price" style="font-size:12px;font-weight:600;">-</span></div>
-        <div class="detail-row"><span style="font-size:12px;color:var(--text-secondary);">Exit Price</span><span id="detail-closing-price" style="font-size:12px;font-weight:600;">-</span></div>
-        <div id="detail-pnl-container" style="margin-top:10px;background:rgba(0,192,118,0.06);border:1px solid rgba(0,192,118,0.15);border-radius:10px;padding:10px;display:none;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:12px;color:var(--text-secondary);">P&L</span>
-                <span id="detail-pnl" style="font-size:16px;font-weight:800;color:var(--accent-green);">-</span>
+        <p style="font-size:17px; font-weight:800; color:var(--text-primary); margin-bottom:16px;">Trade Details</p>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Asset</span>
+            <span id="detail-asset" style="font-size:13px; font-weight:700; color:var(--text-primary);">-</span>
+        </div>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Trade Time</span>
+            <span id="detail-trade-time" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+        </div>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Entry Price</span>
+            <span id="detail-opening-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+        </div>
+        <div class="detail-row">
+            <span style="font-size:13px; color:var(--text-secondary);">Exit Price</span>
+            <span id="detail-closing-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+        </div>
+        <div id="detail-pnl-container" style="margin-top:12px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:12px; padding:12px; display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:13px; color:var(--text-secondary);">P&L</span>
+                <span id="detail-pnl" style="font-size:18px; font-weight:800; color:#10b981;">-</span>
             </div>
         </div>
-        <button class="btn-modal-close btn-close" style="background:rgba(255,255,255,0.05);border:1px solid var(--border-color);color:var(--text-primary);">Close</button>
+        <button class="btn-modal-close btn-close" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;">Close</button>
     </div>
 </div>
 
 <div id="modal-copy-success" class="modal">
     <div class="modal-card">
-        <div class="modal-icon" style="background:rgba(0,192,118,0.1);border:1px solid rgba(0,192,118,0.2);">
-            <svg width="24" height="24" fill="none" stroke="#00c076" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div class="modal-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);">
+            <svg style="width:28px;height:28px;color:#10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
         </div>
-        <h2 style="font-size:18px;font-weight:800;margin-bottom:6px;">Trade Copied!</h2>
-        <p style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
-            You are now copying the trade for <span id="copy-success-asset" style="color:#60a5fa;font-weight:700;">ASSET</span>. It will execute automatically.
+        <h2 style="font-size:20px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">Trade Copied!</h2>
+        <p style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
+            You are now copying the trade for
+            <span id="copy-success-asset" style="color:#60a5fa; font-weight:700;">ASSET</span>.
+            It will execute automatically.
         </p>
-        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#00c076,#00a86b);">Great!</button>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 16px rgba(16,185,129,0.3);">Great!</button>
     </div>
 </div>
 
-<!-- Toasts -->
+<!-- TOASTS -->
 <div id="toast-active" class="toast">
-    <div class="toast-inner" style="border-color:rgba(245,158,11,0.3);">
-        <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;animation:pulse-dot 1s infinite;"></span>
-        <span>Your trade is now <strong style="color:#f59e0b;">ACTIVE!</strong></span>
-    </div>
-</div>
-<div id="toast-copy-executed" class="toast">
-    <div class="toast-inner" style="border-color:rgba(59,130,246,0.3);">
-        <svg width="16" height="16" fill="none" stroke="#60a5fa" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
-        <span id="copy-executed-text">Copy trade executed!</span>
+    <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(245,158,11,0.3);">
+        <span class="relative flex" style="width:10px;height:10px;">
+            <span class="live-dot" style="position:absolute;width:100%;height:100%;border-radius:50%;background:#f59e0b;opacity:0.75;display:inline-flex;"></span>
+            <span style="position:relative;width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-flex;"></span>
+        </span>
+        <span style="color:var(--text-primary);">Your trade is now <strong style="color:#f59e0b;">ACTIVE!</strong></span>
     </div>
 </div>
 
-<!-- ===== BOTTOM NAV ===== -->
+<div id="toast-copy-executed" class="toast">
+    <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(59,130,246,0.3);">
+        <svg style="width:18px;height:18px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+        </svg>
+        <span id="copy-executed-text" style="color:var(--text-primary);">Copy trade executed!</span>
+    </div>
+</div>
+
+<!-- BOTTOM NAV -->
 <nav class="bottom-nav">
     <a href="dashboard.html" class="nav-item" id="nav-dashboard">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
@@ -836,41 +870,40 @@
     </a>
 </nav>
 
+<!-- ===== MAIN SCRIPT ===== -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
 
-    /* ============ NAV HIGHLIGHT ============ */
-    const currentPage = window.location.pathname.split('/').pop().replace('.html','') || 'trade';
+    const currentPage = window.location.pathname.split('/').pop().replace('.html', '') || 'trade';
     const navEl = document.getElementById(`nav-${currentPage}`);
     if (navEl) navEl.classList.add('active');
 
-    /* ============ SOCKET ============ */
     const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
-    /* ============ DOM REFS ============ */
-    const balanceElem        = document.getElementById('balanceDisplay');
-    const livePriceElem      = document.getElementById('livePrice');
-    const countdownTimer     = document.getElementById('countdownTimer');
+    /* ===== DOM REFS ===== */
+    const balanceElem = document.getElementById('balance-display');
+    const currentPriceElem = document.getElementById('currentPrice');
+    const countdownSecondsElem = document.getElementById('countdownSeconds');
     const tradeHistoryContainer = document.getElementById('tradeHistoryContainer');
-    const tradeUpBtn         = document.getElementById('tradeUp');
-    const tradeDownBtn       = document.getElementById('tradeDown');
-    const investmentInput    = document.getElementById('investmentAmount');
-    const tradeStatusElem    = document.getElementById('tradeStatus');
-    const assetSelector      = document.getElementById('assetSelector');
-    const selectedAssetName  = document.getElementById('selectedAssetName');
-    const assetDropdown      = document.getElementById('assetDropdown');
-    const goRealtimeBtn      = document.getElementById('goRealtimeBtn');
-    const tradePanel         = document.getElementById('trade-panel');
-    const copyTradePanel     = document.getElementById('copy-trade-panel');
-    const copyTradesContainer= document.getElementById('copyTradesContainer');
+    const tradeUpBtn = document.getElementById('tradeUp');
+    const tradeDownBtn = document.getElementById('tradeDown');
+    const investmentInput = document.getElementById('investmentAmount');
+    const tradeStatusElem = document.getElementById('tradeStatus');
+    const assetDropdownBtn = document.getElementById('assetDropdownBtn');
+    const selectedAssetSpan = document.getElementById('selectedAssetSpan');
+    const assetDropdownContent = document.getElementById('assetDropdownContent');
+    const tradeContent = document.getElementById('trade-content');
+    const copyTradeContent = document.getElementById('copy-trade-content');
+    const copyTradesContainer = document.getElementById('copyTradesContainer');
     const loadingPlaceholder = document.getElementById('loadingPlaceholder');
-    const noCopyTrades       = document.getElementById('noCopyTrades');
-    const copyTradeStatus    = document.getElementById('copyTradeStatus');
-    const loadMoreBtn        = document.getElementById('loadMoreTradesBtn');
-    const overlay            = document.getElementById('modal-overlay');
-    const allModals          = ['modal-pending','modal-win','modal-loss','modal-trade-details','modal-copy-success'].map(id => document.getElementById(id));
+    const noCopyTrades = document.getElementById('noCopyTrades');
+    const copyTradeStatus = document.getElementById('copyTradeStatus');
+    const loadMoreBtn = document.getElementById('loadMoreTradesBtn');
+    const overlay = document.getElementById('modal-overlay');
+    const goRealtimeBtn = document.getElementById('goRealtimeBtn');
+    const allModals = ['modal-pending','modal-win','modal-loss','modal-trade-details','modal-copy-success'].map(id => document.getElementById(id));
 
-    /* ============ STATE ============ */
+    /* ===== STATE ===== */
     let marketData = {}, currentAsset = '', lastPrice = 0;
     let availableCopyTrades = [];
     let tradeHistoryData = {};
@@ -880,32 +913,32 @@ document.addEventListener('DOMContentLoaded', () => {
     let visibleHistoryCount = 0;
     const TRADES_PER_PAGE = 5;
     let serverTimeOffset = 0;
-    let userIsScrolledBack = false; // KEY: tracks if user scrolled away from live
+    let userIsScrolledBack = false;
 
-    /* ============ TRADINGVIEW LIGHTWEIGHT CHART ============ */
+    /* ===== TRADINGVIEW LIGHTWEIGHT CHART ===== */
     const chartContainer = document.getElementById('tv-chart-container');
     const chart = LightweightCharts.createChart(chartContainer, {
         layout: {
-            background: { type: 'solid', color: '#0b0e11' },
-            textColor: '#848e9c',
+            background: { type: 'solid', color: '#050b18' },
+            textColor: '#8899bb',
             fontSize: 11,
             fontFamily: 'Inter, sans-serif',
         },
         grid: {
-            vertLines: { color: 'rgba(255,255,255,0.03)' },
-            horzLines: { color: 'rgba(255,255,255,0.03)' },
+            vertLines: { color: 'rgba(59,130,246,0.04)' },
+            horzLines: { color: 'rgba(59,130,246,0.04)' },
         },
         crosshair: {
             mode: LightweightCharts.CrosshairMode.Normal,
-            vertLine: { color: 'rgba(255,255,255,0.15)', width: 1, style: 2, labelBackgroundColor: '#1e222d' },
-            horzLine: { color: 'rgba(255,255,255,0.15)', width: 1, style: 2, labelBackgroundColor: '#1e222d' },
+            vertLine: { color: 'rgba(59,130,246,0.2)', width: 1, style: 2, labelBackgroundColor: '#0d1f3c' },
+            horzLine: { color: 'rgba(59,130,246,0.2)', width: 1, style: 2, labelBackgroundColor: '#0d1f3c' },
         },
         rightPriceScale: {
-            borderColor: 'rgba(255,255,255,0.06)',
+            borderColor: 'rgba(59,130,246,0.1)',
             scaleMargins: { top: 0.1, bottom: 0.08 },
         },
         timeScale: {
-            borderColor: 'rgba(255,255,255,0.06)',
+            borderColor: 'rgba(59,130,246,0.1)',
             timeVisible: true,
             secondsVisible: false,
             rightOffset: 5,
@@ -917,27 +950,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const candleSeries = chart.addCandlestickSeries({
-        upColor: '#00c076',
-        downColor: '#ea3941',
-        borderUpColor: '#00c076',
-        borderDownColor: '#ea3941',
-        wickUpColor: '#00c076',
-        wickDownColor: '#ea3941',
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderUpColor: '#10b981',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
     });
 
-    /* ===== Detect user scroll for "Go to Realtime" button ===== */
+    /* ===== DETECT USER SCROLL — CORE FIX ===== */
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
         if (!range) return;
-        // Check if user has scrolled back (the right edge is not showing the latest data)
-        const barsCount = candleSeries.data ? candleSeries.data().length : 0;
-        // If the right side of range is less than total bars, user scrolled back
-        if (range.to < barsCount - 2) {
-            userIsScrolledBack = true;
-            goRealtimeBtn.classList.add('show');
-        } else {
-            userIsScrolledBack = false;
-            goRealtimeBtn.classList.remove('show');
-        }
+        try {
+            const data = candleSeries.data();
+            if (!data || !data.length) return;
+            const totalBars = data.length;
+            if (range.to < totalBars - 3) {
+                userIsScrolledBack = true;
+                goRealtimeBtn.classList.add('show');
+            } else {
+                userIsScrolledBack = false;
+                goRealtimeBtn.classList.remove('show');
+            }
+        } catch(e) {}
     });
 
     goRealtimeBtn.addEventListener('click', () => {
@@ -946,50 +981,39 @@ document.addEventListener('DOMContentLoaded', () => {
         chart.timeScale().scrollToRealTime();
     });
 
-    /* Auto-resize chart */
     const resizeChart = () => {
         const w = chartContainer.clientWidth;
-        const h = chartContainer.clientHeight || 420;
+        const h = chartContainer.clientHeight || 380;
         chart.resize(w, h);
     };
     window.addEventListener('resize', resizeChart);
     setTimeout(resizeChart, 100);
 
-    /* ============ ASSET SELECTOR ============ */
-    assetSelector.addEventListener('click', (e) => {
-        e.stopPropagation();
-        assetSelector.classList.toggle('open');
-        assetDropdown.classList.toggle('show');
-    });
-    window.addEventListener('click', () => {
-        assetSelector.classList.remove('open');
-        assetDropdown.classList.remove('show');
+    /* ===== ASSET DROPDOWN ===== */
+    assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
+    window.addEventListener('click', (e) => {
+        if (!e.target.closest('.asset-dropdown')) assetDropdownContent.classList.remove('show');
     });
 
-    function populateAssets(assets) {
-        assetDropdown.innerHTML = '';
+    function populateAssetSelector(assets) {
+        assetDropdownContent.innerHTML = '';
         assets.forEach(asset => {
-            const a = document.createElement('a');
-            a.href = '#';
-            a.textContent = asset;
-            a.addEventListener('click', (e) => {
+            const link = document.createElement('a');
+            link.href = '#';
+            link.textContent = asset;
+            link.addEventListener('click', (e) => {
                 e.preventDefault();
-                e.stopPropagation();
                 currentAsset = asset;
                 localStorage.setItem('lastSelectedAsset', asset);
-                selectedAssetName.textContent = asset;
-                assetSelector.classList.remove('open');
-                assetDropdown.classList.remove('show');
-                // update active class
-                assetDropdown.querySelectorAll('a').forEach(l => l.classList.remove('active'));
-                a.classList.add('active');
+                selectedAssetSpan.textContent = asset;
+                assetDropdownContent.classList.remove('show');
                 loadChartForAsset();
             });
-            assetDropdown.appendChild(a);
+            assetDropdownContent.appendChild(link);
         });
     }
 
-    /* ============ CHART DATA HELPERS ============ */
+    /* ===== CHART HELPERS ===== */
     function candleToTV(c) {
         return {
             time: Math.floor(new Date(c.timestamp).getTime() / 1000),
@@ -1005,84 +1029,82 @@ document.addEventListener('DOMContentLoaded', () => {
         const md = marketData[currentAsset];
         const candles = (md.candles || []).map(candleToTV);
         if (md.currentCandle) candles.push(candleToTV(md.currentCandle));
-        candleSeries.setData(candles);
 
-        // scroll to end only on initial load, not if user was scrolled back
+        // De-duplicate & sort by time
+        const seen = new Set();
+        const unique = candles.filter(c => {
+            if (seen.has(c.time)) return false;
+            seen.add(c.time);
+            return true;
+        }).sort((a, b) => a.time - b.time);
+
+        candleSeries.setData(unique);
+
         if (!userIsScrolledBack) {
             chart.timeScale().scrollToRealTime();
         }
 
         const price = md.currentPrice || 0;
-        updatePriceDisplay(price);
+        currentPriceElem.textContent = formatPrice(price, currentAsset);
         lastPrice = price;
     }
 
-    /* ============ PRICE DISPLAY ============ */
+    /* ===== PRICE HELPERS ===== */
     function formatPrice(price, asset) {
         const decimals = { 'BTCUSDT':2,'ETHUSDT':2,'BNBUSDT':2,'SOLUSDT':2,'AVAXUSDT':2,'ADAUSDT':4,'MATICUSDT':4,'XRPUSDT':4,'DOGEUSDT':5,'LINKUSDT':4 };
         return parseFloat(price).toFixed(decimals[asset] || 2);
     }
 
-    function updatePriceDisplay(price) {
-        livePriceElem.textContent = formatPrice(price, currentAsset);
-        livePriceElem.classList.remove('up','down','neutral','price-flash-up','price-flash-down');
-        if (lastPrice && price !== lastPrice) {
-            const dir = price > lastPrice ? 'up' : 'down';
-            livePriceElem.classList.add(dir, dir === 'up' ? 'price-flash-up' : 'price-flash-down');
-        } else {
-            livePriceElem.classList.add('neutral');
-        }
-    }
-
-    /* ============ UI HELPERS ============ */
     function showStatus(msg, color) {
-        const colors = { red:'#ea3941', green:'#00c076', blue:'#60a5fa', yellow:'#f59e0b', gray:'var(--text-secondary)' };
+        const colors = { red:'#ef4444', green:'#10b981', blue:'#60a5fa', yellow:'#f59e0b', gray:'var(--text-secondary)' };
         tradeStatusElem.textContent = msg;
         tradeStatusElem.style.color = colors[color] || colors.gray;
     }
 
-    function setTradeButtonsDisabled(d) {
-        [tradeUpBtn, tradeDownBtn].forEach(b => b.disabled = d);
+    function setTradeButtonsDisabled(disabled) {
+        [tradeUpBtn, tradeDownBtn].forEach(btn => {
+            btn.disabled = disabled;
+            btn.style.opacity = disabled ? '0.5' : '1';
+        });
     }
 
-    function updateBalance(bal) {
-        balanceElem.textContent = `$${(bal||0).toFixed(2)}`;
+    function updateBalance(newBalance) {
+        balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
     }
 
-    /* ============ AMOUNT +/- BUTTONS ============ */
+    /* ===== AMOUNT +/- ===== */
     document.getElementById('amountMinus').addEventListener('click', () => {
         let v = parseFloat(investmentInput.value) || 0;
-        v = Math.max(0.5, v - 5);
-        investmentInput.value = v;
+        investmentInput.value = Math.max(0.5, v - 5);
     });
     document.getElementById('amountPlus').addEventListener('click', () => {
         let v = parseFloat(investmentInput.value) || 0;
         investmentInput.value = v + 5;
     });
-    document.querySelectorAll('.quick-chip').forEach(c => {
-        c.addEventListener('click', () => { investmentInput.value = c.dataset.amount; });
+    document.querySelectorAll('.amount-chip').forEach(chip => {
+        chip.addEventListener('click', () => { investmentInput.value = chip.dataset.amount; });
     });
 
-    /* ============ TAB SWITCHING ============ */
-    document.querySelectorAll('.panel-tab').forEach(btn => {
+    /* ===== TABS ===== */
+    document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.panel-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             activeTab = btn.dataset.tab;
             if (activeTab === 'trade') {
-                copyTradePanel.style.display = 'none';
-                tradePanel.style.display = 'block';
+                copyTradeContent.style.display = 'none';
+                tradeContent.style.display = 'block';
             } else {
-                tradePanel.style.display = 'none';
-                copyTradePanel.style.display = 'block';
+                tradeContent.style.display = 'none';
+                copyTradeContent.style.display = 'block';
                 fetchCopyTrades();
             }
         });
     });
 
-    /* ============ COPY TRADES ============ */
+    /* ===== COPY TRADES ===== */
     async function fetchCopyTrades() {
-        if (activeTab !== 'copy') return;
+        if (activeTab !== 'copy-trade') return;
         loadingPlaceholder.style.display = 'block';
         noCopyTrades.style.display = 'none';
         copyTradesContainer.innerHTML = '';
@@ -1090,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/user/copy-trades/available', {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
             });
-            if (!res.ok) throw new Error('Failed');
+            if (!res.ok) throw new Error('Failed to fetch');
             const data = await res.json();
             if (data.success) {
                 availableCopyTrades = data.copyTrades || [];
@@ -1100,41 +1122,82 @@ document.addEventListener('DOMContentLoaded', () => {
                     copyTradeStatus.style.color = '#f59e0b';
                 } else { copyTradeStatus.textContent = ''; }
             }
-        } catch { copyTradeStatus.textContent = 'Error loading.'; copyTradeStatus.style.color = '#ea3941'; }
-        finally { loadingPlaceholder.style.display = 'none'; }
+        } catch (err) {
+            copyTradeStatus.textContent = 'Error loading copy trades.';
+            copyTradeStatus.style.color = '#ef4444';
+        } finally { loadingPlaceholder.style.display = 'none'; }
     }
 
     function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
-        if (!availableCopyTrades.length) { noCopyTrades.style.display = 'block'; return; }
+        if (availableCopyTrades.length === 0) { noCopyTrades.style.display = 'block'; return; }
         noCopyTrades.style.display = 'none';
 
         availableCopyTrades.forEach(trade => {
-            const execMs = Math.floor(new Date(trade.executionTime).getTime() / 60000) * 60000;
+            const rawExecMs = new Date(trade.executionTime).getTime();
+            const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
             const isAlreadyCopied = Object.values(tradeHistoryData).some(t =>
                 t.originalCopyTradeId === trade._id && ['scheduled','pending','active'].includes(t.status)
             );
+            const isPopular = trade.percentage >= 10;
             const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
-            const dc = isUp ? 'var(--accent-green)' : 'var(--accent-red)';
+            const directionColor = isUp ? '#10b981' : '#ef4444';
+            const directionBg = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
 
             const card = document.createElement('div');
             card.className = 'copy-card';
+            card.style.position = 'relative';
+            card.style.overflow = 'hidden';
+            card.style.background = 'linear-gradient(145deg, rgba(13,31,60,0.8) 0%, rgba(5,11,24,0.95) 100%)';
+            card.style.border = '1px solid rgba(59,130,246,0.2)';
+            card.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)';
+            card.style.borderRadius = '16px';
+            card.style.padding = '16px';
+            card.style.marginBottom = '10px';
+
             card.innerHTML = `
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                    <div>
-                        <p style="font-weight:800;font-size:14px;">${trade.tradingPair || trade.asset}</p>
-                        <div style="display:flex;align-items:center;gap:4px;margin-top:2px;">
-                            <span style="width:6px;height:6px;border-radius:50%;background:${dc};display:inline-block;animation:pulse-dot 1s infinite;"></span>
-                            <span style="font-size:10px;font-weight:700;color:${dc};">${trade.direction}</span>
+                <div style="position:absolute; top:-30px; right:-30px; width:120px; height:120px; background:radial-gradient(circle, ${directionBg} 0%, transparent 70%); filter:blur(15px); pointer-events:none;"></div>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; position:relative; z-index:1;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px;height:40px;border-radius:12px;background:${directionBg};border:1px solid ${directionColor}40;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${directionBg};">
+                            <svg style="width:20px;height:20px;color:${directionColor};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <p style="font-weight:800; font-size:16px; color:var(--text-primary); letter-spacing:-0.5px;">${trade.tradingPair || trade.asset}</p>
+                                ${isPopular ? `<span style="background:linear-gradient(90deg, #f59e0b, #ef4444); color:white; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; box-shadow:0 0 8px rgba(245,158,11,0.4);">🔥 Hot</span>` : ''}
+                            </div>
+                            <div style="display:flex; align-items:center; gap:4px; margin-top:2px;">
+                                <span style="width:6px;height:6px;border-radius:50%;background:${directionColor};display:inline-block;animation:pulse-live 1s infinite;"></span>
+                                <span style="font-size:11px; font-weight:700; color:${directionColor};">Live Signal</span>
+                                <span style="font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; background:${directionBg}; color:${directionColor}; margin-left:4px;">${trade.direction}</span>
+                            </div>
                         </div>
                     </div>
                     <div style="text-align:right;">
-                        <p style="font-size:10px;color:var(--text-secondary);font-weight:600;">INVEST</p>
-                        <p style="font-size:14px;font-weight:800;">${trade.percentage}%</p>
+                        <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Executes In</p>
+                        <p class="live-copy-timer" data-exec="${lockedExecutionTimeMs}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">--m</p>
                     </div>
                 </div>
-                <button data-id="${trade._id}" data-asset="${trade.tradingPair||trade.asset}" class="copy-btn ${isAlreadyCopied?'copied':''}" ${isAlreadyCopied?'disabled':''}>
-                    ${isAlreadyCopied ? '✅ Copied' : '⚡ Copy Trade'}
+                <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:4px; margin-bottom:14px; overflow:hidden; position:relative; z-index:1;">
+                    <div class="live-copy-bar" data-exec="${lockedExecutionTimeMs}" style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; position:relative; z-index:1;">
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:10px;">
+                        <p style="font-size:11px; color:var(--text-secondary); font-weight:600;">Investment</p>
+                        <p style="font-size:15px; font-weight:800; color:#f0f4ff;">${trade.percentage}% <span style="font-size:11px;color:#8899bb;font-weight:500;">of balance</span></p>
+                    </div>
+                    <div style="background:rgba(16,185,129,0.05); border:1px solid rgba(16,185,129,0.1); border-radius:10px; padding:10px;">
+                        <p style="font-size:11px; color:var(--text-secondary); font-weight:600;">Est. Profit</p>
+                        <p style="font-size:15px; font-weight:800; color:#10b981;">~85 - 90%</p>
+                    </div>
+                </div>
+                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn ${isAlreadyCopied ? 'copied' : ''}" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;" ${isAlreadyCopied ? 'disabled' : ''}>
+                    ${isAlreadyCopied ?
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅` :
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`}
                 </button>
             `;
             copyTradesContainer.appendChild(card);
@@ -1143,14 +1206,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.classList.contains('copied')) return;
-                btn.textContent = 'Copying...';
+                btn.innerHTML = `Copying...`;
                 btn.disabled = true;
                 socket.emit('copy_trade', { copyTradeId: btn.dataset.id, asset: btn.dataset.asset });
             });
         });
     }
 
-    /* ============ TRADE HISTORY ============ */
+    /* ===== TRADE HISTORY ===== */
     function createTradeRow(trade) {
         tradeHistoryData[trade._id] = trade;
         const el = document.createElement('div');
@@ -1159,15 +1222,15 @@ document.addEventListener('DOMContentLoaded', () => {
         el.addEventListener('click', () => showTradeDetails(trade._id));
         const isUp = trade.direction === 'UP' || trade.direction === 'CALL';
         el.innerHTML = `
-            <div style="display:flex;align-items:center;gap:8px;">
-                <div style="width:28px;height:28px;border-radius:8px;background:${isUp?'rgba(0,192,118,0.1)':'rgba(234,57,65,0.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                    <svg width="12" height="12" fill="none" stroke="${isUp?'#00c076':'#ea3941'}" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="${isUp?'M5 10l7-7m0 0l7 7m-7-7v18':'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:34px;height:34px;border-radius:10px;background:${isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};border:1px solid ${isUp ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg style="width:14px;height:14px;color:${isUp ? '#10b981' : '#ef4444'};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
                     </svg>
                 </div>
                 <div>
-                    <p style="font-weight:700;font-size:12px;">${trade.asset||trade.tradingPair}</p>
-                    <p style="font-size:10px;color:var(--text-secondary);">$${trade.amount.toFixed(2)}</p>
+                    <p style="font-weight:700; font-size:13px; color:var(--text-primary);">${trade.asset || trade.tradingPair}</p>
+                    <p style="font-size:11px; color:var(--text-secondary);">$${trade.amount.toFixed(2)}</p>
                 </div>
             </div>
             <div id="status-${trade._id}" style="text-align:right;"></div>
@@ -1176,27 +1239,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateTradeStatus(tradeId, status, result = null) {
-        const c = document.getElementById(`status-${tradeId}`);
-        if (!c) return;
-        let bc = 'badge-default', text = (result||status).toUpperCase();
-        if (result === 'WIN') bc = 'badge-win';
-        else if (result === 'LOSS') bc = 'badge-loss';
-        else if (status === 'active') bc = 'badge-active';
-        else if (['pending','scheduled'].includes(status)) bc = 'badge-pending';
-        let html = `<span class="badge ${bc}">${text}</span>`;
-        if (['pending','scheduled'].includes(status)) {
+        const container = document.getElementById(`status-${tradeId}`);
+        if (!container) return;
+        let badgeClass = 'badge-default';
+        let text = (result || status).toUpperCase();
+        if (result === 'WIN') badgeClass = 'badge-win';
+        else if (result === 'LOSS') badgeClass = 'badge-loss';
+        else if (status.toLowerCase() === 'active') badgeClass = 'badge-active';
+        else if (['pending','scheduled'].includes(status.toLowerCase())) badgeClass = 'badge-pending';
+        let html = `<span class="badge ${badgeClass}">${text}</span>`;
+        if (['pending','scheduled'].includes(status.toLowerCase())) {
             html += `<button onclick="event.stopPropagation();cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
         }
-        c.innerHTML = html;
+        container.innerHTML = html;
     }
 
     function loadMoreTrades() {
         const slice = fullTradeHistory.slice(visibleHistoryCount, visibleHistoryCount + TRADES_PER_PAGE);
-        if (!slice.length && !visibleHistoryCount) { loadMoreBtn.style.display = 'none'; return; }
-        slice.forEach(t => { tradeHistoryContainer.appendChild(createTradeRow(t)); updateTradeStatus(t._id, t.status, t.result); });
+        if (slice.length === 0 && visibleHistoryCount === 0) { loadMoreBtn.style.display = 'none'; return; }
+        slice.forEach(trade => {
+            const el = createTradeRow(trade);
+            tradeHistoryContainer.appendChild(el);
+            updateTradeStatus(trade._id, trade.status, trade.result);
+        });
         visibleHistoryCount += TRADES_PER_PAGE;
         loadMoreBtn.style.display = 'block';
-        if (visibleHistoryCount >= fullTradeHistory.length) { loadMoreBtn.textContent = 'No More'; loadMoreBtn.disabled = true; }
+        if (visibleHistoryCount >= fullTradeHistory.length) { loadMoreBtn.textContent = 'No More Trades'; loadMoreBtn.disabled = true; }
         else { loadMoreBtn.textContent = 'Load More'; loadMoreBtn.disabled = false; }
     }
     loadMoreBtn.addEventListener('click', loadMoreTrades);
@@ -1209,16 +1277,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.cancelTrade = (tradeId) => socket.emit('cancel_trade', { tradeId });
 
-    /* ============ SOCKET EVENTS ============ */
+    /* ===== SOCKET EVENTS ===== */
     socket.on('init', (data) => {
         marketData = data.marketData;
         const assets = Object.keys(marketData);
-        populateAssets(assets);
+        populateAssetSelector(assets);
         const last = localStorage.getItem('lastSelectedAsset');
         currentAsset = (last && assets.includes(last)) ? last : assets[0];
-        selectedAssetName.textContent = currentAsset;
-        // mark active
-        assetDropdown.querySelectorAll('a').forEach(a => { if (a.textContent === currentAsset) a.classList.add('active'); });
+        selectedAssetSpan.textContent = currentAsset;
         updateBalance(data.balance);
         fullTradeHistory = data.tradeHistory || [];
         visibleHistoryCount = 0;
@@ -1234,173 +1300,209 @@ document.addEventListener('DOMContentLoaded', () => {
         assetPrices[pair] = price;
 
         if (marketData[pair]) {
-            let cc = marketData[pair].currentCandle;
+            let currentCandle = marketData[pair].currentCandle;
             const now = new Date(timestamp);
             now.setSeconds(0, 0);
 
-            if (!cc || new Date(cc.timestamp).getTime() !== now.getTime()) {
+            if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
                 let newOpen = price;
-                if (cc) {
-                    newOpen = cc.close;
+                if (currentCandle) {
+                    newOpen = currentCandle.close;
                     if (!marketData[pair].candles) marketData[pair].candles = [];
-                    marketData[pair].candles.push(cc);
+                    marketData[pair].candles.push(currentCandle);
                     if (marketData[pair].candles.length > 200) marketData[pair].candles.shift();
                 }
-                cc = { timestamp: now.toISOString(), open: newOpen, high: Math.max(newOpen, price), low: Math.min(newOpen, price), close: price };
-                marketData[pair].currentCandle = cc;
+                currentCandle = { timestamp: now.toISOString(), open: newOpen, high: Math.max(newOpen, price), low: Math.min(newOpen, price), close: price };
+                marketData[pair].currentCandle = currentCandle;
             } else {
-                cc.close = price;
-                if (price > cc.high) cc.high = price;
-                if (price < cc.low) cc.low = price;
+                currentCandle.close = price;
+                if (price > currentCandle.high) currentCandle.high = price;
+                if (price < currentCandle.low) currentCandle.low = price;
             }
             marketData[pair].currentPrice = price;
         }
 
         if (pair === currentAsset) {
-            updatePriceDisplay(price);
-            lastPrice = price;
+            const newPrice = price;
+            currentPriceElem.classList.remove('price-up', 'price-down');
+            if (lastPrice !== 0 && newPrice !== lastPrice) {
+                currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
+            }
+            currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
+            lastPrice = newPrice;
 
             const seconds = new Date(timestamp).getSeconds();
             const countdown = 60 - seconds;
-            countdownTimer.textContent = `${countdown}s`;
-            countdownTimer.className = 'timer-text';
-            if (countdown <= 10) countdownTimer.classList.add('critical');
-            else if (countdown <= 30) countdownTimer.classList.add('warning');
+            countdownSecondsElem.textContent = `${countdown}s`;
+            countdownSecondsElem.className = 'timer-value';
+            if (countdown <= 10) countdownSecondsElem.classList.add('critical');
+            else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
 
-            // Update chart candle - use .update() for real-time (efficient!)
+            /* UPDATE CHART — ONLY UPDATE CANDLE, NO AUTO-SCROLL */
             const cc = marketData[pair].currentCandle;
             if (cc) {
                 candleSeries.update(candleToTV(cc));
+                // NO scrollToRealTime() here — this is the core fix
             }
-            // NO auto-scroll here! That's the fix. Only scrollToRealTime if user is not scrolled back
         }
     });
 
-    socket.on('trade_pending', (d) => { updateBalance(d.balance); addTradeToHistory(d.trade); showPendingPopup(d.trade); });
-    socket.on('trade_scheduled', (d) => { updateBalance(d.balance); addTradeToHistory(d.trade); showScheduledPopup(d.trade); if(activeTab==='copy') fetchCopyTrades(); });
-    socket.on('trade_active', (d) => {
-        tradeHistoryData[d.trade._id] = d.trade;
-        if (!document.getElementById(`trade-${d.trade._id}`)) addTradeToHistory(d.trade);
-        else updateTradeStatus(d.trade._id, 'active');
+    socket.on('trade_pending', (data) => { updateBalance(data.balance); addTradeToHistory(data.trade); showPendingPopup(data.trade); });
+    socket.on('trade_scheduled', (data) => { updateBalance(data.balance); addTradeToHistory(data.trade); showScheduledPopup(data.trade); if (activeTab === 'copy-trade') fetchCopyTrades(); });
+    socket.on('trade_active', (data) => {
+        tradeHistoryData[data.trade._id] = data.trade;
+        const row = document.getElementById(`trade-${data.trade._id}`);
+        if (!row) addTradeToHistory(data.trade);
+        else updateTradeStatus(data.trade._id, 'active');
         showToast(document.getElementById('toast-active'));
     });
-    socket.on('trade_result', (d) => {
-        updateBalance(d.balance);
-        tradeHistoryData[d.trade._id] = d.trade;
-        if (!document.getElementById(`trade-${d.trade._id}`)) addTradeToHistory(d.trade);
-        else updateTradeStatus(d.trade._id, d.trade.status, d.trade.result);
+    socket.on('trade_result', (data) => {
+        updateBalance(data.balance);
+        tradeHistoryData[data.trade._id] = data.trade;
+        const row = document.getElementById(`trade-${data.trade._id}`);
+        if (!row) addTradeToHistory(data.trade);
+        else updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
         setTradeButtonsDisabled(false);
-        if (d.trade.result === 'WIN') showWinPopup(d.trade);
-        else if (d.trade.result === 'LOSS') showLossPopup(d.trade);
+        if (data.trade.result === 'WIN') showWinPopup(data.trade);
+        else if (data.trade.result === 'LOSS') showLossPopup(data.trade);
     });
-    socket.on('trade_cancelled', (d) => {
-        updateBalance(d.balance);
-        delete tradeHistoryData[d.tradeId];
-        const row = document.getElementById(`trade-${d.tradeId}`);
+    socket.on('trade_cancelled', (data) => {
+        updateBalance(data.balance);
+        delete tradeHistoryData[data.tradeId];
+        const row = document.getElementById(`trade-${data.tradeId}`);
         if (row) row.remove();
         showStatus('Trade cancelled.', 'gray');
         setTradeButtonsDisabled(false);
-        if(activeTab==='copy') fetchCopyTrades();
+        if (activeTab === 'copy-trade') fetchCopyTrades();
     });
-    socket.on('copy_trade_success', (d) => {
-        showCopySuccessPopup(d.copyTrade?.tradingPair || 'that trade');
+    socket.on('copy_trade_success', (data) => {
+        showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            if (btn.textContent.includes('Copying')) { btn.textContent = '✅ Copied'; btn.disabled = true; btn.classList.add('copied'); }
+            if (btn.textContent.includes('Copying')) {
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅`;
+                btn.disabled = true;
+                btn.classList.add('copied');
+            } else if (!btn.classList.contains('copied')) { btn.disabled = false; }
         });
     });
-    socket.on('copy_trade_executed', (d) => {
-        document.getElementById('copy-executed-text').textContent = `Copy trade for ${d.trade.asset||d.trade.tradingPair} is active!`;
+    socket.on('copy_trade_executed', (data) => {
+        document.getElementById('copy-executed-text').textContent = `Copy trade for ${data.trade.asset || data.trade.tradingPair} is active!`;
         showToast(document.getElementById('toast-copy-executed'));
-        updateBalance(d.balance);
-        addTradeToHistory(d.trade);
+        updateBalance(data.balance);
+        addTradeToHistory(data.trade);
     });
-    socket.on('error', (d) => {
-        showStatus(`Error: ${d.message}`, 'red');
+    socket.on('error', (data) => {
+        showStatus(`Error: ${data.message}`, 'red');
         setTradeButtonsDisabled(false);
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            if (btn.textContent.includes('Copying')) { btn.disabled = false; btn.textContent = '⚡ Copy Trade'; }
+            if (btn.textContent.includes('Copying')) {
+                btn.disabled = false;
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
+            }
         });
     });
     socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
 
-    /* ============ TRADE ACTIONS ============ */
+    /* ===== TRADE ACTIONS ===== */
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
-        if (isNaN(amount) || amount < 0.5) { showStatus('Min amount is $0.50', 'red'); setTradeButtonsDisabled(false); return; }
-        const cp = assetPrices[currentAsset] || lastPrice;
-        if (!cp) { showStatus('Waiting for price...', 'red'); setTradeButtonsDisabled(false); return; }
-        socket.emit('trade', { direction, asset: currentAsset, amount, openingPrice: cp });
+        if (isNaN(amount) || amount < 0.5) { showStatus('Invalid amount. Minimum is $0.50.', 'red'); setTradeButtonsDisabled(false); return; }
+        const currentPrice = assetPrices[currentAsset] || lastPrice;
+        if (!currentPrice) { showStatus('Waiting for price data...', 'red'); setTradeButtonsDisabled(false); return; }
+        socket.emit('trade', { direction, asset: currentAsset, amount, openingPrice: currentPrice });
     };
     tradeUpBtn.addEventListener('click', () => requestTrade('UP'));
     tradeDownBtn.addEventListener('click', () => requestTrade('DOWN'));
 
-    /* ============ MODALS ============ */
+    /* ===== MODALS ===== */
     function showModal(modal) { hideAllModals(); overlay.classList.add('show'); modal.classList.add('show'); if (modal.id === 'modal-win') triggerConfetti(); }
     function hideModal(modal) { overlay.classList.remove('show'); modal.classList.remove('show'); }
     function hideAllModals() { allModals.forEach(m => m.classList.remove('show')); overlay.classList.remove('show'); }
+    function showToast(toast) { toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3000); }
+
     overlay.addEventListener('click', hideAllModals);
-    document.querySelectorAll('.btn-close').forEach(btn => { btn.addEventListener('click', () => { const m = btn.closest('.modal'); if(m) hideModal(m); }); });
+    document.querySelectorAll('.btn-close').forEach(btn => {
+        btn.addEventListener('click', () => { const modal = btn.closest('.modal'); if (modal) hideModal(modal); });
+    });
 
-    function showToast(t) { t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
-
-    function showPendingPopup(t) {
+    function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
-        document.getElementById('pending-amount').textContent = `$${t.amount.toFixed(2)}`;
-        document.getElementById('pending-asset').textContent = t.asset;
+        document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
+        document.getElementById('pending-asset').textContent = trade.asset;
         document.getElementById('pending-time-container').style.display = 'none';
         showModal(document.getElementById('modal-pending'));
     }
-    function showScheduledPopup(t) {
+    function showScheduledPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Scheduled';
-        document.getElementById('pending-amount').textContent = `$${t.amount.toFixed(2)}`;
-        document.getElementById('pending-asset').textContent = t.asset;
-        document.getElementById('pending-time').textContent = new Date(t.scheduledTime).toLocaleTimeString();
+        document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
+        document.getElementById('pending-asset').textContent = trade.asset;
+        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
         document.getElementById('pending-time-container').style.display = 'inline';
         showModal(document.getElementById('modal-pending'));
     }
-    function showWinPopup(t) { document.getElementById('win-amount').textContent = `+$${t.pnl.toFixed(2)}`; showModal(document.getElementById('modal-win')); }
-    function showLossPopup(t) { document.getElementById('loss-amount').textContent = `-$${Math.abs(t.pnl).toFixed(2)}`; showModal(document.getElementById('modal-loss')); }
+    function showWinPopup(trade) { document.getElementById('win-amount').textContent = `+$${trade.pnl.toFixed(2)}`; showModal(document.getElementById('modal-win')); }
+    function showLossPopup(trade) { document.getElementById('loss-amount').textContent = `-$${Math.abs(trade.pnl).toFixed(2)}`; showModal(document.getElementById('modal-loss')); }
     function showCopySuccessPopup(asset) { document.getElementById('copy-success-asset').textContent = asset; showModal(document.getElementById('modal-copy-success')); }
 
     function showTradeDetails(tradeId) {
-        const t = tradeHistoryData[tradeId];
-        if (!t) return;
-        const asset = t.asset || t.tradingPair;
+        const trade = tradeHistoryData[tradeId];
+        if (!trade) return;
+        const asset = trade.asset || trade.tradingPair;
         document.getElementById('detail-asset').textContent = asset;
-        document.getElementById('detail-trade-time').textContent = new Date(t.timestamp || t.createdAt).toLocaleString();
-        document.getElementById('detail-opening-price').textContent = t.entryPrice ? `$${formatPrice(t.entryPrice, asset)}` : 'N/A';
-        document.getElementById('detail-closing-price').textContent = t.exitPrice ? `$${formatPrice(t.exitPrice, asset)}` : 'N/A';
+        document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt).toLocaleString();
+        document.getElementById('detail-opening-price').textContent = trade.entryPrice ? `$${formatPrice(trade.entryPrice, asset)}` : 'N/A';
+        document.getElementById('detail-closing-price').textContent = trade.exitPrice ? `$${formatPrice(trade.exitPrice, asset)}` : 'N/A';
         const pnlEl = document.getElementById('detail-pnl');
-        const pnlC = document.getElementById('detail-pnl-container');
-        if (t.pnl != null) {
-            const pos = t.pnl >= 0;
-            pnlEl.textContent = `${pos?'+':''}$${t.pnl.toFixed(2)}`;
-            pnlEl.style.color = pos ? 'var(--accent-green)' : 'var(--accent-red)';
-            pnlC.style.background = pos ? 'rgba(0,192,118,0.06)' : 'rgba(234,57,65,0.06)';
-            pnlC.style.borderColor = pos ? 'rgba(0,192,118,0.15)' : 'rgba(234,57,65,0.15)';
-            pnlC.style.display = 'block';
-        } else { pnlC.style.display = 'none'; }
+        const pnlContainer = document.getElementById('detail-pnl-container');
+        if (trade.pnl !== undefined && trade.pnl !== null) {
+            const isPos = trade.pnl >= 0;
+            pnlEl.textContent = `${isPos ? '+' : ''}$${trade.pnl.toFixed(2)}`;
+            pnlEl.style.color = isPos ? '#10b981' : '#ef4444';
+            pnlContainer.style.background = isPos ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+            pnlContainer.style.borderColor = isPos ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)';
+            pnlContainer.style.display = 'block';
+        } else { pnlContainer.style.display = 'none'; }
         showModal(document.getElementById('modal-trade-details'));
     }
 
     function triggerConfetti() {
-        const c = document.getElementById('confetti-container');
-        c.innerHTML = '';
-        const colors = ['#00c076','#34d399','#f59e0b','#60a5fa','#a78bfa'];
-        for (let i = 0; i < 25; i++) {
+        const container = document.getElementById('confetti-container');
+        container.innerHTML = '';
+        const colors = ['#10b981','#34d399','#f59e0b','#60a5fa','#a78bfa'];
+        for (let i = 0; i < 30; i++) {
             const p = document.createElement('div');
             p.className = 'confetti-particle';
-            p.style.left = `${Math.random()*100}%`;
-            p.style.animationDelay = `${Math.random()*0.5}s`;
-            p.style.backgroundColor = colors[Math.floor(Math.random()*colors.length)];
-            c.appendChild(p);
+            p.style.left = `${Math.random() * 100}%`;
+            p.style.animationDelay = `${Math.random() * 0.5}s`;
+            p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            p.style.transform = `rotateZ(${Math.random() * 360}deg)`;
+            container.appendChild(p);
         }
-        setTimeout(() => c.innerHTML = '', 2500);
+        setTimeout(() => container.innerHTML = '', 2500);
     }
 
-    /* ============ PERIODIC ============ */
-    setInterval(() => { if(activeTab==='copy') fetchCopyTrades(); }, 30000);
+    /* ===== PERIODIC REFRESH ===== */
+    setInterval(() => { if (activeTab === 'copy-trade') fetchCopyTrades(); }, 30000);
+
+    setInterval(() => {
+        const accurateNow = Date.now() + serverTimeOffset;
+        const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
+        document.querySelectorAll('.live-copy-timer').forEach(el => {
+            const execTimeMs = parseInt(el.getAttribute('data-exec'), 10);
+            const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
+            el.textContent = diffMins <= 0 ? '0m' : `${diffMins}m`;
+            el.style.color = diffMins <= 0 ? '#ef4444' : diffMins <= 5 ? '#ef4444' : '#60a5fa';
+        });
+        document.querySelectorAll('.live-copy-bar').forEach(el => {
+            const execTimeMs = parseInt(el.getAttribute('data-exec'), 10);
+            const diffMs = execTimeMs - accurateNow;
+            const minsLeft = Math.max(0, diffMs / 60000);
+            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
+            el.style.width = `${progressPercent}%`;
+            if (minsLeft < 5) { el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)'; }
+        });
+    }, 1000);
 
 });
 </script>
