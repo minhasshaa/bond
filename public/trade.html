@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade - TradePro</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -302,6 +302,7 @@
     .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
     .copy-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
 
+    /* 🚀 NEW: Design for Copied Button */
     .copy-btn.copied {
         background: rgba(16, 185, 129, 0.15) !important;
         border: 1px solid rgba(16, 185, 129, 0.3) !important;
@@ -813,48 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const TRADES_PER_PAGE = 5;
     let lastChartDrawTime = 0;
 
-    // 🚀 NEW: TradingView Lightweight Charts (Safely Initialized)
-    const chartContainer = document.getElementById('candlestickContainer');
-    let chart = null;
-    let candlestickSeries = null;
-
-    try {
-        chart = LightweightCharts.createChart(chartContainer, {
-            width: chartContainer.clientWidth || window.innerWidth - 32,
-            height: 320,
-            layout: {
-                background: { type: 'solid', color: 'transparent' }, 
-                textColor: '#8899bb',
-            },
-            grid: {
-                vertLines: { color: 'rgba(59,130,246,0.05)' },
-                horzLines: { color: 'rgba(59,130,246,0.05)' },
-            },
-            crosshair: { mode: 0 },
-            rightPriceScale: { borderColor: 'rgba(59,130,246,0.15)' },
-            timeScale: {
-                borderColor: 'rgba(59,130,246,0.15)',
-                timeVisible: true,
-                secondsVisible: false,
-            },
-        });
-
-        candlestickSeries = chart.addCandlestickSeries({
-            upColor: '#10b981',
-            downColor: '#ef4444',
-            borderVisible: false,
-            wickUpColor: '#10b981',
-            wickDownColor: '#ef4444',
-        });
-
-        window.addEventListener('resize', () => {
-            if (chartContainer.clientWidth > 0) {
-                chart.applyOptions({ width: chartContainer.clientWidth });
-            }
-        });
-    } catch (err) {
-        console.error("TradingView Init Error:", err);
-    }
+    const myChart = echarts.init(document.getElementById('candlestickContainer'), 'dark');
 
     document.querySelectorAll('.amount-chip').forEach(chip => {
         chip.addEventListener('click', () => {
@@ -970,9 +930,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const rawExecMs = new Date(trade.executionTime).getTime();
             const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
 
+            // 🚀 FIX: Agar time pehle hi khatam ho chuka hai (Zero par hai), to list mein add hi na karein
             const accurateNow = Date.now() + serverTimeOffset;
             const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
-            if (lockedExecutionTimeMs <= currentMinuteMs) return;
+            if (lockedExecutionTimeMs <= currentMinuteMs) return; // Skip this card
 
             validTradesRendered++;
 
@@ -1046,6 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
             copyTradesContainer.appendChild(card);
         });
 
+        // 🚀 FIX: Agar filter honay ke baad koi trade na bache to no trades show karo
         if (validTradesRendered === 0) {
             noCopyTrades.style.display = 'block';
         }
@@ -1140,72 +1102,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.cancelTrade = (tradeId) => socket.emit('cancel_trade', { tradeId });
 
-    // 🚀 NEW: TradingView Data Formatter
-    function formatCandleForTV(c) {
+    function buildChartData(candles, currentCandle) {
+        const all = [...(candles || [])];
+        if (currentCandle) all.push(currentCandle);
         return {
-            time: Math.floor(new Date(c.timestamp).getTime() / 1000),
-            open: parseFloat(c.open),
-            high: parseFloat(c.high),
-            low: parseFloat(c.low),
-            close: parseFloat(c.close)
+            data: all.map(c => [c.open, c.close, c.low, c.high]),
+            dates: all.map(c => new Date(c.timestamp).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }))
         };
     }
 
-    // 🚀 NEW: TradingView Chart Initialization Safely
     function initChart(candles, currentCandle) {
-        if (!candlestickSeries) return;
-        try {
-            const allCandles = [...(candles || [])];
-            if (currentCandle) allCandles.push(currentCandle);
-            
-            const uniqueCandles = [];
-            const seenTimes = new Set();
-            
-            allCandles.forEach(c => {
-                if(!c || !c.timestamp) return;
-                const formatted = formatCandleForTV(c);
-                if (!seenTimes.has(formatted.time) && !isNaN(formatted.time)) {
-                    seenTimes.add(formatted.time);
-                    uniqueCandles.push(formatted);
-                }
-            });
-            
-            uniqueCandles.sort((a, b) => a.time - b.time);
-            if(uniqueCandles.length > 0) {
-                candlestickSeries.setData(uniqueCandles);
-            }
-        } catch (err) {
-            console.error("Data Set Error:", err);
-        }
+        const { data, dates } = buildChartData(candles, currentCandle);
+        if (!data.length) { myChart.clear(); return; }
+
+        myChart.setOption({
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+            xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#8899bb' } }, axisLabel: { color: '#8899bb', fontSize: 10 } },
+            yAxis: { scale: true, axisLine: { lineStyle: { color: '#8899bb' } }, axisLabel: { color: '#8899bb', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(59,130,246,0.08)' } } },
+            grid: { left: '14%', right: '4%', bottom: '12%', top: '4%' },
+            dataZoom: [{ type: 'inside', startValue: Math.max(0, dates.length - 50), endValue: dates.length - 1 }],
+            series: [{
+                type: 'candlestick',
+                data,
+                itemStyle: { color: '#10b981', color0: '#ef4444', borderColor: '#10b981', borderColor0: '#ef4444' }
+            }]
+        }, { notMerge: true });
     }
 
-    // 🚀 NEW: TradingView Chart Update Safely
     function updateChart(candles, currentCandle) {
-        if (!candlestickSeries || !currentCandle) return;
-        try {
-            const formatted = formatCandleForTV(currentCandle);
-            if (!isNaN(formatted.time)) {
-                candlestickSeries.update(formatted);
-            }
-        } catch (e) {
-            initChart(candles, currentCandle);
-        }
+        const { data, dates } = buildChartData(candles, currentCandle);
+        if (!data.length) return;
+        
+        myChart.setOption({ 
+            xAxis: { data: dates }, 
+            series: [{ data }],
+            dataZoom: [{ 
+                type: 'inside', 
+                startValue: Math.max(0, dates.length - 25),
+                endValue: dates.length - 1 
+            }]
+        });
     }
 
     function updateUIForCurrentAsset() {
-        if (currentAsset && marketData && marketData[currentAsset]) {
+        if (marketData[currentAsset]) {
             initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            if(candlestickSeries) {
-                try { candlestickSeries.setData([]); } catch(e) {}
-            }
+            myChart.clear();
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
     }
+
+    window.addEventListener('resize', () => myChart.resize());
 
     let serverTimeOffset = 0;
 
@@ -1216,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const last = localStorage.getItem('lastSelectedAsset');
         currentAsset = (last && assets.includes(last)) ? last : assets[0];
-        if(currentAsset) selectedAssetSpan.textContent = currentAsset;
+        selectedAssetSpan.textContent = currentAsset;
 
         updateBalance(data.balance);
         fullTradeHistory = data.tradeHistory || [];
@@ -1504,6 +1457,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     }, 30000);
 
+    // 🚀 NEW: AUTO REMOVE ZERO TIMER ENGINE
     setInterval(() => {
         const accurateNow = Date.now() + serverTimeOffset;
         const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
@@ -1513,6 +1467,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
             
             if (diffMins <= 0) {
+                // 🚀 FIX: Jab timer zero ho jaye, to fade out karke card ko remove kar do
                 const card = el.closest('.copy-card');
                 if (card) {
                     card.style.transition = 'opacity 0.5s ease';
@@ -1521,6 +1476,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         card.remove();
                         const container = document.getElementById('copyTradesContainer');
                         const noTradesMsg = document.getElementById('noCopyTrades');
+                        // Agar sab trades khatam ho jayen to "No trades" wala message show karein
                         if (container && container.children.length === 0 && noTradesMsg) {
                             noTradesMsg.style.display = 'block';
                         }
