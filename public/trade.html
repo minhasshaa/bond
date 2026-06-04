@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade - TradePro</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<!-- 🚀 TradingView Lightweight Charts -->
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -39,7 +40,6 @@
     ::-webkit-scrollbar-track { background: var(--bg-primary); }
     ::-webkit-scrollbar-thumb { background: var(--accent-blue); border-radius: 2px; }
 
-    /* ---- GLASS CARD ---- */
     .glass-card {
         background: rgba(13,31,60,0.6);
         backdrop-filter: blur(20px);
@@ -48,7 +48,6 @@
         padding: 16px;
     }
 
-    /* ---- HEADER ---- */
     .trade-header {
         background: rgba(13,31,60,0.8);
         border: 1px solid var(--border-color);
@@ -57,7 +56,6 @@
         margin-bottom: 16px;
     }
 
-    /* ---- ASSET DROPDOWN ---- */
     .asset-dropdown { position: relative; display: inline-block; }
     .asset-dropdown-btn {
         background: rgba(5,11,24,0.8);
@@ -103,7 +101,6 @@
     }
     .show { display: block; }
 
-    /* ---- PRICE DISPLAY ---- */
     .current-price {
         font-size: 28px;
         font-weight: 800;
@@ -112,7 +109,6 @@
         letter-spacing: -0.5px;
     }
 
-    /* ---- TIMER ---- */
     .timer-box {
         background: rgba(59,130,246,0.08);
         border: 1px solid rgba(59,130,246,0.2);
@@ -133,7 +129,6 @@
     .timer-value.critical { color: #ef4444; animation: blink 0.5s infinite; }
     @keyframes blink { 50% { opacity: 0.6; } }
 
-    /* ---- TABS ---- */
     .tab-container {
         background: rgba(5,11,24,0.6);
         border: 1px solid var(--border-color);
@@ -166,7 +161,6 @@
         box-shadow: 0 4px 12px rgba(59,130,246,0.3);
     }
 
-    /* ---- AMOUNT INPUT ---- */
     .amount-input {
         width: 100%;
         background: rgba(5,11,24,0.8);
@@ -185,7 +179,6 @@
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
     input[type="number"] { -moz-appearance: textfield; }
 
-    /* ---- TRADE BUTTONS ---- */
     .btn-up {
         flex: 1;
         padding: 16px;
@@ -228,7 +221,6 @@
     .btn-down:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239,68,68,0.4); }
     .btn-down:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    /* ---- QUICK AMOUNT CHIPS ---- */
     .amount-chip {
         padding: 6px 14px;
         background: rgba(59,130,246,0.08);
@@ -246,7 +238,6 @@
         border-color: rgba(59,130,246,0.4);
     }
 
-    /* ---- TRADE HISTORY ---- */
     .trade-row {
         display: flex;
         align-items: center;
@@ -263,7 +254,6 @@
         border-color: rgba(59,130,246,0.25);
     }
 
-    /* ---- STATUS BADGES ---- */
     .badge {
         padding: 3px 9px;
         border-radius: 7px;
@@ -293,7 +283,6 @@
     }
     .cancel-btn:hover { background: rgba(245,158,11,0.2); }
 
-    /* ---- COPY TRADE CARD ---- */
     .copy-card {
         background: rgba(13,31,60,0.6);
         border: 1px solid rgba(59,130,246,0.2);
@@ -324,13 +313,11 @@
     .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
     .copy-btn:disabled { background: rgba(107,114,128,0.3); cursor: not-allowed; transform: none; box-shadow: none; color: var(--text-secondary); }
 
-    /* ---- PRICE FLASH ---- */
     @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
     @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
     .price-up { animation: flash-up 0.5s ease-out; border-radius: 6px; }
     .price-down { animation: flash-down 0.5s ease-out; border-radius: 6px; }
 
-    /* ---- MODALS ---- */
     .modal-overlay {
         position: fixed; inset: 0;
         background: rgba(0,0,0,0.75);
@@ -388,7 +375,6 @@
     }
     .btn-modal-close:hover { transform: translateY(-1px); }
 
-    /* ---- TOAST ---- */
     .toast {
         position: fixed;
         top: 20px; left: 50%;
@@ -413,11 +399,9 @@
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
 
-    /* ---- LIVE DOT ---- */
     .live-dot { animation: pulse-live 1.5s infinite; }
     @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
-    /* ---- CONFETTI ---- */
     .confetti-particle {
         position: absolute;
         width: 8px; height: 14px;
@@ -429,7 +413,6 @@
         100% { transform: translateY(320px) rotateZ(360deg); opacity: 0; }
     }
 
-    /* ---- LOAD MORE ---- */
     .btn-load-more {
         width: 100%;
         padding: 10px;
@@ -447,7 +430,6 @@
     .btn-load-more:hover { background: rgba(59,130,246,0.15); color: var(--text-primary); }
     .btn-load-more:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    /* ---- SECTION LABEL ---- */
     .section-label {
         font-size: 11px;
         font-weight: 600;
@@ -456,7 +438,6 @@
         color: var(--text-secondary);
     }
 
-    /* ---- SKELETON ---- */
     .skeleton {
         background: linear-gradient(90deg, rgba(13,31,60,0.8) 25%, rgba(59,130,246,0.05) 50%, rgba(13,31,60,0.8) 75%);
         background-size: 200% 100%;
@@ -465,7 +446,6 @@
     }
     @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 
-    /* ---- BOTTOM NAV ---- */
     .bottom-nav {
         position: fixed;
         bottom: 0; left: 0; right: 0;
@@ -499,7 +479,6 @@
         border-radius: 0 0 4px 4px;
     }
 
-    /* ---- TRADE DETAILS MODAL ---- */
     .detail-row {
         display: flex;
         justify-content: space-between;
@@ -841,6 +820,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 🚀 NEW: TradingView Lightweight Charts Setup
     const chartContainer = document.getElementById('candlestickContainer');
     const chart = LightweightCharts.createChart(chartContainer, {
+        width: chartContainer.clientWidth,
+        height: 320,
         layout: {
             background: { type: 'solid', color: 'transparent' },
             textColor: '#8899bb',
@@ -1158,8 +1139,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
+    // 🚀 FIX: Removed the ECharts bug that crashed the UI
     function updateUIForCurrentAsset() {
-        if (marketData[currentAsset]) {
+        if (currentAsset && marketData[currentAsset]) {
             initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
@@ -1179,7 +1161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const last = localStorage.getItem('lastSelectedAsset');
         currentAsset = (last && assets.includes(last)) ? last : assets[0];
-        selectedAssetSpan.textContent = currentAsset;
+        if(currentAsset) selectedAssetSpan.textContent = currentAsset;
 
         updateBalance(data.balance);
         fullTradeHistory = data.tradeHistory || [];
@@ -1193,6 +1175,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const { pair, price, timestamp } = data;
 
         assetPrices[pair] = price;
+        let isNewAsset = false;
+
+        // 🚀 FIX: Auto-populate asset if backend loads late
+        if (!marketData[pair]) {
+            marketData[pair] = { currentPrice: price, candles: [], currentCandle: null };
+            isNewAsset = true;
+        }
+
+        if (isNewAsset) {
+            const allAssets = Object.keys(marketData);
+            populateAssetSelector(allAssets);
+            if (!currentAsset) {
+                currentAsset = pair;
+                selectedAssetSpan.textContent = currentAsset;
+                updateUIForCurrentAsset();
+            }
+        }
 
         if (marketData[pair]) {
             let currentCandle = marketData[pair].currentCandle;
@@ -1243,7 +1242,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (countdown <= 10) countdownSecondsElem.classList.add('critical');
             else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
 
-            // TV Lightweight Charts is highly optimized, direct update is fine
             updateChart(marketData[pair].candles, marketData[pair].currentCandle);
         }
     });
