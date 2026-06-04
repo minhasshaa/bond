@@ -1310,7 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     newOpen = currentCandle.close;
                     if (!marketData[pair].candles) marketData[pair].candles = [];
                     marketData[pair].candles.push(currentCandle);
-                    if (marketData[pair].candles.length > 200) marketData[pair].candles.shift();
+                    if (marketData[pair].candles.length > 1440) marketData[pair].candles.shift();
                 }
                 currentCandle = { timestamp: now.toISOString(), open: newOpen, high: Math.max(newOpen, price), low: Math.min(newOpen, price), close: price };
                 marketData[pair].currentCandle = currentCandle;
