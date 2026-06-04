@@ -262,7 +262,10 @@ function runTradeMonitorWithWebsockets(io, User, Trade, TRADE_PAIRS) {
                     if (!globalMarketData[pair].candles) globalMarketData[pair].candles = [];
                     globalMarketData[pair].candles.push(candleObj);
                     
-                    if (globalMarketData[pair].candles.length > 50) {
+                    // ==========================================
+                    // 🚀 CHANGED HERE: Updated limit from 50 to 1440
+                    // ==========================================
+                    if (globalMarketData[pair].candles.length > 1440) {
                         globalMarketData[pair].candles.shift();
                     }
 
