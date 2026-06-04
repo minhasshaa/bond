@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade - TradePro</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<!-- 🚀 TradingView Lightweight Charts -->
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -284,18 +283,8 @@
     .cancel-btn:hover { background: rgba(245,158,11,0.2); }
 
     .copy-card {
-        background: rgba(13,31,60,0.6);
-        border: 1px solid rgba(59,130,246,0.2);
-        border-radius: 16px;
-        padding: 16px;
-        transition: all 0.2s;
+        transition: all 0.5s ease;
     }
-    .copy-card:hover { border-color: rgba(59,130,246,0.4); }
-    .copy-card.expiring {
-        border-color: rgba(239,68,68,0.3);
-        background: rgba(239,68,68,0.05);
-    }
-
     .copy-btn {
         width: 100%;
         padding: 11px;
@@ -311,7 +300,15 @@
         box-shadow: 0 4px 12px rgba(16,185,129,0.25);
     }
     .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
-    .copy-btn:disabled { background: rgba(107,114,128,0.3); cursor: not-allowed; transform: none; box-shadow: none; color: var(--text-secondary); }
+    .copy-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
+
+    .copy-btn.copied {
+        background: rgba(16, 185, 129, 0.15) !important;
+        border: 1px solid rgba(16, 185, 129, 0.3) !important;
+        color: #10b981 !important;
+        box-shadow: none !important;
+        cursor: not-allowed;
+    }
 
     @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
     @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
@@ -778,7 +775,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
-    // ---- DOM ELEMENTS ----
     const balanceElem = document.getElementById('balance-display');
     const currentPriceElem = document.getElementById('currentPrice');
     const countdownSecondsElem = document.getElementById('countdownSeconds');
@@ -807,7 +803,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const toastCopyExecuted = document.getElementById('toast-copy-executed');
     const allModals = [modalPending, modalWin, modalLoss, modalTradeDetails, modalCopySuccess];
 
-    // ---- STATE ----
     let marketData = {}, currentAsset = '', lastPrice = 0;
     let availableCopyTrades = [];
     let tradeHistoryData = {};
@@ -816,53 +811,57 @@ document.addEventListener('DOMContentLoaded', () => {
     let fullTradeHistory = [];
     let visibleHistoryCount = 0;
     const TRADES_PER_PAGE = 5;
+    let lastChartDrawTime = 0;
 
-    // 🚀 NEW: TradingView Lightweight Charts Setup
+    // 🚀 NEW: TradingView Lightweight Charts (Safely Initialized)
     const chartContainer = document.getElementById('candlestickContainer');
-    const chart = LightweightCharts.createChart(chartContainer, {
-        width: chartContainer.clientWidth,
-        height: 320,
-        layout: {
-            background: { type: 'solid', color: 'transparent' },
-            textColor: '#8899bb',
-        },
-        grid: {
-            vertLines: { color: 'rgba(59,130,246,0.05)' },
-            horzLines: { color: 'rgba(59,130,246,0.05)' },
-        },
-        crosshair: {
-            mode: LightweightCharts.CrosshairMode.Normal,
-        },
-        rightPriceScale: {
-            borderColor: 'rgba(59,130,246,0.15)',
-        },
-        timeScale: {
-            borderColor: 'rgba(59,130,246,0.15)',
-            timeVisible: true,
-            secondsVisible: false,
-        },
-    });
+    let chart = null;
+    let candlestickSeries = null;
 
-    const candlestickSeries = chart.addCandlestickSeries({
-        upColor: '#10b981',
-        downColor: '#ef4444',
-        borderVisible: false,
-        wickUpColor: '#10b981',
-        wickDownColor: '#ef4444',
-    });
+    try {
+        chart = LightweightCharts.createChart(chartContainer, {
+            width: chartContainer.clientWidth || window.innerWidth - 32,
+            height: 320,
+            layout: {
+                background: { type: 'solid', color: 'transparent' }, 
+                textColor: '#8899bb',
+            },
+            grid: {
+                vertLines: { color: 'rgba(59,130,246,0.05)' },
+                horzLines: { color: 'rgba(59,130,246,0.05)' },
+            },
+            crosshair: { mode: 0 },
+            rightPriceScale: { borderColor: 'rgba(59,130,246,0.15)' },
+            timeScale: {
+                borderColor: 'rgba(59,130,246,0.15)',
+                timeVisible: true,
+                secondsVisible: false,
+            },
+        });
 
-    window.addEventListener('resize', () => {
-        chart.applyOptions({ width: chartContainer.clientWidth });
-    });
+        candlestickSeries = chart.addCandlestickSeries({
+            upColor: '#10b981',
+            downColor: '#ef4444',
+            borderVisible: false,
+            wickUpColor: '#10b981',
+            wickDownColor: '#ef4444',
+        });
 
-    // ---- QUICK AMOUNT CHIPS ----
+        window.addEventListener('resize', () => {
+            if (chartContainer.clientWidth > 0) {
+                chart.applyOptions({ width: chartContainer.clientWidth });
+            }
+        });
+    } catch (err) {
+        console.error("TradingView Init Error:", err);
+    }
+
     document.querySelectorAll('.amount-chip').forEach(chip => {
         chip.addEventListener('click', () => {
             investmentInput.value = chip.dataset.amount;
         });
     });
 
-    // ---- TABS ----
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -880,7 +879,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ---- ASSET DROPDOWN ----
     assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
     window.addEventListener('click', (e) => {
         if (!e.target.closest('.asset-dropdown')) assetDropdownContent.classList.remove('show');
@@ -904,7 +902,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ---- HELPERS ----
     function formatPrice(price, asset) {
         const decimals = { 'BTCUSDT':2,'ETHUSDT':2,'BNBUSDT':2,'SOLUSDT':2,'AVAXUSDT':2,'ADAUSDT':4,'MATICUSDT':4,'XRPUSDT':4,'DOGEUSDT':5,'LINKUSDT':4 };
         return parseFloat(price).toFixed(decimals[asset] || 2);
@@ -927,7 +924,6 @@ document.addEventListener('DOMContentLoaded', () => {
         balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
     }
 
-    // ---- COPY TRADES ----
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
         loadingPlaceholder.style.display = 'block';
@@ -961,60 +957,104 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
+        noCopyTrades.style.display = 'none';
+
         if (availableCopyTrades.length === 0) {
             noCopyTrades.style.display = 'block';
             return;
         }
-        noCopyTrades.style.display = 'none';
+
+        let validTradesRendered = 0;
 
         availableCopyTrades.forEach(trade => {
-            const now = new Date();
-            const executionTime = new Date(trade.executionTime);
-            const minutesLeft = Math.max(0, Math.floor((executionTime - now) / 60000));
-            const isExpiring = minutesLeft < 5;
+            const rawExecMs = new Date(trade.executionTime).getTime();
+            const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
 
-            const isUp = trade.direction === 'CALL';
+            const accurateNow = Date.now() + serverTimeOffset;
+            const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
+            if (lockedExecutionTimeMs <= currentMinuteMs) return;
+
+            validTradesRendered++;
+
+            const isAlreadyCopied = Object.values(tradeHistoryData).some(t => 
+                t.originalCopyTradeId === trade._id && 
+                (t.status === 'scheduled' || t.status === 'pending' || t.status === 'active')
+            );
+
+            const isPopular = trade.percentage >= 10; 
+            const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
+            const directionColor = isUp ? '#10b981' : '#ef4444';
+            const directionBg = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+
             const card = document.createElement('div');
-            card.className = `copy-card${isExpiring ? ' expiring' : ''}`;
+            card.className = `copy-card`;
+            card.style.position = 'relative';
+            card.style.overflow = 'hidden';
+            card.style.background = 'linear-gradient(145deg, rgba(13,31,60,0.8) 0%, rgba(5,11,24,0.95) 100%)';
+            card.style.border = '1px solid rgba(59,130,246,0.2)';
+            card.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)';
 
             card.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <div style="width:32px;height:32px;border-radius:10px;background:${isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};border:1px solid ${isUp ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};display:flex;align-items:center;justify-content:center;">
-                            <svg style="width:16px;height:16px;color:${isUp ? '#10b981' : '#ef4444'};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+                <div style="position:absolute; top:-30px; right:-30px; width:120px; height:120px; background:radial-gradient(circle, ${directionBg} 0%, transparent 70%); filter:blur(15px); pointer-events:none;"></div>
+                
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; position:relative; z-index:1;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px;height:40px;border-radius:12px;background:${directionBg};border:1px solid ${directionColor}40;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${directionBg};">
+                            <svg style="width:20px;height:20px;color:${directionColor};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
                             </svg>
                         </div>
                         <div>
-                            <p style="font-weight:700; font-size:15px; color:var(--text-primary);">${trade.tradingPair}</p>
-                            <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; background:${isUp ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color:${isUp ? '#10b981' : '#ef4444'};">${trade.direction}</span>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <p style="font-weight:800; font-size:16px; color:var(--text-primary); letter-spacing:-0.5px;">${trade.tradingPair || trade.asset}</p>
+                                ${isPopular ? `<span style="background:linear-gradient(90deg, #f59e0b, #ef4444); color:white; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; box-shadow:0 0 8px rgba(245,158,11,0.4);">🔥 Hot</span>` : ''}
+                            </div>
+                            <div style="display:flex; align-items:center; gap:4px; margin-top:2px;">
+                                <span style="width:6px;height:6px;border-radius:50%;background:${directionColor};box-shadow:0 0 8px ${directionColor};display:inline-block;animation:pulse-live 1s infinite;"></span>
+                                <span style="font-size:11px; font-weight:700; color:${directionColor};">Live Signal</span>
+                                <span style="font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; background:${directionBg}; color:${directionColor}; margin-left:4px;">${trade.direction}</span>
+                            </div>
                         </div>
                     </div>
                     <div style="text-align:right;">
-                        <p style="font-size:11px; color:var(--text-secondary);">Executes in</p>
-                        <p style="font-size:14px; font-weight:700; color:${isExpiring ? '#ef4444' : '#60a5fa'};">${minutesLeft}m</p>
+                        <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Executes In</p>
+                        <p class="live-copy-timer" data-exec="${lockedExecutionTimeMs}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">--m</p>
                     </div>
                 </div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
-                    <div style="background:rgba(5,11,24,0.5);border:1px solid var(--border-color);border-radius:10px;padding:8px 10px;">
-                        <p style="font-size:11px; color:var(--text-secondary);">Percentage</p>
-                        <p style="font-size:14px; font-weight:700; color:#f59e0b;">${trade.percentage}%</p>
+
+                <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:4px; margin-bottom:14px; overflow:hidden; position:relative; z-index:1;">
+                    <div class="live-copy-bar" data-exec="${lockedExecutionTimeMs}" style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; position:relative; z-index:1;">
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:10px;">
+                        <p style="font-size:11px; color:var(--text-secondary); font-weight:600;">Investment</p>
+                        <p style="font-size:15px; font-weight:800; color:#f0f4ff;">${trade.percentage}% <span style="font-size:11px;color:#8899bb;font-weight:500;">of balance</span></p>
                     </div>
-                    <div style="background:rgba(5,11,24,0.5);border:1px solid var(--border-color);border-radius:10px;padding:8px 10px;">
-                        <p style="font-size:11px; color:var(--text-secondary);">Of Your Balance</p>
-                        <p style="font-size:14px; font-weight:700; color:#10b981;">${trade.percentage}% used</p>
+                    <div style="background:rgba(16,185,129,0.05); border:1px solid rgba(16,185,129,0.1); border-radius:10px; padding:10px;">
+                        <p style="font-size:11px; color:var(--text-secondary); font-weight:600;">Est. Profit</p>
+                        <p style="font-size:15px; font-weight:800; color:#10b981;">~85 - 90%</p>
                     </div>
                 </div>
-                <button data-id="${trade._id}" data-asset="${trade.tradingPair}" class="copy-btn">
-                    Copy This Trade
+
+                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn ${isAlreadyCopied ? 'copied' : ''}" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;" ${isAlreadyCopied ? 'disabled' : ''}>
+                    ${isAlreadyCopied ? 
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅` : 
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`}
                 </button>
             `;
             copyTradesContainer.appendChild(card);
         });
 
+        if (validTradesRendered === 0) {
+            noCopyTrades.style.display = 'block';
+        }
+
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                btn.textContent = 'Copying...';
+                if(btn.classList.contains('copied')) return;
+
+                btn.innerHTML = `<svg class="animate-spin" style="width:16px;height:16px;margin-right:6px;" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Copying...`;
                 btn.disabled = true;
                 socket.emit('copy_trade', {
                     copyTradeId: btn.dataset.id,
@@ -1024,7 +1064,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ---- TRADE HISTORY ----
     function createTradeRow(trade) {
         tradeHistoryData[trade._id] = trade;
         const el = document.createElement('div');
@@ -1112,48 +1151,64 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // 🚀 NEW: TradingView Chart Initialization
+    // 🚀 NEW: TradingView Chart Initialization Safely
     function initChart(candles, currentCandle) {
-        const allCandles = [...(candles || [])];
-        if (currentCandle) allCandles.push(currentCandle);
-        
-        const uniqueCandles = [];
-        const seenTimes = new Set();
-        
-        allCandles.forEach(c => {
-            const formatted = formatCandleForTV(c);
-            if (!seenTimes.has(formatted.time)) {
-                seenTimes.add(formatted.time);
-                uniqueCandles.push(formatted);
+        if (!candlestickSeries) return;
+        try {
+            const allCandles = [...(candles || [])];
+            if (currentCandle) allCandles.push(currentCandle);
+            
+            const uniqueCandles = [];
+            const seenTimes = new Set();
+            
+            allCandles.forEach(c => {
+                if(!c || !c.timestamp) return;
+                const formatted = formatCandleForTV(c);
+                if (!seenTimes.has(formatted.time) && !isNaN(formatted.time)) {
+                    seenTimes.add(formatted.time);
+                    uniqueCandles.push(formatted);
+                }
+            });
+            
+            uniqueCandles.sort((a, b) => a.time - b.time);
+            if(uniqueCandles.length > 0) {
+                candlestickSeries.setData(uniqueCandles);
             }
-        });
-        
-        uniqueCandles.sort((a, b) => a.time - b.time);
-        candlestickSeries.setData(uniqueCandles);
+        } catch (err) {
+            console.error("Data Set Error:", err);
+        }
     }
 
-    // 🚀 NEW: TradingView Chart Update
+    // 🚀 NEW: TradingView Chart Update Safely
     function updateChart(candles, currentCandle) {
-        if (!currentCandle) return;
-        candlestickSeries.update(formatCandleForTV(currentCandle));
+        if (!candlestickSeries || !currentCandle) return;
+        try {
+            const formatted = formatCandleForTV(currentCandle);
+            if (!isNaN(formatted.time)) {
+                candlestickSeries.update(formatted);
+            }
+        } catch (e) {
+            initChart(candles, currentCandle);
+        }
     }
 
-
-    // 🚀 FIX: Removed the ECharts bug that crashed the UI
     function updateUIForCurrentAsset() {
-        if (currentAsset && marketData[currentAsset]) {
+        if (currentAsset && marketData && marketData[currentAsset]) {
             initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            candlestickSeries.setData([]);
+            if(candlestickSeries) {
+                try { candlestickSeries.setData([]); } catch(e) {}
+            }
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
     }
 
-    // ---- SOCKET EVENTS ----
+    let serverTimeOffset = 0;
+
     socket.on('init', (data) => {
         marketData = data.marketData;
         const assets = Object.keys(marketData);
@@ -1173,37 +1228,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('price_update', (data) => {
         const { pair, price, timestamp } = data;
-
+        
+        serverTimeOffset = timestamp - Date.now();
         assetPrices[pair] = price;
-        let isNewAsset = false;
-
-        // 🚀 FIX: Auto-populate asset if backend loads late
-        if (!marketData[pair]) {
-            marketData[pair] = { currentPrice: price, candles: [], currentCandle: null };
-            isNewAsset = true;
-        }
-
-        if (isNewAsset) {
-            const allAssets = Object.keys(marketData);
-            populateAssetSelector(allAssets);
-            if (!currentAsset) {
-                currentAsset = pair;
-                selectedAssetSpan.textContent = currentAsset;
-                updateUIForCurrentAsset();
-            }
-        }
 
         if (marketData[pair]) {
             let currentCandle = marketData[pair].currentCandle;
             
-            const now = new Date(timestamp);
+            const now = new Date(timestamp); 
             now.setSeconds(0, 0); 
 
             if (!currentCandle || new Date(currentCandle.timestamp).getTime() !== now.getTime()) {
                 
                 let newOpen = price;
                 if (currentCandle) {
-                    newOpen = currentCandle.close;
+                    newOpen = currentCandle.close; 
                     if (!marketData[pair].candles) marketData[pair].candles = [];
                     marketData[pair].candles.push(currentCandle);
                     if (marketData[pair].candles.length > 50) marketData[pair].candles.shift();
@@ -1242,7 +1281,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (countdown <= 10) countdownSecondsElem.classList.add('critical');
             else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
 
-            updateChart(marketData[pair].candles, marketData[pair].currentCandle);
+            const currentTime = Date.now();
+            if (currentTime - lastChartDrawTime > 150) { 
+                updateChart(marketData[pair].candles, marketData[pair].currentCandle);
+                lastChartDrawTime = currentTime;
+            }
         }
     });
     
@@ -1256,6 +1299,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBalance(data.balance);
         addTradeToHistory(data.trade);
         showScheduledPopup(data.trade);
+        
+        if (activeTab === 'copy-trade') fetchCopyTrades();
     });
 
     socket.on('trade_active', (data) => {
@@ -1284,13 +1329,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (row) row.remove();
         showStatus('Trade cancelled.', 'gray');
         setTradeButtonsDisabled(false);
+        
+        if (activeTab === 'copy-trade') fetchCopyTrades();
     });
 
     socket.on('copy_trade_success', (data) => {
         showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
+        
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.disabled = false;
-            if (btn.textContent === 'Copying...') btn.textContent = 'Copy This Trade';
+            if (btn.textContent.includes('Copying...')) {
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅`;
+                btn.disabled = true;
+                btn.classList.add('copied');
+            } else if (!btn.classList.contains('copied')) {
+                btn.disabled = false;
+            }
         });
     });
 
@@ -1304,14 +1357,15 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus(`Error: ${data.message}`, 'red');
         setTradeButtonsDisabled(false);
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.disabled = false;
-            if (btn.textContent === 'Copying...') btn.textContent = 'Copy This Trade';
+            if (btn.textContent.includes('Copying...')) {
+                btn.disabled = false;
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
+            }
         });
     });
 
     socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
 
-    // ---- TRADE REQUEST ----
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
@@ -1332,7 +1386,6 @@ document.addEventListener('DOMContentLoaded', () => {
     tradeUpBtn.addEventListener('click', () => requestTrade('UP'));
     tradeDownBtn.addEventListener('click', () => requestTrade('DOWN'));
 
-    // ---- MODALS ----
     function showModal(modal) {
         hideAllModals();
         overlay.classList.add('show');
@@ -1363,7 +1416,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ---- POPUP CONTENT ----
     function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
@@ -1432,7 +1484,6 @@ document.addEventListener('DOMContentLoaded', () => {
         showModal(modalTradeDetails);
     }
 
-    // ---- CONFETTI ----
     function triggerConfetti() {
         const container = document.getElementById('confetti-container');
         container.innerHTML = '';
@@ -1449,10 +1500,53 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => container.innerHTML = '', 2500);
     }
 
-    // ---- AUTO REFRESH COPY TRADES ----
     setInterval(() => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     }, 30000);
+
+    setInterval(() => {
+        const accurateNow = Date.now() + serverTimeOffset;
+        const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
+
+        document.querySelectorAll('.live-copy-timer').forEach(el => {
+            const execTimeMs = parseInt(el.getAttribute('data-exec'));
+            const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
+            
+            if (diffMins <= 0) {
+                const card = el.closest('.copy-card');
+                if (card) {
+                    card.style.transition = 'opacity 0.5s ease';
+                    card.style.opacity = '0';
+                    setTimeout(() => {
+                        card.remove();
+                        const container = document.getElementById('copyTradesContainer');
+                        const noTradesMsg = document.getElementById('noCopyTrades');
+                        if (container && container.children.length === 0 && noTradesMsg) {
+                            noTradesMsg.style.display = 'block';
+                        }
+                    }, 500);
+                }
+            } else {
+                el.textContent = `${diffMins}m`;
+                el.style.color = diffMins <= 5 ? '#ef4444' : '#60a5fa';
+            }
+        });
+
+        document.querySelectorAll('.live-copy-bar').forEach(el => {
+            const execTimeMs = parseInt(el.getAttribute('data-exec'));
+            const diffMs = execTimeMs - accurateNow;
+            const minsLeft = Math.max(0, diffMs / 60000);
+            
+            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
+            el.style.width = `${progressPercent}%`;
+            
+            if (minsLeft < 5) {
+                el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+                el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)';
+            }
+        });
+    }, 1000);
+
 });
 </script>
 </body>
