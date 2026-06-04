@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trade - TradePro</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<!-- TradingView Lightweight Charts -->
+<!-- TradingView Lightweight Charts v4 -->
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
     :root {
@@ -109,34 +109,6 @@
         letter-spacing: -0.5px;
     }
 
-    /* ─── TradingView Chart Wrapper ─── */
-    .tv-chart-wrapper {
-        position: relative;
-        width: 100%;
-        height: 320px;
-        background: #0a1220;
-        border-radius: 0;
-        overflow: hidden;
-    }
-    #tvChart {
-        width: 100% !important;
-        height: 100% !important;
-    }
-    /* Watermark overlay */
-    .tv-watermark {
-        position: absolute;
-        bottom: 8px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 11px;
-        font-weight: 700;
-        color: rgba(59,130,246,0.15);
-        letter-spacing: 2px;
-        pointer-events: none;
-        text-transform: uppercase;
-    }
-
-
     .timer-box {
         background: rgba(59,130,246,0.08);
         border: 1px solid rgba(59,130,246,0.2);
@@ -156,6 +128,39 @@
     .timer-value.warning { color: #f59e0b; }
     .timer-value.critical { color: #ef4444; animation: blink 0.5s infinite; }
     @keyframes blink { 50% { opacity: 0.6; } }
+
+    /* ─── Chart Wrapper ─── */
+    #chartContainer {
+        width: 100%;
+        height: 320px;
+        position: relative;
+        background: #0b1426;
+        border-radius: 20px;
+        overflow: hidden;
+    }
+    /* "Go to latest" button */
+    #goLatestBtn {
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        z-index: 50;
+        background: rgba(59,130,246,0.85);
+        border: none;
+        color: white;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 6px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: none;
+        align-items: center;
+        gap: 5px;
+        font-family: 'Inter', sans-serif;
+        backdrop-filter: blur(4px);
+        transition: background 0.2s;
+    }
+    #goLatestBtn:hover { background: rgba(59,130,246,1); }
+    #goLatestBtn svg { width:13px; height:13px; }
 
     .tab-container {
         background: rgba(5,11,24,0.6);
@@ -208,43 +213,25 @@
     input[type="number"] { -moz-appearance: textfield; }
 
     .btn-up {
-        flex: 1;
-        padding: 16px;
+        flex: 1; padding: 16px;
         background: linear-gradient(135deg, #10b981, #059669);
-        border: none;
-        border-radius: 14px;
-        color: white;
-        font-size: 16px;
-        font-weight: 800;
-        cursor: pointer;
-        transition: all 0.2s;
-        font-family: 'Inter', sans-serif;
+        border: none; border-radius: 14px; color: white;
+        font-size: 16px; font-weight: 800; cursor: pointer;
+        transition: all 0.2s; font-family: 'Inter', sans-serif;
         box-shadow: 0 4px 16px rgba(16,185,129,0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
     }
     .btn-up:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
     .btn-up:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
     .btn-down {
-        flex: 1;
-        padding: 16px;
+        flex: 1; padding: 16px;
         background: linear-gradient(135deg, #ef4444, #dc2626);
-        border: none;
-        border-radius: 14px;
-        color: white;
-        font-size: 16px;
-        font-weight: 800;
-        cursor: pointer;
-        transition: all 0.2s;
-        font-family: 'Inter', sans-serif;
+        border: none; border-radius: 14px; color: white;
+        font-size: 16px; font-weight: 800; cursor: pointer;
+        transition: all 0.2s; font-family: 'Inter', sans-serif;
         box-shadow: 0 4px 16px rgba(239,68,68,0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
     }
     .btn-down:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239,68,68,0.4); }
     .btn-down:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
@@ -253,42 +240,25 @@
         padding: 6px 14px;
         background: rgba(59,130,246,0.08);
         border: 1px solid rgba(59,130,246,0.2);
-        border-radius: 8px;
-        color: #60a5fa;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.15s;
-        font-family: 'Inter', sans-serif;
+        border-radius: 8px; color: #60a5fa;
+        font-size: 12px; font-weight: 600; cursor: pointer;
+        transition: all 0.15s; font-family: 'Inter', sans-serif;
     }
-    .amount-chip:hover {
-        background: rgba(59,130,246,0.2);
-        border-color: rgba(59,130,246,0.4);
-    }
+    .amount-chip:hover { background: rgba(59,130,246,0.2); border-color: rgba(59,130,246,0.4); }
 
     .trade-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
+        display: flex; align-items: center; justify-content: space-between;
         padding: 12px 14px;
         background: rgba(5,11,24,0.5);
         border: 1px solid var(--border-color);
-        border-radius: 12px;
-        cursor: pointer;
-        transition: all 0.15s;
+        border-radius: 12px; cursor: pointer; transition: all 0.15s;
     }
-    .trade-row:hover {
-        background: rgba(59,130,246,0.06);
-        border-color: rgba(59,130,246,0.25);
-    }
+    .trade-row:hover { background: rgba(59,130,246,0.06); border-color: rgba(59,130,246,0.25); }
 
     .badge {
-        padding: 3px 9px;
-        border-radius: 7px;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        padding: 3px 9px; border-radius: 7px;
+        font-size: 11px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.04em;
     }
     .badge-win { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
     .badge-loss { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
@@ -300,125 +270,83 @@
         padding: 3px 8px;
         background: rgba(245,158,11,0.12);
         border: 1px solid rgba(245,158,11,0.2);
-        color: #f59e0b;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        margin-left: 6px;
-        transition: all 0.15s;
+        color: #f59e0b; border-radius: 6px;
+        font-size: 11px; font-weight: 600; cursor: pointer;
+        font-family: 'Inter', sans-serif; margin-left: 6px; transition: all 0.15s;
     }
     .cancel-btn:hover { background: rgba(245,158,11,0.2); }
 
-    .copy-card { transition: all 0.5s ease; }
+    .copy-card { transition: all 0.2s; }
     .copy-btn {
-        width: 100%;
-        padding: 11px;
+        width: 100%; padding: 11px;
         background: linear-gradient(135deg, #10b981, #059669);
-        border: none;
-        border-radius: 10px;
-        color: white;
-        font-weight: 700;
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.2s;
-        font-family: 'Inter', sans-serif;
+        border: none; border-radius: 10px; color: white;
+        font-weight: 700; font-size: 13px; cursor: pointer;
+        transition: all 0.2s; font-family: 'Inter', sans-serif;
         box-shadow: 0 4px 12px rgba(16,185,129,0.25);
     }
     .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
     .copy-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
     .copy-btn.copied {
-        background: rgba(16, 185, 129, 0.15) !important;
-        border: 1px solid rgba(16, 185, 129, 0.3) !important;
+        background: rgba(16,185,129,0.15) !important;
+        border: 1px solid rgba(16,185,129,0.3) !important;
         color: #10b981 !important;
         box-shadow: none !important;
         cursor: not-allowed;
     }
 
-    @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
-    @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
+    @keyframes flash-up { 0%,100% { background-color:transparent; } 50% { background-color:rgba(16,185,129,0.15); } }
+    @keyframes flash-down { 0%,100% { background-color:transparent; } 50% { background-color:rgba(239,68,68,0.15); } }
     .price-up { animation: flash-up 0.5s ease-out; border-radius: 6px; }
     .price-down { animation: flash-down 0.5s ease-out; border-radius: 6px; }
 
     .modal-overlay {
         position: fixed; inset: 0;
         background: rgba(0,0,0,0.75);
-        z-index: 9998;
-        display: none;
-        align-items: center;
-        justify-content: center;
+        z-index: 9998; display: none;
+        align-items: center; justify-content: center;
     }
     .modal-overlay.show { display: flex; }
 
     .modal {
-        position: fixed; inset: 0;
-        z-index: 9999;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
+        position: fixed; inset: 0; z-index: 9999;
+        display: none; align-items: center; justify-content: center; padding: 20px;
     }
     .modal.show { display: flex; }
 
     .modal-card {
-        background: #0d1f3c;
-        border: 1px solid var(--border-color);
-        border-radius: 24px;
-        padding: 32px 28px;
+        background: #0d1f3c; border: 1px solid var(--border-color);
+        border-radius: 24px; padding: 32px 28px;
         width: 100%; max-width: 360px;
         text-align: center;
         animation: popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
-        position: relative;
-        overflow: hidden;
+        position: relative; overflow: hidden;
     }
     .modal-card.win-card { border-color: rgba(16,185,129,0.4); }
     .modal-card.loss-card { border-color: rgba(239,68,68,0.3); }
     @keyframes popIn { 0% { transform:scale(0.85); opacity:0; } 100% { transform:scale(1); opacity:1; } }
 
     .modal-icon {
-        width: 64px; height: 64px;
-        border-radius: 20px;
+        width: 64px; height: 64px; border-radius: 20px;
         display: flex; align-items: center; justify-content: center;
         margin: 0 auto 20px;
     }
 
     .btn-modal-close {
-        width: 100%;
-        padding: 13px;
-        border: none;
-        border-radius: 14px;
-        color: white;
-        font-weight: 700;
-        font-size: 15px;
-        cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        margin-top: 20px;
-        transition: all 0.2s;
+        width: 100%; padding: 13px; border: none; border-radius: 14px;
+        color: white; font-weight: 700; font-size: 15px; cursor: pointer;
+        font-family: 'Inter', sans-serif; margin-top: 20px; transition: all 0.2s;
     }
     .btn-modal-close:hover { transform: translateY(-1px); }
 
-    .toast {
-        position: fixed;
-        top: 20px; left: 50%;
-        transform: translateX(-50%);
-        z-index: 9999;
-        display: none;
-    }
-    .toast.show {
-        display: flex;
-        animation: slideDown 0.4s ease-out;
-    }
+    .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: none; }
+    .toast.show { display: flex; animation: slideDown 0.4s ease-out; }
     @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 
     .toast-inner {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 20px;
-        border-radius: 14px;
-        font-weight: 600;
-        font-size: 14px;
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 20px; border-radius: 14px;
+        font-weight: 600; font-size: 14px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
 
@@ -426,10 +354,8 @@
     @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
     .confetti-particle {
-        position: absolute;
-        width: 8px; height: 14px;
-        opacity: 0;
-        animation: confetti-fall 2s ease-out forwards;
+        position: absolute; width: 8px; height: 14px;
+        opacity: 0; animation: confetti-fall 2s ease-out forwards;
     }
     @keyframes confetti-fall {
         0% { transform: translateY(-100%) rotateZ(0deg); opacity: 1; }
@@ -437,27 +363,19 @@
     }
 
     .btn-load-more {
-        width: 100%;
-        padding: 10px;
+        width: 100%; padding: 10px;
         background: rgba(59,130,246,0.08);
         border: 1px solid var(--border-color);
-        border-radius: 12px;
-        color: var(--text-secondary);
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        transition: all 0.2s;
-        margin-top: 8px;
+        border-radius: 12px; color: var(--text-secondary);
+        font-size: 13px; font-weight: 600; cursor: pointer;
+        font-family: 'Inter', sans-serif; transition: all 0.2s; margin-top: 8px;
     }
     .btn-load-more:hover { background: rgba(59,130,246,0.15); color: var(--text-primary); }
     .btn-load-more:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .section-label {
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        font-size: 11px; font-weight: 600;
+        letter-spacing: 0.08em; text-transform: uppercase;
         color: var(--text-secondary);
     }
 
@@ -470,44 +388,33 @@
     @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 
     .bottom-nav {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
+        position: fixed; bottom: 0; left: 0; right: 0;
         background: rgba(10,22,40,0.95);
         backdrop-filter: blur(20px);
         border-top: 1px solid var(--border-color);
         padding: 10px 0 20px;
-        display: flex;
-        justify-content: space-around;
-        align-items: center;
-        z-index: 1000;
+        display: flex; justify-content: space-around; align-items: center; z-index: 1000;
     }
     .nav-item {
         display: flex; flex-direction: column;
         align-items: center; gap: 4px;
-        text-decoration: none;
-        color: var(--text-secondary);
+        text-decoration: none; color: var(--text-secondary);
         font-size: 11px; font-weight: 500;
-        flex: 1; transition: all 0.2s;
-        position: relative; padding: 4px 0;
+        flex: 1; transition: all 0.2s; position: relative; padding: 4px 0;
     }
     .nav-item svg { width: 22px; height: 22px; }
     .nav-item.active { color: var(--accent-blue); }
     .nav-item.active::before {
-        content: '';
-        position: absolute;
-        top: -10px; left: 50%;
-        transform: translateX(-50%);
+        content: ''; position: absolute;
+        top: -10px; left: 50%; transform: translateX(-50%);
         width: 32px; height: 3px;
         background: linear-gradient(90deg, #3b82f6, #60a5fa);
         border-radius: 0 0 4px 4px;
     }
 
     .detail-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px 0;
-        border-bottom: 1px solid var(--border-color);
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 10px 0; border-bottom: 1px solid var(--border-color);
     }
     .detail-row:last-child { border-bottom: none; }
 </style>
@@ -556,11 +463,16 @@
                 </div>
             </div>
 
-            <!-- ─── TradingView Chart ─── -->
-            <div class="glass-card" style="padding:0; overflow:hidden; margin-bottom:16px;">
-                <div class="tv-chart-wrapper">
-                    <div id="tvChart"></div>
-                    <div class="tv-watermark">TradePro</div>
+            <!-- TradingView Chart Container -->
+            <div style="margin-bottom:16px; border-radius:20px; overflow:hidden; border:1px solid var(--border-color);">
+                <div id="chartContainer">
+                    <div id="tvChart" style="width:100%;height:100%;"></div>
+                    <button id="goLatestBtn">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                        </svg>
+                        Latest
+                    </button>
                 </div>
             </div>
 
@@ -728,10 +640,10 @@
             <span style="font-size:13px; color:var(--text-secondary);">Exit Price</span>
             <span id="detail-closing-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
         </div>
-        <div id="detail-pnl-container" style="margin-top:12px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:12px; padding:12px; display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:13px; color:var(--text-secondary);">P&L</span>
-                <span id="detail-pnl" style="font-size:18px; font-weight:800; color:#10b981;">-</span>
+        <div id="detail-pnl-container" style="margin-top:12px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:12px;padding:12px;display:none;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:13px;color:var(--text-secondary);">P&L</span>
+                <span id="detail-pnl" style="font-size:18px;font-weight:800;color:#10b981;">-</span>
             </div>
         </div>
         <button class="btn-modal-close btn-close" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;">Close</button>
@@ -755,7 +667,6 @@
     </div>
 </div>
 
-<!-- Toasts -->
 <div id="toast-active" class="toast">
     <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(245,158,11,0.3);">
         <span class="relative flex" style="width:10px;height:10px;">
@@ -801,232 +712,211 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
 
-    const currentPage = window.location.pathname.split('/').pop().replace('.html', '') || 'trade';
+    const currentPage = window.location.pathname.split('/').pop().replace('.html','') || 'trade';
     const navEl = document.getElementById(`nav-${currentPage}`);
     if (navEl) navEl.classList.add('active');
 
     const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
-    // ─── DOM refs ───
-    const balanceElem          = document.getElementById('balance-display');
-    const currentPriceElem     = document.getElementById('currentPrice');
-    const countdownSecondsElem = document.getElementById('countdownSeconds');
-    const tradeHistoryContainer= document.getElementById('tradeHistoryContainer');
-    const tradeUpBtn           = document.getElementById('tradeUp');
-    const tradeDownBtn         = document.getElementById('tradeDown');
-    const investmentInput      = document.getElementById('investmentAmount');
-    const tradeStatusElem      = document.getElementById('tradeStatus');
-    const assetDropdownBtn     = document.getElementById('assetDropdownBtn');
-    const selectedAssetSpan    = document.getElementById('selectedAssetSpan');
-    const assetDropdownContent = document.getElementById('assetDropdownContent');
-    const tradeContent         = document.getElementById('trade-content');
-    const copyTradeContent     = document.getElementById('copy-trade-content');
-    const copyTradesContainer  = document.getElementById('copyTradesContainer');
-    const loadingPlaceholder   = document.getElementById('loadingPlaceholder');
-    const noCopyTrades         = document.getElementById('noCopyTrades');
-    const copyTradeStatus      = document.getElementById('copyTradeStatus');
-    const loadMoreBtn          = document.getElementById('loadMoreTradesBtn');
-    const overlay              = document.getElementById('modal-overlay');
-    const modalPending         = document.getElementById('modal-pending');
-    const toastActive          = document.getElementById('toast-active');
-    const modalWin             = document.getElementById('modal-win');
-    const modalLoss            = document.getElementById('modal-loss');
-    const modalTradeDetails    = document.getElementById('modal-trade-details');
-    const modalCopySuccess     = document.getElementById('modal-copy-success');
-    const toastCopyExecuted    = document.getElementById('toast-copy-executed');
-    const scrollToLatestBtn    = null; // removed - no button needed
-    const allModals = [modalPending, modalWin, modalLoss, modalTradeDetails, modalCopySuccess];
+    /* ─── DOM refs ─── */
+    const balanceElem            = document.getElementById('balance-display');
+    const currentPriceElem       = document.getElementById('currentPrice');
+    const countdownSecondsElem   = document.getElementById('countdownSeconds');
+    const tradeHistoryContainer  = document.getElementById('tradeHistoryContainer');
+    const tradeUpBtn             = document.getElementById('tradeUp');
+    const tradeDownBtn           = document.getElementById('tradeDown');
+    const investmentInput        = document.getElementById('investmentAmount');
+    const tradeStatusElem        = document.getElementById('tradeStatus');
+    const assetDropdownBtn       = document.getElementById('assetDropdownBtn');
+    const selectedAssetSpan      = document.getElementById('selectedAssetSpan');
+    const assetDropdownContent   = document.getElementById('assetDropdownContent');
+    const tradeContent           = document.getElementById('trade-content');
+    const copyTradeContent       = document.getElementById('copy-trade-content');
+    const copyTradesContainer    = document.getElementById('copyTradesContainer');
+    const loadingPlaceholder     = document.getElementById('loadingPlaceholder');
+    const noCopyTrades           = document.getElementById('noCopyTrades');
+    const copyTradeStatus        = document.getElementById('copyTradeStatus');
+    const loadMoreBtn            = document.getElementById('loadMoreTradesBtn');
+    const overlay                = document.getElementById('modal-overlay');
+    const modalPending           = document.getElementById('modal-pending');
+    const toastActive            = document.getElementById('toast-active');
+    const modalWin               = document.getElementById('modal-win');
+    const modalLoss              = document.getElementById('modal-loss');
+    const modalTradeDetails      = document.getElementById('modal-trade-details');
+    const modalCopySuccess       = document.getElementById('modal-copy-success');
+    const toastCopyExecuted      = document.getElementById('toast-copy-executed');
+    const goLatestBtn            = document.getElementById('goLatestBtn');
+    const allModals              = [modalPending, modalWin, modalLoss, modalTradeDetails, modalCopySuccess];
 
-    let marketData = {}, currentAsset = '', lastPrice = 0;
+    /* ─── State ─── */
+    let marketData       = {};
+    let currentAsset     = '';
+    let lastPrice        = 0;
     let availableCopyTrades = [];
     let tradeHistoryData = {};
-    let assetPrices = {};
-    let activeTab = 'trade';
+    let assetPrices      = {};
+    let activeTab        = 'trade';
     let fullTradeHistory = [];
     let visibleHistoryCount = 0;
     const TRADES_PER_PAGE = 5;
     let serverTimeOffset = 0;
 
-    // ─────────────────────────────────────────────
-    // TradingView Lightweight Charts Setup
-    // ─────────────────────────────────────────────
-    let tvChart = null;
-    let candleSeries = null;
-    let userScrolled = false;   // true = user ne left swipe kiya
-    let lastChartDrawTime = 0;
+    /* ════════════════════════════════════════════
+       TradingView Lightweight Chart Setup
+    ════════════════════════════════════════════ */
+    const tvEl = document.getElementById('tvChart');
 
-    function createTVChart() {
-        if (tvChart) {
-            tvChart.remove();
-            tvChart = null;
-            candleSeries = null;
-        }
-
-        const container = document.getElementById('tvChart');
-
-        tvChart = LightweightCharts.createChart(container, {
-            width: container.clientWidth,
-            height: 320,
-            layout: {
-                background: { type: 'solid', color: '#0a1220' },
-                textColor: '#8899bb',
-                fontFamily: 'Inter, sans-serif',
-                fontSize: 11,
+    const chart = LightweightCharts.createChart(tvEl, {
+        width:  tvEl.parentElement.clientWidth,
+        height: 320,
+        layout: {
+            background: { color: '#0b1426' },
+            textColor:  '#8899bb',
+        },
+        grid: {
+            vertLines: { color: 'rgba(59,130,246,0.07)' },
+            horzLines: { color: 'rgba(59,130,246,0.07)' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+            vertLine: { color: 'rgba(59,130,246,0.4)', width: 1, style: 1 },
+            horzLine: { color: 'rgba(59,130,246,0.4)', width: 1, style: 1 },
+        },
+        rightPriceScale: {
+            borderColor: 'rgba(59,130,246,0.15)',
+            textColor:   '#8899bb',
+            scaleMargins: { top: 0.1, bottom: 0.1 },
+        },
+        timeScale: {
+            borderColor:       'rgba(59,130,246,0.15)',
+            timeVisible:       true,
+            secondsVisible:    false,
+            tickMarkFormatter: (time) => {
+                const d = new Date(time * 1000);
+                const h = String(d.getHours()).padStart(2,'0');
+                const m = String(d.getMinutes()).padStart(2,'0');
+                return `${h}:${m}`;
             },
-            grid: {
-                vertLines: { color: 'rgba(59,130,246,0.06)' },
-                horzLines: { color: 'rgba(59,130,246,0.06)' },
-            },
-            crosshair: {
-                mode: LightweightCharts.CrosshairMode.Normal,
-                vertLine: {
-                    color: 'rgba(59,130,246,0.5)',
-                    width: 1,
-                    style: LightweightCharts.LineStyle.Dashed,
-                    labelBackgroundColor: '#1e3a5f',
-                },
-                horzLine: {
-                    color: 'rgba(59,130,246,0.5)',
-                    width: 1,
-                    style: LightweightCharts.LineStyle.Dashed,
-                    labelBackgroundColor: '#1e3a5f',
-                },
-            },
-            rightPriceScale: {
-                borderColor: 'rgba(59,130,246,0.15)',
-                scaleMargins: { top: 0.1, bottom: 0.1 },
-                textColor: '#8899bb',
-            },
-            timeScale: {
-                borderColor: 'rgba(59,130,246,0.15)',
-                timeVisible: true,
-                secondsVisible: false,
-                fixLeftEdge: false,
-                fixRightEdge: false,
-                rightOffset: 3,
-                barSpacing: 8,
-                minBarSpacing: 4,
-            },
-            handleScroll: {
-                mouseWheel: true,
-                pressedMouseMove: true,
-                horzTouchDrag: true,
-                vertTouchDrag: false,
-            },
-            handleScale: {
-                axisPressedMouseMove: true,
-                mouseWheel: true,
-                pinch: true,
-            },
-        });
+        },
+        handleScroll:  { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
+        handleScale:   { mouseWheel: true, pinch: true },
+    });
 
-        candleSeries = tvChart.addCandlestickSeries({
-            upColor:          '#10b981',
-            downColor:        '#ef4444',
-            borderUpColor:    '#10b981',
-            borderDownColor:  '#ef4444',
-            wickUpColor:      '#10b981',
-            wickDownColor:    '#ef4444',
-            priceLineVisible: true,
-            priceLineColor:   'rgba(59,130,246,0.6)',
-            priceLineWidth:   1,
-            lastValueVisible: true,
-        });
+    const candleSeries = chart.addCandlestickSeries({
+        upColor:          '#26a69a',
+        downColor:        '#ef5350',
+        borderUpColor:    '#26a69a',
+        borderDownColor:  '#ef5350',
+        wickUpColor:      '#26a69a',
+        wickDownColor:    '#ef5350',
+    });
 
-        // Jab user scroll kare to flag set ho
-        tvChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-            userScrolled = true;
-        });
+    /* Price line (current price marker like Binance) */
+    const priceLine = candleSeries.createPriceLine({
+        price:      0,
+        color:      '#f59e0b',
+        lineWidth:  1,
+        lineStyle:  LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title:      '',
+    });
 
-        // Touch/mouse release hone pe auto-scroll resume karo
-        // (bilkul Binance jaisa — finger uthao, chart latest pe aa jata hai)
-        container.addEventListener('touchend', () => { userScrolled = false; });
-        container.addEventListener('mouseup',  () => { userScrolled = false; });
+    /* "Go Latest" button — show when user scrolls away from latest candle */
+    let userScrolled = false;
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (!range) return;
+        const allData = candleSeries.data ? candleSeries.data() : [];
+        if (!allData || allData.length === 0) return;
+        const lastBar = allData.length - 1;
+        // If the right edge of visible range is at least 3 bars before the last → user scrolled
+        userScrolled = range.to < lastBar - 2;
+        goLatestBtn.style.display = userScrolled ? 'flex' : 'none';
+    });
 
-        // Resize handler
-        new ResizeObserver(() => {
-            if (tvChart) tvChart.applyOptions({ width: container.clientWidth });
-        }).observe(container);
-    }
+    goLatestBtn.addEventListener('click', scrollToLatest);
 
-    function initTVChart(candles, currentCandle) {
-        createTVChart();
-        const tvData = convertCandlesToTV(candles, currentCandle);
-        if (!tvData.length) return;
-        candleSeries.setData(tvData);
-        tvChart.timeScale().scrollToRealTime();
+    function scrollToLatest() {
+        chart.timeScale().scrollToRealTime();
         userScrolled = false;
+        goLatestBtn.style.display = 'none';
     }
 
-    function convertCandlesToTV(candles, currentCandle) {
+    /* Resize chart on window resize */
+    window.addEventListener('resize', () => {
+        chart.applyOptions({ width: tvEl.parentElement.clientWidth });
+    });
+
+    /* ─── Convert candle array → LW format (Unix seconds) ─── */
+    function toLWCandle(c) {
+        const t = Math.floor(new Date(c.timestamp).getTime() / 1000);
+        return { time: t, open: c.open, high: c.high, low: c.low, close: c.close };
+    }
+
+    /* ─── Set all candles at once (on init / asset switch) ─── */
+    function initChart(candles, currentCandle) {
         const all = [...(candles || [])];
         if (currentCandle) all.push(currentCandle);
 
-        return all
-            .map(c => ({
-                time: Math.floor(new Date(c.timestamp).getTime() / 1000),
-                open:  parseFloat(c.open),
-                high:  parseFloat(c.high),
-                low:   parseFloat(c.low),
-                close: parseFloat(c.close),
-            }))
-            .filter(c => !isNaN(c.time) && !isNaN(c.open))
-            .sort((a, b) => a.time - b.time);
+        if (!all.length) { candleSeries.setData([]); return; }
+
+        // Sort by time ascending, deduplicate by timestamp
+        const seen = new Set();
+        const unique = all
+            .map(toLWCandle)
+            .sort((a,b) => a.time - b.time)
+            .filter(c => {
+                if (seen.has(c.time)) return false;
+                seen.add(c.time);
+                return true;
+            });
+
+        candleSeries.setData(unique);
+
+        // Show last 50 candles
+        const from = Math.max(0, unique.length - 50);
+        chart.timeScale().setVisibleLogicalRange({ from, to: unique.length + 2 });
+
+        // Update price line
+        if (unique.length) priceLine.applyOptions({ price: unique[unique.length-1].close });
     }
 
-    function updateTVChart(candles, currentCandle) {
-        if (!candleSeries || !tvChart) return;
+    /* ─── Live update for current candle ─── */
+    function updateCurrentCandle(candle) {
+        if (!candle) return;
+        const lw = toLWCandle(candle);
+        try { candleSeries.update(lw); } catch(e) { /* ignore */ }
+        priceLine.applyOptions({ price: lw.close });
 
-        const tvData = convertCandlesToTV(candles, currentCandle);
-        if (!tvData.length) return;
-
-        const latest = tvData[tvData.length - 1];
-        try {
-            candleSeries.update(latest);
-        } catch(e) {
-            candleSeries.setData(tvData);
-        }
-
-        // Jab tak user scroll kar raha hai tab auto-scroll mat karo
-        // Jaise hi user finger uthaye (touchend/mouseup) userScrolled = false ho jata hai
-        // Phir agli update pe scrollToRealTime call hoga
+        // Auto-scroll ONLY if user hasn't manually scrolled away
         if (!userScrolled) {
-            tvChart.timeScale().scrollToRealTime();
+            chart.timeScale().scrollToRealTime();
         }
     }
 
-    // ─────────────────────────────────────────────
-    // Amount chips
-    // ─────────────────────────────────────────────
+    /* ════════════════════════════════════════════
+       Rest of existing logic (unchanged)
+    ════════════════════════════════════════════ */
+
     document.querySelectorAll('.amount-chip').forEach(chip => {
-        chip.addEventListener('click', () => {
-            investmentInput.value = chip.dataset.amount;
-        });
+        chip.addEventListener('click', () => { investmentInput.value = chip.dataset.amount; });
     });
 
-    // ─────────────────────────────────────────────
-    // Tabs
-    // ─────────────────────────────────────────────
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             activeTab = btn.dataset.tab;
-
             if (activeTab === 'trade') {
                 copyTradeContent.style.display = 'none';
-                tradeContent.style.display = 'block';
+                tradeContent.style.display     = 'block';
             } else {
-                tradeContent.style.display = 'none';
+                tradeContent.style.display     = 'none';
                 copyTradeContent.style.display = 'block';
                 fetchCopyTrades();
             }
         });
     });
 
-    // ─────────────────────────────────────────────
-    // Asset dropdown
-    // ─────────────────────────────────────────────
     assetDropdownBtn.addEventListener('click', () => assetDropdownContent.classList.toggle('show'));
     window.addEventListener('click', (e) => {
         if (!e.target.closest('.asset-dropdown')) assetDropdownContent.classList.remove('show');
@@ -1051,10 +941,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatPrice(price, asset) {
-        const decimals = {
-            'BTCUSDT':2,'ETHUSDT':2,'BNBUSDT':2,'SOLUSDT':2,'AVAXUSDT':2,
-            'ADAUSDT':4,'MATICUSDT':4,'XRPUSDT':4,'DOGEUSDT':5,'LINKUSDT':4
-        };
+        const decimals = { 'BTCUSDT':2,'ETHUSDT':2,'BNBUSDT':2,'SOLUSDT':2,'AVAXUSDT':2,'ADAUSDT':4,'MATICUSDT':4,'XRPUSDT':4,'DOGEUSDT':5,'LINKUSDT':4 };
         return parseFloat(price).toFixed(decimals[asset] || 2);
     }
 
@@ -1066,7 +953,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setTradeButtonsDisabled(disabled) {
         [tradeUpBtn, tradeDownBtn].forEach(btn => {
-            btn.disabled = disabled;
+            btn.disabled    = disabled;
             btn.style.opacity = disabled ? '0.5' : '1';
         });
     }
@@ -1075,75 +962,51 @@ document.addEventListener('DOMContentLoaded', () => {
         balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
     }
 
-    // ─────────────────────────────────────────────
-    // Copy Trades
-    // ─────────────────────────────────────────────
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
         loadingPlaceholder.style.display = 'block';
-        noCopyTrades.style.display = 'none';
-        copyTradesContainer.innerHTML = '';
-
+        noCopyTrades.style.display       = 'none';
+        copyTradesContainer.innerHTML    = '';
         try {
             const res = await fetch('/api/user/copy-trades/available', {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
             });
             if (!res.ok) throw new Error('Failed to fetch');
             const data = await res.json();
-
             if (data.success) {
                 availableCopyTrades = data.copyTrades || [];
                 renderCopyTrades();
                 if (data.message && data.message.includes('$100')) {
                     copyTradeStatus.textContent = data.message;
                     copyTradeStatus.style.color = '#f59e0b';
-                } else {
-                    copyTradeStatus.textContent = '';
-                }
+                } else { copyTradeStatus.textContent = ''; }
             }
         } catch (err) {
             copyTradeStatus.textContent = 'Error loading copy trades.';
             copyTradeStatus.style.color = '#ef4444';
-        } finally {
-            loadingPlaceholder.style.display = 'none';
-        }
+        } finally { loadingPlaceholder.style.display = 'none'; }
     }
 
     function renderCopyTrades() {
         copyTradesContainer.innerHTML = '';
+        if (availableCopyTrades.length === 0) { noCopyTrades.style.display = 'block'; return; }
         noCopyTrades.style.display = 'none';
 
-        if (availableCopyTrades.length === 0) {
-            noCopyTrades.style.display = 'block';
-            return;
-        }
-
-        let validTradesRendered = 0;
-
         availableCopyTrades.forEach(trade => {
-            const rawExecMs = new Date(trade.executionTime).getTime();
+            const rawExecMs          = new Date(trade.executionTime).getTime();
             const lockedExecutionTimeMs = Math.floor(rawExecMs / 60000) * 60000;
-
-            const accurateNow = Date.now() + serverTimeOffset;
-            const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
-            if (lockedExecutionTimeMs <= currentMinuteMs) return;
-
-            validTradesRendered++;
-
-            const isAlreadyCopied = Object.values(tradeHistoryData).some(t =>
+            const isAlreadyCopied    = Object.values(tradeHistoryData).some(t =>
                 t.originalCopyTradeId === trade._id &&
                 (t.status === 'scheduled' || t.status === 'pending' || t.status === 'active')
             );
-
-            const isPopular = trade.percentage >= 10;
-            const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
+            const isPopular     = trade.percentage >= 10;
+            const isUp          = trade.direction === 'CALL' || trade.direction === 'UP';
             const directionColor = isUp ? '#10b981' : '#ef4444';
-            const directionBg = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+            const directionBg    = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
 
             const card = document.createElement('div');
             card.className = 'copy-card';
             card.style.cssText = 'position:relative;overflow:hidden;background:linear-gradient(145deg,rgba(13,31,60,0.8) 0%,rgba(5,11,24,0.95) 100%);border:1px solid rgba(59,130,246,0.2);border-radius:16px;padding:16px;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
-
             card.innerHTML = `
                 <div style="position:absolute;top:-30px;right:-30px;width:120px;height:120px;background:radial-gradient(circle,${directionBg} 0%,transparent 70%);filter:blur(15px);pointer-events:none;"></div>
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;position:relative;z-index:1;">
@@ -1192,30 +1055,22 @@ document.addEventListener('DOMContentLoaded', () => {
             copyTradesContainer.appendChild(card);
         });
 
-        if (validTradesRendered === 0) {
-            noCopyTrades.style.display = 'block';
-        }
-
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.classList.contains('copied')) return;
-                btn.innerHTML = `<svg class="animate-spin" style="width:16px;height:16px;margin-right:6px;" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Copying...`;
+                btn.innerHTML = `<svg class="animate-spin" style="width:16px;height:16px;margin-right:6px;" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity:.25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity:.75"></path></svg> Copying...`;
                 btn.disabled = true;
                 socket.emit('copy_trade', { copyTradeId: btn.dataset.id, asset: btn.dataset.asset });
             });
         });
     }
 
-    // ─────────────────────────────────────────────
-    // Trade History
-    // ─────────────────────────────────────────────
     function createTradeRow(trade) {
         tradeHistoryData[trade._id] = trade;
         const el = document.createElement('div');
         el.id = `trade-${trade._id}`;
         el.className = 'trade-row';
         el.addEventListener('click', () => showTradeDetails(trade._id));
-
         const isUp = trade.direction === 'UP' || trade.direction === 'CALL';
         el.innerHTML = `
             <div style="display:flex;align-items:center;gap:10px;">
@@ -1237,15 +1092,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateTradeStatus(tradeId, status, result = null) {
         const container = document.getElementById(`status-${tradeId}`);
         if (!container) return;
-
         let badgeClass = 'badge-default';
         let text = (result || status).toUpperCase();
-
-        if (result === 'WIN') badgeClass = 'badge-win';
+        if (result === 'WIN')   badgeClass = 'badge-win';
         else if (result === 'LOSS') badgeClass = 'badge-loss';
         else if (status.toLowerCase() === 'active') badgeClass = 'badge-active';
         else if (['pending','scheduled'].includes(status.toLowerCase())) badgeClass = 'badge-pending';
-
         let html = `<span class="badge ${badgeClass}">${text}</span>`;
         if (['pending','scheduled'].includes(status.toLowerCase())) {
             html += `<button onclick="event.stopPropagation();cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
@@ -1255,10 +1107,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function loadMoreTrades() {
         const slice = fullTradeHistory.slice(visibleHistoryCount, visibleHistoryCount + TRADES_PER_PAGE);
-        if (slice.length === 0 && visibleHistoryCount === 0) {
-            loadMoreBtn.style.display = 'none';
-            return;
-        }
+        if (slice.length === 0 && visibleHistoryCount === 0) { loadMoreBtn.style.display = 'none'; return; }
         slice.forEach(trade => {
             const el = createTradeRow(trade);
             tradeHistoryContainer.appendChild(el);
@@ -1268,13 +1117,12 @@ document.addEventListener('DOMContentLoaded', () => {
         loadMoreBtn.style.display = 'block';
         if (visibleHistoryCount >= fullTradeHistory.length) {
             loadMoreBtn.textContent = 'No More Trades';
-            loadMoreBtn.disabled = true;
+            loadMoreBtn.disabled    = true;
         } else {
             loadMoreBtn.textContent = 'Load More';
-            loadMoreBtn.disabled = false;
+            loadMoreBtn.disabled    = false;
         }
     }
-
     loadMoreBtn.addEventListener('click', loadMoreTrades);
 
     function addTradeToHistory(trade) {
@@ -1285,40 +1133,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.cancelTrade = (tradeId) => socket.emit('cancel_trade', { tradeId });
 
-    // ─────────────────────────────────────────────
-    // Update UI for selected asset
-    // ─────────────────────────────────────────────
     function updateUIForCurrentAsset() {
         if (marketData[currentAsset]) {
-            initTVChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
+            initChart(marketData[currentAsset].candles, marketData[currentAsset].currentCandle);
             const price = marketData[currentAsset].currentPrice || 0;
             currentPriceElem.textContent = formatPrice(price, currentAsset);
             lastPrice = price;
         } else {
-            if (tvChart) { tvChart.remove(); tvChart = null; candleSeries = null; }
+            candleSeries.setData([]);
             currentPriceElem.textContent = '-.--';
             lastPrice = 0;
         }
     }
 
-    window.addEventListener('resize', () => {
-        if (tvChart) tvChart.applyOptions({ width: document.getElementById('tvChart').clientWidth });
-    });
-
-    // ─────────────────────────────────────────────
-    // Socket Events
-    // ─────────────────────────────────────────────
+    /* ─── Socket events ─── */
     socket.on('init', (data) => {
         marketData = data.marketData;
         const assets = Object.keys(marketData);
         populateAssetSelector(assets);
-
         const last = localStorage.getItem('lastSelectedAsset');
         currentAsset = (last && assets.includes(last)) ? last : assets[0];
         selectedAssetSpan.textContent = currentAsset;
-
         updateBalance(data.balance);
-        fullTradeHistory = data.tradeHistory || [];
+        fullTradeHistory    = data.tradeHistory || [];
         visibleHistoryCount = 0;
         tradeHistoryContainer.innerHTML = '';
         loadMoreTrades();
@@ -1327,13 +1164,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('price_update', (data) => {
         const { pair, price, timestamp } = data;
-
         serverTimeOffset = timestamp - Date.now();
         assetPrices[pair] = price;
 
         if (marketData[pair]) {
             let currentCandle = marketData[pair].currentCandle;
-
             const now = new Date(timestamp);
             now.setSeconds(0, 0);
 
@@ -1343,92 +1178,73 @@ document.addEventListener('DOMContentLoaded', () => {
                     newOpen = currentCandle.close;
                     if (!marketData[pair].candles) marketData[pair].candles = [];
                     marketData[pair].candles.push(currentCandle);
-                    if (marketData[pair].candles.length > 100) marketData[pair].candles.shift();
+                    if (marketData[pair].candles.length > 200) marketData[pair].candles.shift();
                 }
                 currentCandle = {
                     timestamp: now.toISOString(),
-                    open: newOpen,
-                    high: Math.max(newOpen, price),
-                    low: Math.min(newOpen, price),
-                    close: price
+                    open:  newOpen,
+                    high:  Math.max(newOpen, price),
+                    low:   Math.min(newOpen, price),
+                    close: price,
                 };
                 marketData[pair].currentCandle = currentCandle;
             } else {
                 currentCandle.close = price;
                 if (price > currentCandle.high) currentCandle.high = price;
-                if (price < currentCandle.low) currentCandle.low = price;
+                if (price < currentCandle.low)  currentCandle.low  = price;
             }
-
             marketData[pair].currentPrice = price;
         }
 
         if (pair === currentAsset) {
             const newPrice = price;
-            currentPriceElem.classList.remove('price-up', 'price-down');
+            currentPriceElem.classList.remove('price-up','price-down');
             if (lastPrice !== 0 && newPrice !== lastPrice) {
                 currentPriceElem.classList.add(newPrice > lastPrice ? 'price-up' : 'price-down');
             }
             currentPriceElem.textContent = formatPrice(newPrice, currentAsset);
             lastPrice = newPrice;
 
-            const seconds = new Date(timestamp).getSeconds();
+            const seconds  = new Date(timestamp).getSeconds();
             const countdown = 60 - seconds;
             countdownSecondsElem.textContent = `${countdown}s`;
-            countdownSecondsElem.className = 'timer-value';
-            if (countdown <= 10) countdownSecondsElem.classList.add('critical');
+            countdownSecondsElem.className   = 'timer-value';
+            if (countdown <= 10)      countdownSecondsElem.classList.add('critical');
             else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
 
-            // Throttle: max every 150ms
-            const now2 = Date.now();
-            if (now2 - lastChartDrawTime > 150) {
-                updateTVChart(marketData[pair].candles, marketData[pair].currentCandle);
-                lastChartDrawTime = now2;
+            // Update only current candle (smooth live update)
+            if (marketData[pair] && marketData[pair].currentCandle) {
+                updateCurrentCandle(marketData[pair].currentCandle);
             }
         }
     });
 
-    socket.on('trade_pending', (data) => {
-        updateBalance(data.balance);
-        addTradeToHistory(data.trade);
-        showPendingPopup(data.trade);
-    });
-
-    socket.on('trade_scheduled', (data) => {
-        updateBalance(data.balance);
-        addTradeToHistory(data.trade);
-        showScheduledPopup(data.trade);
-        if (activeTab === 'copy-trade') fetchCopyTrades();
-    });
-
-    socket.on('trade_active', (data) => {
+    socket.on('trade_pending',   (data) => { updateBalance(data.balance); addTradeToHistory(data.trade); showPendingPopup(data.trade); });
+    socket.on('trade_scheduled', (data) => { updateBalance(data.balance); addTradeToHistory(data.trade); showScheduledPopup(data.trade); if (activeTab === 'copy-trade') fetchCopyTrades(); });
+    socket.on('trade_active',    (data) => {
         tradeHistoryData[data.trade._id] = data.trade;
         const row = document.getElementById(`trade-${data.trade._id}`);
-        if (!row) addTradeToHistory(data.trade);
-        else updateTradeStatus(data.trade._id, 'active');
+        if (!row) addTradeToHistory(data.trade); else updateTradeStatus(data.trade._id, 'active');
         showToast(toastActive);
     });
-
     socket.on('trade_result', (data) => {
         updateBalance(data.balance);
         tradeHistoryData[data.trade._id] = data.trade;
         const row = document.getElementById(`trade-${data.trade._id}`);
-        if (!row) addTradeToHistory(data.trade);
-        else updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
+        if (!row) addTradeToHistory(data.trade); else updateTradeStatus(data.trade._id, data.trade.status, data.trade.result);
         setTradeButtonsDisabled(false);
-        if (data.trade.result === 'WIN') showWinPopup(data.trade);
+        if (data.trade.result === 'WIN')       showWinPopup(data.trade);
         else if (data.trade.result === 'LOSS') showLossPopup(data.trade);
     });
-
     socket.on('trade_cancelled', (data) => {
         updateBalance(data.balance);
         delete tradeHistoryData[data.tradeId];
         const row = document.getElementById(`trade-${data.tradeId}`);
         if (row) row.remove();
-        showStatus('Trade cancelled.', 'gray');
+        showStatus('Trade cancelled.','gray');
         setTradeButtonsDisabled(false);
         if (activeTab === 'copy-trade') fetchCopyTrades();
     });
-
     socket.on('copy_trade_success', (data) => {
         showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
         document.querySelectorAll('.copy-btn').forEach(btn => {
@@ -1436,18 +1252,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅`;
                 btn.disabled = true;
                 btn.classList.add('copied');
-            } else if (!btn.classList.contains('copied')) {
-                btn.disabled = false;
-            }
+            } else if (!btn.classList.contains('copied')) { btn.disabled = false; }
         });
     });
-
     socket.on('copy_trade_executed', (data) => {
         showCopyExecutedToast(data.trade);
         updateBalance(data.balance);
         addTradeToHistory(data.trade);
     });
-
     socket.on('error', (data) => {
         showStatus(`Error: ${data.message}`, 'red');
         setTradeButtonsDisabled(false);
@@ -1458,97 +1270,48 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...','red'));
 
-    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
-
-    // ─────────────────────────────────────────────
-    // Trade buttons
-    // ─────────────────────────────────────────────
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
-        if (isNaN(amount) || amount < 0.5) {
-            showStatus('Invalid amount. Minimum is $0.50.', 'red');
-            setTradeButtonsDisabled(false);
-            return;
-        }
+        if (isNaN(amount) || amount < 0.5) { showStatus('Invalid amount. Minimum is $0.50.','red'); setTradeButtonsDisabled(false); return; }
         const currentPrice = assetPrices[currentAsset] || lastPrice;
-        if (!currentPrice) {
-            showStatus('Waiting for price data...', 'red');
-            setTradeButtonsDisabled(false);
-            return;
-        }
+        if (!currentPrice) { showStatus('Waiting for price data...','red'); setTradeButtonsDisabled(false); return; }
         socket.emit('trade', { direction, asset: currentAsset, amount, openingPrice: currentPrice });
     };
-
     tradeUpBtn.addEventListener('click',   () => requestTrade('UP'));
     tradeDownBtn.addEventListener('click', () => requestTrade('DOWN'));
 
-    // ─────────────────────────────────────────────
-    // Modals & Toasts
-    // ─────────────────────────────────────────────
-    function showModal(modal) {
-        hideAllModals();
-        overlay.classList.add('show');
-        modal.classList.add('show');
-        if (modal === modalWin) triggerConfetti();
-    }
-
-    function hideModal(modal) {
-        overlay.classList.remove('show');
-        modal.classList.remove('show');
-    }
-
-    function hideAllModals() {
-        allModals.forEach(m => m.classList.remove('show'));
-        overlay.classList.remove('show');
-    }
-
-    function showToast(toast) {
-        toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 3000);
-    }
+    /* ─── Modal helpers ─── */
+    function showModal(modal) { hideAllModals(); overlay.classList.add('show'); modal.classList.add('show'); if (modal === modalWin) triggerConfetti(); }
+    function hideModal(modal) { overlay.classList.remove('show'); modal.classList.remove('show'); }
+    function hideAllModals()  { allModals.forEach(m => m.classList.remove('show')); overlay.classList.remove('show'); }
+    function showToast(toast) { toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3000); }
 
     overlay.addEventListener('click', hideAllModals);
     document.querySelectorAll('.btn-close').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const modal = btn.closest('.modal');
-            if (modal) hideModal(modal);
-        });
+        btn.addEventListener('click', () => { const modal = btn.closest('.modal'); if (modal) hideModal(modal); });
     });
 
     function showPendingPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
-        document.getElementById('pending-asset').textContent = trade.asset;
+        document.getElementById('pending-asset').textContent  = trade.asset;
         document.getElementById('pending-time-container').style.display = 'none';
         showModal(modalPending);
     }
-
     function showScheduledPopup(trade) {
         document.getElementById('pending-title').textContent = 'Trade Scheduled';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
-        document.getElementById('pending-asset').textContent = trade.asset;
-        document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
+        document.getElementById('pending-asset').textContent  = trade.asset;
+        document.getElementById('pending-time').textContent   = new Date(trade.scheduledTime).toLocaleTimeString();
         document.getElementById('pending-time-container').style.display = 'inline';
         showModal(modalPending);
     }
-
-    function showWinPopup(trade) {
-        document.getElementById('win-amount').textContent = `+$${trade.pnl.toFixed(2)}`;
-        showModal(modalWin);
-    }
-
-    function showLossPopup(trade) {
-        document.getElementById('loss-amount').textContent = `-$${Math.abs(trade.pnl).toFixed(2)}`;
-        showModal(modalLoss);
-    }
-
-    function showCopySuccessPopup(asset) {
-        document.getElementById('copy-success-asset').textContent = asset;
-        showModal(modalCopySuccess);
-    }
-
+    function showWinPopup(trade)  { document.getElementById('win-amount').textContent = `+$${trade.pnl.toFixed(2)}`; showModal(modalWin); }
+    function showLossPopup(trade) { document.getElementById('loss-amount').textContent = `-$${Math.abs(trade.pnl).toFixed(2)}`; showModal(modalLoss); }
+    function showCopySuccessPopup(asset) { document.getElementById('copy-success-asset').textContent = asset; showModal(modalCopySuccess); }
     function showCopyExecutedToast(trade) {
         document.getElementById('copy-executed-text').textContent = `Copy trade for ${trade.asset || trade.tradingPair} is now active!`;
         showToast(toastCopyExecuted);
@@ -1557,27 +1320,24 @@ document.addEventListener('DOMContentLoaded', () => {
     function showTradeDetails(tradeId) {
         const trade = tradeHistoryData[tradeId];
         if (!trade) return;
-
-        const asset = trade.asset || trade.tradingPair;
-        document.getElementById('detail-asset').textContent = asset;
+        const asset      = trade.asset || trade.tradingPair;
+        const entryPrice = trade.entryPrice;
+        const exitPrice  = trade.exitPrice;
+        const pnl        = trade.pnl;
+        document.getElementById('detail-asset').textContent      = asset;
         document.getElementById('detail-trade-time').textContent = new Date(trade.timestamp || trade.createdAt).toLocaleString();
-        document.getElementById('detail-opening-price').textContent = trade.entryPrice ? `$${formatPrice(trade.entryPrice, asset)}` : 'N/A';
-        document.getElementById('detail-closing-price').textContent = trade.exitPrice ? `$${formatPrice(trade.exitPrice, asset)}` : 'N/A';
-
-        const pnlEl = document.getElementById('detail-pnl');
+        document.getElementById('detail-opening-price').textContent = entryPrice ? `$${formatPrice(entryPrice, asset)}` : 'N/A';
+        document.getElementById('detail-closing-price').textContent = exitPrice  ? `$${formatPrice(exitPrice,  asset)}` : 'N/A';
+        const pnlEl        = document.getElementById('detail-pnl');
         const pnlContainer = document.getElementById('detail-pnl-container');
-
-        if (trade.pnl !== undefined && trade.pnl !== null) {
-            const isPos = trade.pnl >= 0;
-            pnlEl.textContent = `${isPos ? '+' : ''}$${trade.pnl.toFixed(2)}`;
+        if (pnl !== undefined && pnl !== null) {
+            const isPos = pnl >= 0;
+            pnlEl.textContent = `${isPos ? '+' : ''}$${pnl.toFixed(2)}`;
             pnlEl.style.color = isPos ? '#10b981' : '#ef4444';
-            pnlContainer.style.background = isPos ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
-            pnlContainer.style.borderColor = isPos ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)';
+            pnlContainer.style.background   = isPos ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+            pnlContainer.style.borderColor  = isPos ? 'rgba(16,185,129,0.2)'  : 'rgba(239,68,68,0.2)';
             pnlContainer.style.display = 'block';
-        } else {
-            pnlContainer.style.display = 'none';
-        }
-
+        } else { pnlContainer.style.display = 'none'; }
         showModal(modalTradeDetails);
     }
 
@@ -1588,59 +1348,35 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = 0; i < 30; i++) {
             const p = document.createElement('div');
             p.className = 'confetti-particle';
-            p.style.left = `${Math.random() * 100}%`;
-            p.style.animationDelay = `${Math.random() * 0.5}s`;
-            p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
-            p.style.transform = `rotateZ(${Math.random() * 360}deg)`;
+            p.style.left              = `${Math.random() * 100}%`;
+            p.style.animationDelay    = `${Math.random() * 0.5}s`;
+            p.style.backgroundColor   = colors[Math.floor(Math.random() * colors.length)];
+            p.style.transform         = `rotateZ(${Math.random() * 360}deg)`;
             container.appendChild(p);
         }
         setTimeout(() => container.innerHTML = '', 2500);
     }
 
-    // ─────────────────────────────────────────────
-    // Copy trade timers
-    // ─────────────────────────────────────────────
+    /* ─── Copy trade timers ─── */
+    setInterval(() => { if (activeTab === 'copy-trade') fetchCopyTrades(); }, 30000);
     setInterval(() => {
-        if (activeTab === 'copy-trade') fetchCopyTrades();
-    }, 30000);
-
-    setInterval(() => {
-        const accurateNow = Date.now() + serverTimeOffset;
+        const accurateNow     = Date.now() + serverTimeOffset;
         const currentMinuteMs = Math.floor(accurateNow / 60000) * 60000;
-
         document.querySelectorAll('.live-copy-timer').forEach(el => {
             const execTimeMs = parseInt(el.getAttribute('data-exec'));
-            const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
-
-            if (diffMins <= 0) {
-                const card = el.closest('.copy-card');
-                if (card) {
-                    card.style.transition = 'opacity 0.5s ease';
-                    card.style.opacity = '0';
-                    setTimeout(() => {
-                        card.remove();
-                        const container = document.getElementById('copyTradesContainer');
-                        const noTradesMsg = document.getElementById('noCopyTrades');
-                        if (container && container.children.length === 0 && noTradesMsg) {
-                            noTradesMsg.style.display = 'block';
-                        }
-                    }, 500);
-                }
-            } else {
-                el.textContent = `${diffMins}m`;
-                el.style.color = diffMins <= 5 ? '#ef4444' : '#60a5fa';
-            }
+            const diffMins   = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
+            el.textContent   = diffMins <= 0 ? '0m' : `${diffMins}m`;
+            el.style.color   = diffMins <= 5 ? '#ef4444' : '#60a5fa';
         });
-
         document.querySelectorAll('.live-copy-bar').forEach(el => {
-            const execTimeMs = parseInt(el.getAttribute('data-exec'));
-            const diffMs = execTimeMs - accurateNow;
-            const minsLeft = Math.max(0, diffMs / 60000);
-            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
-            el.style.width = `${progressPercent}%`;
+            const execTimeMs    = parseInt(el.getAttribute('data-exec'));
+            const diffMs        = execTimeMs - accurateNow;
+            const minsLeft      = Math.max(0, diffMs / 60000);
+            const progressPct   = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
+            el.style.width      = `${progressPct}%`;
             if (minsLeft < 5) {
-                el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
-                el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)';
+                el.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
+                el.style.boxShadow  = '0 0 8px rgba(239,68,68,0.5)';
             }
         });
     }, 1000);
