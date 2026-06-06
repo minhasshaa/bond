@@ -3,128 +3,138 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Trade - Nova Ex</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<title>Trade - TradePro</title>
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
     :root {
-        --bg-primary: #000000;
-        --bg-card: #14151A;
-        --accent-green: #0ECB81;
-        --accent-red: #F6465D;
-        --border-color: #2B3139;
-        --text-primary: #EAECEF;
-        --text-secondary: #848E9C;
-        --text-muted: #474D57;
+        --bg-primary: #050b18;
+        --bg-secondary: #0a1628;
+        --bg-card: #0d1f3c;
+        --accent-blue: #3b82f6;
+        --accent-gold: #f59e0b;
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --border-color: rgba(59, 130, 246, 0.15);
+        --text-primary: #f0f4ff;
+        --text-secondary: #8899bb;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
         font-family: 'Inter', sans-serif;
-        background-color: var(--bg-primary) !important;
-        color: var(--text-primary) !important;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
         padding-bottom: 90px;
         min-height: 100vh;
+        background-image:
+            radial-gradient(ellipse at 20% 0%, rgba(59,130,246,0.08) 0%, transparent 50%),
+            radial-gradient(ellipse at 80% 0%, rgba(245,158,11,0.05) 0%, transparent 50%);
     }
 
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: var(--bg-primary); }
-    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: var(--accent-blue); border-radius: 2px; }
 
-    /* ========== NOVA EX TYPOGRAPHY ========== */
-    .logo-text { font-family: 'Orbitron', sans-serif; }
-    .asset-price { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
-
-    /* ========== FLAT CARDS ========== */
-    .flat-card {
-        background: var(--bg-card);
+    .glass-card {
+        background: rgba(13,31,60,0.6);
+        backdrop-filter: blur(20px);
         border: 1px solid var(--border-color);
-        border-radius: 8px;
+        border-radius: 20px;
         padding: 16px;
     }
 
     /* ========== TOP HEADER ========== */
     .trade-header {
-        background: var(--bg-primary);
-        border-bottom: 1px solid var(--border-color);
-        padding: 16px 0;
+        background: rgba(13,31,60,0.8);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        padding: 16px;
         margin-bottom: 16px;
     }
 
     .asset-dropdown { position: relative; display: inline-block; }
     .asset-dropdown-btn {
-        background: var(--bg-card);
+        background: rgba(5,11,24,0.8);
         border: 1px solid var(--border-color);
         color: var(--text-primary);
         padding: 8px 14px;
-        border-radius: 6px;
+        border-radius: 12px;
         font-weight: 700;
-        font-size: 16px;
+        font-size: 15px;
         cursor: pointer;
         display: flex;
         align-items: center;
         gap: 8px;
+        font-family: 'Inter', sans-serif;
         transition: border-color 0.2s;
     }
-    .asset-dropdown-btn:hover { border-color: var(--text-secondary); }
+    .asset-dropdown-btn:hover { border-color: rgba(59,130,246,0.4); }
     .asset-dropdown-content {
         display: none;
         position: absolute;
-        background: var(--bg-card);
+        background: #0a1628;
         border: 1px solid var(--border-color);
-        border-radius: 6px;
-        min-width: 180px;
+        border-radius: 14px;
+        min-width: 160px;
         z-index: 100;
         margin-top: 6px;
-        padding: 4px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.8);
+        padding: 6px;
+        box-shadow: 0 16px 40px rgba(0,0,0,0.5);
     }
     .asset-dropdown-content a {
-        color: var(--text-primary);
-        padding: 10px 12px;
+        color: var(--text-secondary);
+        padding: 9px 12px;
         text-decoration: none;
         display: block;
-        border-radius: 4px;
-        font-size: 14px;
+        border-radius: 8px;
+        font-size: 13px;
         font-weight: 500;
+        transition: all 0.15s;
     }
     .asset-dropdown-content a:hover {
-        background: var(--border-color);
+        background: rgba(59,130,246,0.1);
+        color: var(--text-primary);
     }
     .show { display: block; }
 
     .current-price {
-        font-size: 26px;
-        font-weight: 700;
+        font-size: 28px;
+        font-weight: 800;
         color: var(--text-primary);
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Inter', monospace;
+        letter-spacing: -0.5px;
     }
 
     .timer-box {
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.2);
+        border-radius: 12px;
+        padding: 10px 14px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-top: 8px;
+        margin-top: 12px;
     }
     .timer-value {
-        font-size: 14px;
+        font-size: 16px;
         font-weight: 700;
-        color: var(--text-primary);
-        font-family: 'JetBrains Mono', monospace;
+        color: white;
+        font-family: 'Inter', monospace;
     }
     .timer-value.warning { color: #f59e0b; }
-    .timer-value.critical { color: var(--accent-red); animation: blink 0.5s infinite; }
-    @keyframes blink { 50% { opacity: 0.5; } }
+    .timer-value.critical { color: #ef4444; animation: blink 0.5s infinite; }
+    @keyframes blink { 50% { opacity: 0.6; } }
 
     /* ========== CHART ========== */
     .chart-wrapper {
         position: relative;
-        background: var(--bg-primary);
+        background: rgba(13,31,60,0.6);
+        backdrop-filter: blur(20px);
         border: 1px solid var(--border-color);
-        border-radius: 8px;
+        border-radius: 20px;
         overflow: hidden;
         margin-bottom: 16px;
     }
@@ -138,56 +148,64 @@
         bottom: 12px;
         right: 12px;
         z-index: 10;
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 6px 12px;
-        border-radius: 4px;
+        background: rgba(59,130,246,0.15);
+        border: 1px solid rgba(59,130,246,0.3);
+        color: #60a5fa;
+        padding: 7px 14px;
+        border-radius: 10px;
         font-size: 11px;
-        font-weight: 600;
+        font-weight: 700;
         cursor: pointer;
+        font-family: 'Inter', sans-serif;
         display: none;
         align-items: center;
         gap: 6px;
+        transition: all 0.2s;
+        backdrop-filter: blur(10px);
     }
-    .go-realtime-btn:hover { background: var(--border-color); }
+    .go-realtime-btn:hover { background: rgba(59,130,246,0.25); }
     .go-realtime-btn.show { display: flex; }
 
     /* ========== TABS ========== */
     .tab-container {
-        border-bottom: 1px solid var(--border-color);
+        background: rgba(5,11,24,0.6);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 4px;
         display: flex;
-        gap: 16px;
+        gap: 4px;
         margin-bottom: 16px;
-        padding: 0 4px;
     }
     .tab-btn {
-        padding: 10px 0;
+        flex: 1;
+        padding: 9px 12px;
+        border-radius: 10px;
         border: none;
         background: transparent;
         color: var(--text-secondary);
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 600;
         cursor: pointer;
-        position: relative;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
     }
     .tab-btn.active {
-        color: var(--text-primary);
-    }
-    .tab-btn.active::after {
-        content: '';
-        position: absolute;
-        bottom: -1px; left: 0; right: 0;
-        height: 2px; background-color: var(--text-primary);
+        background: linear-gradient(135deg, #3b82f6, #2563eb);
+        color: white;
+        box-shadow: 0 4px 12px rgba(59,130,246,0.3);
     }
 
     /* ========== TRADE PANEL ========== */
     .amount-input-wrapper {
         display: flex;
         align-items: center;
-        background: var(--bg-card);
+        background: rgba(5,11,24,0.8);
         border: 1px solid var(--border-color);
-        border-radius: 6px;
+        border-radius: 12px;
         overflow: hidden;
         margin-bottom: 10px;
     }
@@ -195,17 +213,19 @@
         width: 44px;
         height: 48px;
         border: none;
-        background: transparent;
-        color: var(--text-secondary);
+        background: rgba(59,130,246,0.06);
+        color: var(--text-primary);
         font-size: 20px;
-        font-weight: 400;
+        font-weight: 600;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background 0.1s;
+        transition: background 0.15s;
+        font-family: 'Inter', sans-serif;
+        flex-shrink: 0;
     }
-    .amount-adj-btn:hover { background: var(--border-color); color: var(--text-primary); }
+    .amount-adj-btn:hover { background: rgba(59,130,246,0.12); }
 
     .amount-input {
         flex: 1;
@@ -217,6 +237,7 @@
         color: var(--text-primary);
         font-size: 16px;
         font-weight: 600;
+        font-family: 'Inter', sans-serif;
         outline: none;
         text-align: center;
     }
@@ -225,152 +246,159 @@
     input[type="number"] { -moz-appearance: textfield; }
 
     .amount-chip {
-        padding: 6px 12px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        color: var(--text-secondary);
+        padding: 6px 14px;
+        background: rgba(59,130,246,0.08);
+        border: 1px solid rgba(59,130,246,0.2);
+        border-radius: 8px;
+        color: #60a5fa;
         font-size: 12px;
-        font-weight: 500;
+        font-weight: 600;
         cursor: pointer;
+        transition: all 0.15s;
+        font-family: 'Inter', sans-serif;
     }
     .amount-chip:hover {
-        border-color: var(--text-primary);
-        color: var(--text-primary);
+        background: rgba(59,130,246,0.2);
+        border-color: rgba(59,130,246,0.4);
     }
 
     .payout-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 0;
-        margin-bottom: 12px;
-        border-top: 1px solid var(--border-color);
-        border-bottom: 1px solid var(--border-color);
+        padding: 10px 14px;
+        background: rgba(16,185,129,0.06);
+        border: 1px solid rgba(16,185,129,0.12);
+        border-radius: 12px;
+        margin-bottom: 14px;
     }
-    .payout-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; text-transform: uppercase; }
-    .payout-value { font-size: 16px; font-weight: 700; color: var(--accent-green); }
+    .payout-label { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+    .payout-value { font-size: 18px; font-weight: 800; color: var(--accent-green); }
 
     .btn-up {
         flex: 1;
-        padding: 14px;
-        background: var(--accent-green);
+        padding: 16px;
+        background: linear-gradient(135deg, #10b981, #059669);
         border: none;
-        border-radius: 6px;
-        color: #000;
+        border-radius: 14px;
+        color: white;
         font-size: 16px;
-        font-weight: 700;
+        font-weight: 800;
         cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 16px rgba(16,185,129,0.3);
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
     }
-    .btn-up:hover { opacity: 0.9; }
-    .btn-up:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-up:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(16,185,129,0.4); }
+    .btn-up:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
     .btn-down {
         flex: 1;
-        padding: 14px;
-        background: var(--accent-red);
+        padding: 16px;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
         border: none;
-        border-radius: 6px;
-        color: #fff;
+        border-radius: 14px;
+        color: white;
         font-size: 16px;
-        font-weight: 700;
+        font-weight: 800;
         cursor: pointer;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 16px rgba(239,68,68,0.3);
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
     }
-    .btn-down:hover { opacity: 0.9; }
-    .btn-down:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-down:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(239,68,68,0.4); }
+    .btn-down:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
     /* ========== TRADE HISTORY ========== */
     .trade-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 14px 16px;
-        background: var(--bg-primary);
+        padding: 12px 14px;
+        background: rgba(5,11,24,0.5);
         border: 1px solid var(--border-color);
-        border-radius: 6px;
+        border-radius: 12px;
         cursor: pointer;
-        margin-bottom: 8px;
+        transition: all 0.15s;
     }
     .trade-row:hover {
-        background: var(--bg-card);
+        background: rgba(59,130,246,0.06);
+        border-color: rgba(59,130,246,0.25);
     }
 
     .badge {
-        padding: 4px 8px;
-        border-radius: 4px;
+        padding: 3px 9px;
+        border-radius: 7px;
         font-size: 11px;
         font-weight: 700;
         text-transform: uppercase;
-        font-family: 'JetBrains Mono', monospace;
+        letter-spacing: 0.04em;
     }
-    .badge-win { background: rgba(14,203,129,0.15); color: var(--accent-green); }
-    .badge-loss { background: rgba(246,70,93,0.15); color: var(--accent-red); }
-    .badge-active { background: rgba(245,158,11,0.15); color: #f59e0b; }
-    .badge-pending { background: rgba(234,236,239,0.1); color: var(--text-primary); }
-    .badge-default { background: var(--border-color); color: var(--text-secondary); }
+    .badge-win { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+    .badge-loss { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+    .badge-active { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.2); }
+    .badge-pending { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+    .badge-default { background: rgba(136,153,187,0.12); color: var(--text-secondary); border: 1px solid var(--border-color); }
 
     .cancel-btn {
-        padding: 4px 10px;
-        background: transparent;
-        border: 1px solid var(--text-secondary);
-        color: var(--text-secondary);
-        border-radius: 4px;
+        padding: 3px 8px;
+        background: rgba(245,158,11,0.12);
+        border: 1px solid rgba(245,158,11,0.2);
+        color: #f59e0b;
+        border-radius: 6px;
         font-size: 11px;
         font-weight: 600;
         cursor: pointer;
-        margin-left: 8px;
+        font-family: 'Inter', sans-serif;
+        margin-left: 6px;
+        transition: all 0.15s;
     }
-    .cancel-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
+    .cancel-btn:hover { background: rgba(245,158,11,0.2); }
 
     /* ========== COPY TRADE ========== */
-    .copy-card { 
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 12px;
-    }
+    .copy-card { transition: all 0.2s; }
     .copy-btn {
         width: 100%;
-        padding: 12px;
-        background: var(--accent-green);
+        padding: 11px;
+        background: linear-gradient(135deg, #10b981, #059669);
         border: none;
-        border-radius: 6px;
-        color: #000;
+        border-radius: 10px;
+        color: white;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 13px;
         cursor: pointer;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 8px;
+        transition: all 0.2s;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 4px 12px rgba(16,185,129,0.25);
     }
-    .copy-btn:hover { opacity: 0.9; }
-    .copy-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .copy-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,185,129,0.35); }
+    .copy-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; box-shadow: none; color: white; }
     .copy-btn.copied {
-        background: transparent !important;
-        border: 1px solid var(--border-color) !important;
-        color: var(--accent-green) !important;
+        background: rgba(16, 185, 129, 0.15) !important;
+        border: 1px solid rgba(16, 185, 129, 0.3) !important;
+        color: #10b981 !important;
+        box-shadow: none !important;
+        cursor: not-allowed;
     }
 
     /* ========== PRICE FLASH ========== */
-    @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(14,203,129,0.15); } }
-    @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(246,70,93,0.15); } }
-    .price-up { animation: flash-up 0.5s ease-out; border-radius: 4px; }
-    .price-down { animation: flash-down 0.5s ease-out; border-radius: 4px; }
+    @keyframes flash-up { 0%,100% { background-color: transparent; } 50% { background-color: rgba(16,185,129,0.15); } }
+    @keyframes flash-down { 0%,100% { background-color: transparent; } 50% { background-color: rgba(239,68,68,0.15); } }
+    .price-up { animation: flash-up 0.5s ease-out; border-radius: 6px; }
+    .price-down { animation: flash-down 0.5s ease-out; border-radius: 6px; }
 
     /* ========== MODALS ========== */
     .modal-overlay {
         position: fixed; inset: 0;
-        background: rgba(0,0,0,0.8);
+        background: rgba(0,0,0,0.75);
         z-index: 9998;
         display: none;
         align-items: center;
@@ -389,34 +417,47 @@
     .modal.show { display: flex; }
 
     .modal-card {
-        background: var(--bg-card);
+        background: #0d1f3c;
         border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 24px;
+        border-radius: 24px;
+        padding: 32px 28px;
         width: 100%; max-width: 360px;
         text-align: center;
+        animation: popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
         position: relative;
+        overflow: hidden;
+    }
+    .modal-card.win-card { border-color: rgba(16,185,129,0.4); }
+    .modal-card.loss-card { border-color: rgba(239,68,68,0.3); }
+    @keyframes popIn { 0% { transform:scale(0.85); opacity:0; } 100% { transform:scale(1); opacity:1; } }
+
+    .modal-icon {
+        width: 64px; height: 64px;
+        border-radius: 20px;
+        display: flex; align-items: center; justify-content: center;
+        margin: 0 auto 20px;
     }
 
     .btn-modal-close {
         width: 100%;
-        padding: 12px;
+        padding: 13px;
         border: none;
-        border-radius: 6px;
-        background: var(--text-primary);
-        color: #000;
+        border-radius: 14px;
+        color: white;
         font-weight: 700;
-        font-size: 14px;
+        font-size: 15px;
         cursor: pointer;
+        font-family: 'Inter', sans-serif;
         margin-top: 20px;
+        transition: all 0.2s;
     }
-    .btn-modal-close:hover { opacity: 0.9; }
+    .btn-modal-close:hover { transform: translateY(-1px); }
 
     .detail-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 0;
+        padding: 10px 0;
         border-bottom: 1px solid var(--border-color);
     }
     .detail-row:last-child { border-bottom: none; }
@@ -431,7 +472,7 @@
     }
     .toast.show {
         display: flex;
-        animation: slideDown 0.3s ease-out;
+        animation: slideDown 0.4s ease-out;
     }
     @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 
@@ -440,337 +481,407 @@
         align-items: center;
         gap: 10px;
         padding: 12px 20px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
+        border-radius: 14px;
         font-weight: 600;
-        font-size: 13px;
+        font-size: 14px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
 
     .live-dot { animation: pulse-live 1.5s infinite; }
     @keyframes pulse-live { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
+    .confetti-particle {
+        position: absolute;
+        width: 8px; height: 14px;
+        opacity: 0;
+        animation: confetti-fall 2s ease-out forwards;
+    }
+    @keyframes confetti-fall {
+        0% { transform: translateY(-100%) rotateZ(0deg); opacity: 1; }
+        100% { transform: translateY(320px) rotateZ(360deg); opacity: 0; }
+    }
+
     .btn-load-more {
         width: 100%;
-        padding: 12px;
-        background: var(--bg-card);
+        padding: 10px;
+        background: rgba(59,130,246,0.08);
         border: 1px solid var(--border-color);
-        border-radius: 6px;
-        color: var(--text-primary);
+        border-radius: 12px;
+        color: var(--text-secondary);
         font-size: 13px;
         font-weight: 600;
         cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.2s;
         margin-top: 8px;
     }
-    .btn-load-more:hover { background: var(--border-color); }
+    .btn-load-more:hover { background: rgba(59,130,246,0.15); color: var(--text-primary); }
     .btn-load-more:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .section-label {
-        font-size: 12px;
-        font-weight: 500;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
         color: var(--text-secondary);
     }
 
-    /* ========== CONNECTION STATUS ========== */
-    .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .conn-dot.connected { background: var(--accent-green); }
-    .conn-dot.disconnected { background: var(--accent-red); }
-    .conn-dot.connecting { background: #f59e0b; animation: pulse 1.5s infinite; }
+    .skeleton {
+        background: linear-gradient(90deg, rgba(13,31,60,0.8) 25%, rgba(59,130,246,0.05) 50%, rgba(13,31,60,0.8) 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+        border-radius: 10px;
+    }
+    @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 
+    /* ========== BOTTOM NAV ========== */
+    .bottom-nav {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: rgba(10,22,40,0.95);
+        backdrop-filter: blur(20px);
+        border-top: 1px solid var(--border-color);
+        padding: 10px 0 20px;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        z-index: 1000;
+    }
+    .nav-item {
+        display: flex; flex-direction: column;
+        align-items: center; gap: 4px;
+        text-decoration: none;
+        color: var(--text-secondary);
+        font-size: 11px; font-weight: 500;
+        flex: 1; transition: all 0.2s;
+        position: relative; padding: 4px 0;
+    }
+    .nav-item svg { width: 22px; height: 22px; }
+    .nav-item.active { color: var(--accent-blue); }
+    .nav-item.active::before {
+        content: '';
+        position: absolute;
+        top: -10px; left: 50%;
+        transform: translateX(-50%);
+        width: 32px; height: 3px;
+        background: linear-gradient(90deg, #3b82f6, #60a5fa);
+        border-radius: 0 0 4px 4px;
+    }
 </style>
 </head>
 
-<body class="flex h-screen overflow-hidden antialiased">
+<body>
 <script>
     if (!localStorage.getItem('authToken')) window.location.href = '/login.html';
 </script>
 
-<aside class="hidden md:flex flex-col w-64 border-r border-[#2B3139] bg-[#000000] z-20">
-    <div class="h-20 flex items-center px-6 border-b border-[#2B3139]">
-        <span class="logo-text text-2xl font-black tracking-wider text-white">NOVA<span class="text-[#0ECB81]">EX</span></span>
-    </div>
-    <nav class="flex-1 py-6 px-4 space-y-1">
-        <a href="dashboard.html" class="flex items-center gap-3 px-4 py-3 text-[#848E9C] hover:bg-[#14151A] hover:text-white rounded-md transition-colors"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"></path></svg> Dashboard</a>
-        <a href="trade.html" class="flex items-center gap-3 px-4 py-3 bg-[#14151A] text-[#EAECEF] rounded-md font-semibold"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg> Trade</a>
-        <a href="deposit.html" class="flex items-center gap-3 px-4 py-3 text-[#848E9C] hover:bg-[#14151A] hover:text-white rounded-md transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg> Deposit</a>
-        <a href="withdraw.html" class="flex items-center gap-3 px-4 py-3 text-[#848E9C] hover:bg-[#14151A] hover:text-white rounded-md transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg> Wallet</a>
-        <a href="profile.html" class="flex items-center gap-3 px-4 py-3 text-[#848E9C] hover:bg-[#14151A] hover:text-white rounded-md transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg> Profile</a>
-    </nav>
-</aside>
+<div class="container mx-auto px-4 pt-5 max-w-5xl" style="padding: 16px; max-width: 700px; margin: 0 auto;">
 
-<main class="flex-1 flex flex-col h-full overflow-y-auto relative pb-20 md:pb-0">
-
-    <div class="px-4 py-4 md:px-8 border-b border-[#14151A] flex justify-between items-center md:hidden">
-        <span class="logo-text text-[22px] font-black tracking-wider text-white">NOVA<span class="text-[#0ECB81]">EX</span></span>
-        <div class="flex items-center gap-2 bg-[#14151A] px-2 py-1 rounded border border-[#2B3139]">
-            <span class="conn-dot connecting" id="conn-dot-mobile"></span>
-            <span class="text-[10px] font-semibold text-[#EAECEF] uppercase tracking-wider" id="conn-text-mobile">Connecting</span>
+    <!-- HEADER -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>
+            <h1 style="font-size:20px; font-weight:800; color:var(--text-primary);">Trading</h1>
+            <p style="font-size:12px; color:var(--text-secondary);">Live binary options market</p>
+        </div>
+        <div style="text-align:right;">
+            <p style="font-size:11px; color:var(--text-secondary);">Balance</p>
+            <p id="balance-display" style="font-size:20px; font-weight:800; color:#10b981;">$0.00</p>
         </div>
     </div>
 
-    <div class="max-w-5xl mx-auto w-full p-4 md:p-8">
-
-        <div class="hidden md:flex justify-between items-center mb-6">
-            <div>
-                <h1 class="text-2xl font-bold text-white">Live Trading</h1>
-                <p class="text-sm text-[#848E9C]">Execute binary contracts</p>
+    <!-- ASSET + PRICE -->
+    <div class="trade-header">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div class="asset-dropdown">
+                <button id="assetDropdownBtn" class="asset-dropdown-btn">
+                    <span id="selectedAssetSpan">Select Asset</span>
+                    <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div id="assetDropdownContent" class="asset-dropdown-content"></div>
             </div>
-            <div class="flex gap-4 items-center">
-                <div class="text-right mr-4">
-                    <p class="text-[11px] text-[#848E9C] uppercase tracking-wider font-semibold">Available Balance</p>
-                    <p id="balance-display-desktop" class="text-xl font-bold text-[#EAECEF] font-mono">$0.00</p>
-                </div>
-                <div class="flex items-center gap-2 bg-[#14151A] px-3 py-1.5 rounded border border-[#2B3139]">
-                    <span class="conn-dot connecting" id="conn-dot-desktop"></span>
-                    <span class="text-[11px] font-semibold text-[#EAECEF] uppercase tracking-wider" id="conn-text-desktop">Connecting</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="md:hidden flex justify-between items-center mb-4">
-            <span class="text-sm font-medium text-[#848E9C]">Balance</span>
-            <span id="balance-display-mobile" class="text-xl font-bold text-[#EAECEF] font-mono">$0.00</span>
-        </div>
-
-        <div class="trade-header px-0 md:px-4 md:bg-[#14151A] md:border md:rounded-lg mb-4">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div class="asset-dropdown">
-                    <button id="assetDropdownBtn" class="asset-dropdown-btn">
-                        <span id="selectedAssetSpan">Select Asset</span>
-                        <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                        </svg>
-                    </button>
-                    <div id="assetDropdownContent" class="asset-dropdown-content"></div>
-                </div>
-                <div style="text-align:right;">
-                    <p id="currentPrice" class="current-price">-.--</p>
-                </div>
-            </div>
-            <div class="timer-box">
-                <span class="text-xs font-semibold text-[#848E9C] uppercase">Next Candle In</span>
-                <span id="countdownSeconds" class="timer-value">--</span>
+            <div style="text-align:right;">
+                <p class="section-label" style="margin-bottom:2px;">Current Price</p>
+                <p id="currentPrice" class="current-price">-.--</p>
             </div>
         </div>
+        <div class="timer-box">
+            <span style="font-size:12px; font-weight:600; color:#60a5fa;">NEXT CANDLE IN</span>
+            <span id="countdownSeconds" class="timer-value">--</span>
+        </div>
+    </div>
 
-        <div class="chart-wrapper">
-            <div id="tv-chart-container"></div>
-            <button class="go-realtime-btn" id="goRealtimeBtn">
-                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 5l7 7-7 7M5 5l7 7-7 7"/>
+    <!-- TRADINGVIEW CHART -->
+    <div class="chart-wrapper">
+        <div id="tv-chart-container"></div>
+        <button class="go-realtime-btn" id="goRealtimeBtn">
+            <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 5l7 7-7 7M5 5l7 7-7 7"/>
+            </svg>
+            Go to Live
+        </button>
+    </div>
+
+    <!-- TABS -->
+    <div class="tab-container">
+        <button class="tab-btn active" data-tab="trade">
+            <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+            </svg>
+            Live Trade
+        </button>
+        <button class="tab-btn" data-tab="copy-trade">
+            <svg style="width:15px;height:15px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
+            </svg>
+            Copy Trade
+        </button>
+    </div>
+
+    <!-- LIVE TRADE PANEL -->
+    <div id="trade-content" class="glass-card" style="margin-bottom:16px;">
+        <p class="section-label" style="margin-bottom:12px;">Investment Amount</p>
+
+        <div class="amount-input-wrapper">
+            <button class="amount-adj-btn" id="amountMinus">−</button>
+            <input type="number" id="investmentAmount" min="0.5" step="0.01"
+                class="amount-input" placeholder="Enter amount (min $0.50)" value="10">
+            <button class="amount-adj-btn" id="amountPlus">+</button>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+            <button class="amount-chip" data-amount="10">$10</button>
+            <button class="amount-chip" data-amount="25">$25</button>
+            <button class="amount-chip" data-amount="50">$50</button>
+            <button class="amount-chip" data-amount="100">$100</button>
+            <button class="amount-chip" data-amount="250">$250</button>
+        </div>
+
+        <div class="payout-row">
+            <span class="payout-label">ESTIMATED PAYOUT</span>
+            <span class="payout-value">~87%</span>
+        </div>
+
+        <div style="display:flex; gap:10px;">
+            <button id="tradeUp" class="btn-up">
+                <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
                 </svg>
-                Go to Live
+                UP
+            </button>
+            <button id="tradeDown" class="btn-down">
+                <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+                </svg>
+                DOWN
             </button>
         </div>
 
-        <div class="tab-container">
-            <button class="tab-btn active" data-tab="trade">Live Trade</button>
-            <button class="tab-btn" data-tab="copy-trade">Copy Trade</button>
-        </div>
-
-        <div id="trade-content" class="flat-card mb-4">
-            <p class="section-label mb-3">Investment Amount</p>
-
-            <div class="amount-input-wrapper">
-                <button class="amount-adj-btn" id="amountMinus">−</button>
-                <input type="number" id="investmentAmount" min="0.5" step="0.01" class="amount-input" placeholder="Min $0.50" value="10">
-                <button class="amount-adj-btn" id="amountPlus">+</button>
-            </div>
-
-            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
-                <button class="amount-chip" data-amount="10">$10</button>
-                <button class="amount-chip" data-amount="25">$25</button>
-                <button class="amount-chip" data-amount="50">$50</button>
-                <button class="amount-chip" data-amount="100">$100</button>
-                <button class="amount-chip" data-amount="250">$250</button>
-            </div>
-
-            <div class="payout-row">
-                <span class="payout-label">ESTIMATED PAYOUT</span>
-                <span class="payout-value">87%</span>
-            </div>
-
-            <div style="display:flex; gap:10px;">
-                <button id="tradeUp" class="btn-up">
-                    <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
-                    </svg>
-                    CALL
-                </button>
-                <button id="tradeDown" class="btn-down">
-                    <svg style="width:18px;height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
-                    </svg>
-                    PUT
-                </button>
-            </div>
-
-            <div id="tradeStatus" style="margin-top:12px; min-height:20px; text-align:center; font-size:13px; font-weight:500;"></div>
-        </div>
-
-        <div id="copy-trade-content" class="flat-card mb-4" style="display:none;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
-                <div style="width:32px;height:32px;border-radius:6px;background:var(--bg-primary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;">
-                    <svg style="width:16px;height:16px;color:var(--text-primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
-                    </svg>
-                </div>
-                <div>
-                    <p style="font-weight:700; font-size:15px; color:var(--text-primary);">Expert Signals</p>
-                    <p style="font-size:11px; color:var(--text-secondary);">Auto-copy live trades</p>
-                </div>
-            </div>
-
-            <div id="loadingPlaceholder" style="text-align:center; padding:24px 0;">
-                <div class="skeleton" style="height:80px; margin-bottom:10px; border-radius:6px;"></div>
-                <div class="skeleton" style="height:80px; border-radius:6px;"></div>
-            </div>
-
-            <div id="noCopyTrades" style="display:none; text-align:center; padding:24px 0;">
-                <p style="font-size:13px; color:var(--text-secondary);">No copy trades available.</p>
-            </div>
-
-            <div id="copyTradesContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
-            <div id="copyTradeStatus" style="margin-top:10px; text-align:center; font-size:13px; font-weight:500;"></div>
-        </div>
-
-        <div class="flat-card">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
-                <div style="width:32px;height:32px;border-radius:6px;background:var(--bg-primary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;">
-                    <svg style="width:16px;height:16px;color:var(--text-primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                    </svg>
-                </div>
-                <p style="font-weight:700; font-size:15px;">Recent Orders</p>
-            </div>
-            <div id="tradeHistoryContainer" style="display:flex; flex-direction:column; gap:4px; max-height:400px; overflow-y:auto;"></div>
-            <button id="loadMoreTradesBtn" class="btn-load-more" style="display:none;">Load More</button>
-        </div>
-
+        <div id="tradeStatus" style="margin-top:12px; min-height:20px; text-align:center; font-size:13px; font-weight:600;"></div>
     </div>
-</main>
 
-<nav class="md:hidden fixed bottom-0 w-full bg-[#000000] border-t border-[#14151A] flex justify-between items-center px-4 py-2 pb-safe z-50">
-    <a href="dashboard.html" class="flex flex-col items-center gap-1 p-2 text-[#848E9C] hover:text-[#EAECEF]">
-        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"></path></svg>
-        <span class="text-[10px] font-medium">Home</span>
-    </a>
-    <a href="trade.html" class="flex flex-col items-center gap-1 p-2 text-[#EAECEF]">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
-        <span class="text-[10px] font-medium">Trade</span>
-    </a>
-    <a href="deposit.html" class="flex flex-col items-center gap-1 p-2 text-[#848E9C] hover:text-[#EAECEF]">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-        <span class="text-[10px] font-medium">Deposit</span>
-    </a>
-    <a href="withdraw.html" class="flex flex-col items-center gap-1 p-2 text-[#848E9C] hover:text-[#EAECEF]">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
-        <span class="text-[10px] font-medium">Wallet</span>
-    </a>
-    <a href="profile.html" class="flex flex-col items-center gap-1 p-2 text-[#848E9C] hover:text-[#EAECEF]">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-        <span class="text-[10px] font-medium">Profile</span>
-    </a>
-</nav>
+    <!-- COPY TRADE PANEL -->
+    <div id="copy-trade-content" class="glass-card" style="display:none; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+            <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(59,130,246,0.3);">
+                <svg style="width:16px;height:16px;color:white;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h2a2 2 0 002-2v-4a2 2 0 00-2-2h-2"/>
+                </svg>
+            </div>
+            <div>
+                <p style="font-weight:700; font-size:15px;">Available Copy Trades</p>
+                <p style="font-size:11px; color:var(--text-secondary);">Follow expert traders automatically</p>
+            </div>
+        </div>
 
+        <div id="loadingPlaceholder" style="text-align:center; padding:24px 0;">
+            <div class="skeleton" style="height:80px; margin-bottom:10px;"></div>
+            <div class="skeleton" style="height:80px;"></div>
+        </div>
+
+        <div id="noCopyTrades" style="display:none; text-align:center; padding:24px 0;">
+            <p style="font-size:13px; color:var(--text-secondary);">No copy trades available right now.</p>
+            <p style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Check back soon!</p>
+        </div>
+
+        <div id="copyTradesContainer" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <div id="copyTradeStatus" style="margin-top:10px; text-align:center; font-size:13px; font-weight:500;"></div>
+    </div>
+
+    <!-- TRADE HISTORY -->
+    <div class="glass-card">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+            <div style="width:32px;height:32px;border-radius:10px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);display:flex;align-items:center;justify-content:center;">
+                <svg style="width:16px;height:16px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+            </div>
+            <p style="font-weight:700; font-size:15px;">Trade History</p>
+        </div>
+        <div id="tradeHistoryContainer" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto;"></div>
+        <button id="loadMoreTradesBtn" class="btn-load-more" style="display:none;">Load More</button>
+    </div>
+
+</div>
+
+<!-- ===== MODALS ===== -->
 <div id="modal-overlay" class="modal-overlay"></div>
 
 <div id="modal-pending" class="modal">
     <div class="modal-card">
-        <h2 id="pending-title" style="font-size:18px; font-weight:700; color:var(--text-primary); margin-bottom:12px;">Trade Pending</h2>
+        <div class="modal-icon" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);">
+            <svg style="width:28px;height:28px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        </div>
+        <h2 id="pending-title" style="font-size:20px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">Trade Pending</h2>
         <p style="font-size:14px; color:var(--text-secondary); line-height:1.6;">
-            Your <span id="pending-amount" style="color:var(--text-primary); font-weight:700;">$0.00</span> order for 
-            <span id="pending-asset" style="color:var(--text-primary); font-weight:700;">ASSET</span>
+            Your <span id="pending-amount" style="color:var(--text-primary); font-weight:700;">$0.00</span> trade on
+            <span id="pending-asset" style="color:#60a5fa; font-weight:700;">ASSET</span>
             <span id="pending-time-container" style="display:none;">
                 executes at <span id="pending-time" style="color:var(--text-primary); font-weight:700;">00:00</span>
             </span>
         </p>
-        <button class="btn-modal-close btn-close">Acknowledge</button>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#3b82f6,#2563eb); box-shadow:0 4px 16px rgba(59,130,246,0.3);">Got it</button>
     </div>
 </div>
 
 <div id="modal-win" class="modal">
-    <div class="modal-card border-t-4 border-t-[#0ECB81]">
-        <h2 style="font-size:24px; font-weight:800; color:var(--accent-green); margin-bottom:8px;">WIN</h2>
-        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Contract Settled</p>
-        <div style="background:#000; border:1px solid var(--border-color); border-radius:6px; padding:16px;">
-            <p id="win-amount" style="font-size:24px; font-weight:700; color:var(--accent-green); font-family:'JetBrains Mono', monospace;">+$0.00</p>
+    <div class="modal-card win-card">
+        <div id="confetti-container" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>
+        <div class="modal-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);">
+            <svg style="width:28px;height:28px;color:#10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
         </div>
-        <button class="btn-modal-close btn-close bg-[#0ECB81] text-black">Collect</button>
+        <h2 style="font-size:28px; font-weight:800; color:#10b981; margin-bottom:8px;">YOU WON!</h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Trade Closed Successfully</p>
+        <div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:14px;padding:14px;">
+            <p id="win-amount" style="font-size:28px; font-weight:800; color:#10b981;">+$0.00</p>
+        </div>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 16px rgba(16,185,129,0.3);">Awesome!</button>
     </div>
 </div>
 
 <div id="modal-loss" class="modal">
-    <div class="modal-card border-t-4 border-t-[#F6465D]">
-        <h2 style="font-size:24px; font-weight:800; color:var(--accent-red); margin-bottom:8px;">LOSS</h2>
-        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Contract Settled</p>
-        <div style="background:#000; border:1px solid var(--border-color); border-radius:6px; padding:16px;">
-            <p id="loss-amount" style="font-size:24px; font-weight:700; color:var(--accent-red); font-family:'JetBrains Mono', monospace;">-$0.00</p>
+    <div class="modal-card loss-card">
+        <div class="modal-icon" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);">
+            <svg style="width:28px;height:28px;color:#ef4444;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
         </div>
-        <button class="btn-modal-close btn-close bg-[#14151A] text-[#F6465D] border border-[#2B3139]">Dismiss</button>
+        <h2 style="font-size:24px; font-weight:800; color:#ef4444; margin-bottom:8px;">Trade Closed</h2>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">Better luck next time!</p>
+        <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:14px;padding:14px;">
+            <p id="loss-amount" style="font-size:24px; font-weight:800; color:#ef4444;">-$0.00</p>
+        </div>
+        <button class="btn-modal-close btn-close" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;">Close</button>
     </div>
 </div>
 
 <div id="modal-trade-details" class="modal">
     <div class="modal-card" style="text-align:left;">
-        <p style="font-size:16px; font-weight:700; color:var(--text-primary); margin-bottom:16px;">Contract Details</p>
+        <p style="font-size:17px; font-weight:800; color:var(--text-primary); margin-bottom:16px;">Trade Details</p>
         <div class="detail-row">
             <span style="font-size:13px; color:var(--text-secondary);">Asset</span>
-            <span id="detail-asset" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
+            <span id="detail-asset" style="font-size:13px; font-weight:700; color:var(--text-primary);">-</span>
         </div>
         <div class="detail-row">
-            <span style="font-size:13px; color:var(--text-secondary);">Execution</span>
-            <span id="detail-trade-time" style="font-size:13px; font-weight:500; color:var(--text-primary);">-</span>
+            <span style="font-size:13px; color:var(--text-secondary);">Trade Time</span>
+            <span id="detail-trade-time" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
         </div>
         <div class="detail-row">
             <span style="font-size:13px; color:var(--text-secondary);">Entry Price</span>
-            <span id="detail-opening-price" style="font-size:13px; font-weight:500; font-family:'JetBrains Mono'; color:var(--text-primary);">-</span>
+            <span id="detail-opening-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
         </div>
         <div class="detail-row">
             <span style="font-size:13px; color:var(--text-secondary);">Exit Price</span>
-            <span id="detail-closing-price" style="font-size:13px; font-weight:500; font-family:'JetBrains Mono'; color:var(--text-primary);">-</span>
+            <span id="detail-closing-price" style="font-size:13px; font-weight:600; color:var(--text-primary);">-</span>
         </div>
-        <div id="detail-pnl-container" style="margin-top:12px; background:#000; border:1px solid var(--border-color); border-radius:6px; padding:12px; display:none;">
+        <div id="detail-pnl-container" style="margin-top:12px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); border-radius:12px; padding:12px; display:none;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:12px; font-weight:600; color:var(--text-secondary); text-transform:uppercase;">Net Result</span>
-                <span id="detail-pnl" style="font-size:18px; font-weight:700; font-family:'JetBrains Mono'; color:var(--text-primary);">-</span>
+                <span style="font-size:13px; color:var(--text-secondary);">P&L</span>
+                <span id="detail-pnl" style="font-size:18px; font-weight:800; color:#10b981;">-</span>
             </div>
         </div>
-        <button class="btn-modal-close btn-close">Close</button>
+        <button class="btn-modal-close btn-close" style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);color:#60a5fa;">Close</button>
     </div>
 </div>
 
 <div id="modal-copy-success" class="modal">
-    <div class="modal-card border-t-4 border-t-[#EAECEF]">
-        <h2 style="font-size:18px; font-weight:700; color:var(--text-primary); margin-bottom:8px;">Strategy Copied</h2>
+    <div class="modal-card">
+        <div class="modal-icon" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);">
+            <svg style="width:28px;height:28px;color:#10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+        </div>
+        <h2 style="font-size:20px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">Trade Copied!</h2>
         <p style="font-size:13px; color:var(--text-secondary); line-height:1.6;">
-            Order for <span id="copy-success-asset" style="color:var(--text-primary); font-weight:700;">ASSET</span> linked.
+            You are now copying the trade for
+            <span id="copy-success-asset" style="color:#60a5fa; font-weight:700;">ASSET</span>.
+            It will execute automatically.
         </p>
-        <button class="btn-modal-close btn-close">Acknowledge</button>
+        <button class="btn-modal-close btn-close" style="background:linear-gradient(135deg,#10b981,#059669); box-shadow:0 4px 16px rgba(16,185,129,0.3);">Great!</button>
     </div>
 </div>
 
+<!-- TOASTS -->
 <div id="toast-active" class="toast">
-    <div class="toast-inner">
-        <span class="live-dot" style="width:8px;height:8px;border-radius:50%;background:#f59e0b;"></span>
-        <span style="color:var(--text-primary);">Order <strong style="color:#f59e0b;">ACTIVE</strong></span>
+    <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(245,158,11,0.3);">
+        <span class="relative flex" style="width:10px;height:10px;">
+            <span class="live-dot" style="position:absolute;width:100%;height:100%;border-radius:50%;background:#f59e0b;opacity:0.75;display:inline-flex;"></span>
+            <span style="position:relative;width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-flex;"></span>
+        </span>
+        <span style="color:var(--text-primary);">Your trade is now <strong style="color:#f59e0b;">ACTIVE!</strong></span>
     </div>
 </div>
 
 <div id="toast-copy-executed" class="toast">
-    <div class="toast-inner">
-        <span id="copy-executed-text" style="color:var(--text-primary);">Copy trade executed.</span>
+    <div class="toast-inner" style="background:rgba(13,31,60,0.95);border:1px solid rgba(59,130,246,0.3);">
+        <svg style="width:18px;height:18px;color:#60a5fa;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+        </svg>
+        <span id="copy-executed-text" style="color:var(--text-primary);">Copy trade executed!</span>
     </div>
 </div>
 
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav">
+    <a href="dashboard.html" class="nav-item" id="nav-dashboard">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+        <span>Home</span>
+    </a>
+    <a href="trade.html" class="nav-item" id="nav-trade">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+        <span>Trade</span>
+    </a>
+    <a href="deposit.html" class="nav-item" id="nav-deposit">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        <span>Deposit</span>
+    </a>
+    <a href="withdraw.html" class="nav-item" id="nav-withdraw">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H4a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+        <span>Wallet</span>
+    </a>
+    <a href="profile.html" class="nav-item" id="nav-profile">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+        <span>Profile</span>
+    </a>
+</nav>
+
+<!-- ===== MAIN SCRIPT ===== -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+
+    const currentPage = window.location.pathname.split('/').pop().replace('.html', '') || 'trade';
+    const navEl = document.getElementById(`nav-${currentPage}`);
+    if (navEl) navEl.classList.add('active');
 
     const socket = io({ auth: { token: localStorage.getItem('authToken') } });
 
     /* ===== DOM REFS ===== */
-    const balanceElemMobile = document.getElementById('balance-display-mobile');
-    const balanceElemDesktop = document.getElementById('balance-display-desktop');
+    const balanceElem = document.getElementById('balance-display');
     const currentPriceElem = document.getElementById('currentPrice');
     const countdownSecondsElem = document.getElementById('countdownSeconds');
     const tradeHistoryContainer = document.getElementById('tradeHistoryContainer');
@@ -804,46 +915,30 @@ document.addEventListener('DOMContentLoaded', () => {
     let serverTimeOffset = 0;
     let userIsScrolledBack = false;
 
-    /* ===== CONNECTION STATUS SYNC ===== */
-    const connDotMobile = document.getElementById('conn-dot-mobile');
-    const connTextMobile = document.getElementById('conn-text-mobile');
-    const connDotDesktop = document.getElementById('conn-dot-desktop');
-    const connTextDesktop = document.getElementById('conn-text-desktop');
-
-    function setConnectionStatus(state) {
-        const cls = `conn-dot ${state}`;
-        if(connDotMobile) connDotMobile.className = cls;
-        if(connDotDesktop) connDotDesktop.className = cls;
-        
-        let txt = state === 'connected' ? 'Live' : state === 'connecting' ? 'Connecting...' : 'Offline';
-        if(connTextMobile) connTextMobile.textContent = txt;
-        if(connTextDesktop) connTextDesktop.textContent = txt;
-    }
-
-    /* ===== TRADINGVIEW LIGHTWEIGHT CHART (PURE DARK THEME) ===== */
+    /* ===== TRADINGVIEW LIGHTWEIGHT CHART ===== */
     const chartContainer = document.getElementById('tv-chart-container');
     const chart = LightweightCharts.createChart(chartContainer, {
         layout: {
-            background: { type: 'solid', color: '#000000' },
-            textColor: '#848E9C',
+            background: { type: 'solid', color: '#050b18' },
+            textColor: '#8899bb',
             fontSize: 11,
             fontFamily: 'Inter, sans-serif',
         },
         grid: {
-            vertLines: { color: '#14151A' },
-            horzLines: { color: '#14151A' },
+            vertLines: { color: 'rgba(59,130,246,0.04)' },
+            horzLines: { color: 'rgba(59,130,246,0.04)' },
         },
         crosshair: {
             mode: LightweightCharts.CrosshairMode.Normal,
-            vertLine: { color: '#2B3139', width: 1, style: 2, labelBackgroundColor: '#14151A' },
-            horzLine: { color: '#2B3139', width: 1, style: 2, labelBackgroundColor: '#14151A' },
+            vertLine: { color: 'rgba(59,130,246,0.2)', width: 1, style: 2, labelBackgroundColor: '#0d1f3c' },
+            horzLine: { color: 'rgba(59,130,246,0.2)', width: 1, style: 2, labelBackgroundColor: '#0d1f3c' },
         },
         rightPriceScale: {
-            borderColor: '#14151A',
+            borderColor: 'rgba(59,130,246,0.1)',
             scaleMargins: { top: 0.1, bottom: 0.08 },
         },
         timeScale: {
-            borderColor: '#14151A',
+            borderColor: 'rgba(59,130,246,0.1)',
             timeVisible: true,
             secondsVisible: false,
             rightOffset: 5,
@@ -855,20 +950,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const candleSeries = chart.addCandlestickSeries({
-        upColor: '#0ECB81',
-        downColor: '#F6465D',
-        borderUpColor: '#0ECB81',
-        borderDownColor: '#F6465D',
-        wickUpColor: '#0ECB81',
-        wickDownColor: '#F6465D',
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderUpColor: '#10b981',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
     });
 
+    /* ===== DETECT USER SCROLL — CORE FIX ===== */
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
         if (!range) return;
         try {
             const data = candleSeries.data();
             if (!data || !data.length) return;
-            if (range.to < data.length - 3) {
+            const totalBars = data.length;
+            if (range.to < totalBars - 3) {
                 userIsScrolledBack = true;
                 goRealtimeBtn.classList.add('show');
             } else {
@@ -933,6 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const candles = (md.candles || []).map(candleToTV);
         if (md.currentCandle) candles.push(candleToTV(md.currentCandle));
 
+        // De-duplicate & sort by time
         const seen = new Set();
         const unique = candles.filter(c => {
             if (seen.has(c.time)) return false;
@@ -958,7 +1056,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showStatus(msg, color) {
-        const colors = { red:'#F6465D', green:'#0ECB81', gray:'var(--text-secondary)' };
+        const colors = { red:'#ef4444', green:'#10b981', blue:'#60a5fa', yellow:'#f59e0b', gray:'var(--text-secondary)' };
         tradeStatusElem.textContent = msg;
         tradeStatusElem.style.color = colors[color] || colors.gray;
     }
@@ -966,13 +1064,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function setTradeButtonsDisabled(disabled) {
         [tradeUpBtn, tradeDownBtn].forEach(btn => {
             btn.disabled = disabled;
+            btn.style.opacity = disabled ? '0.5' : '1';
         });
     }
 
     function updateBalance(newBalance) {
-        const balStr = `$${(newBalance || 0).toFixed(2)}`;
-        if(balanceElemMobile) balanceElemMobile.textContent = balStr;
-        if(balanceElemDesktop) balanceElemDesktop.textContent = balStr;
+        balanceElem.textContent = `$${(newBalance || 0).toFixed(2)}`;
     }
 
     /* ===== AMOUNT +/- ===== */
@@ -1005,7 +1102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    /* ===== COPY TRADES (FLAT THEME) ===== */
+    /* ===== COPY TRADES ===== */
     async function fetchCopyTrades() {
         if (activeTab !== 'copy-trade') return;
         loadingPlaceholder.style.display = 'block';
@@ -1020,10 +1117,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 availableCopyTrades = data.copyTrades || [];
                 renderCopyTrades();
+                if (data.message && data.message.includes('$100')) {
+                    copyTradeStatus.textContent = data.message;
+                    copyTradeStatus.style.color = '#f59e0b';
+                } else { copyTradeStatus.textContent = ''; }
             }
         } catch (err) {
             copyTradeStatus.textContent = 'Error loading copy trades.';
-            copyTradeStatus.style.color = '#F6465D';
+            copyTradeStatus.style.color = '#ef4444';
         } finally { loadingPlaceholder.style.display = 'none'; }
     }
 
@@ -1038,38 +1139,65 @@ document.addEventListener('DOMContentLoaded', () => {
             const isAlreadyCopied = Object.values(tradeHistoryData).some(t =>
                 t.originalCopyTradeId === trade._id && ['scheduled','pending','active'].includes(t.status)
             );
+            const isPopular = trade.percentage >= 10;
             const isUp = trade.direction === 'CALL' || trade.direction === 'UP';
-            const directionColor = isUp ? '#0ECB81' : '#F6465D';
+            const directionColor = isUp ? '#10b981' : '#ef4444';
+            const directionBg = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
 
             const card = document.createElement('div');
             card.className = 'copy-card';
+            card.style.position = 'relative';
+            card.style.overflow = 'hidden';
+            card.style.background = 'linear-gradient(145deg, rgba(13,31,60,0.8) 0%, rgba(5,11,24,0.95) 100%)';
+            card.style.border = '1px solid rgba(59,130,246,0.2)';
+            card.style.boxShadow = '0 8px 32px rgba(0,0,0,0.2)';
+            card.style.borderRadius = '16px';
+            card.style.padding = '16px';
+            card.style.marginBottom = '10px';
 
             card.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-                    <div>
-                        <div style="display:flex; align-items:center; gap:6px;">
-                            <p style="font-weight:700; font-size:16px; color:var(--text-primary);">${trade.tradingPair || trade.asset}</p>
-                            <span style="font-size:10px; font-weight:700; padding:2px 4px; border:1px solid ${directionColor}; color:${directionColor}; border-radius:4px;">${trade.direction}</span>
+                <div style="position:absolute; top:-30px; right:-30px; width:120px; height:120px; background:radial-gradient(circle, ${directionBg} 0%, transparent 70%); filter:blur(15px); pointer-events:none;"></div>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; position:relative; z-index:1;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px;height:40px;border-radius:12px;background:${directionBg};border:1px solid ${directionColor}40;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${directionBg};">
+                            <svg style="width:20px;height:20px;color:${directionColor};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <p style="font-weight:800; font-size:16px; color:var(--text-primary); letter-spacing:-0.5px;">${trade.tradingPair || trade.asset}</p>
+                                ${isPopular ? `<span style="background:linear-gradient(90deg, #f59e0b, #ef4444); color:white; font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; text-transform:uppercase; box-shadow:0 0 8px rgba(245,158,11,0.4);">🔥 Hot</span>` : ''}
+                            </div>
+                            <div style="display:flex; align-items:center; gap:4px; margin-top:2px;">
+                                <span style="width:6px;height:6px;border-radius:50%;background:${directionColor};display:inline-block;animation:pulse-live 1s infinite;"></span>
+                                <span style="font-size:11px; font-weight:700; color:${directionColor};">Live Signal</span>
+                                <span style="font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px; background:${directionBg}; color:${directionColor}; margin-left:4px;">${trade.direction}</span>
+                            </div>
                         </div>
                     </div>
                     <div style="text-align:right;">
-                        <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:600;">Executes In</p>
-                        <p class="live-copy-timer" data-exec="${lockedExecutionTimeMs}" style="font-size:16px; font-weight:700; color:var(--text-primary); font-family:'JetBrains Mono';">--m</p>
+                        <p style="font-size:10px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Executes In</p>
+                        <p class="live-copy-timer" data-exec="${lockedExecutionTimeMs}" style="font-size:18px; font-weight:800; color:#60a5fa; font-family:monospace; line-height:1.2;">--m</p>
                     </div>
                 </div>
-                
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px;">
-                    <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:10px;">
-                        <p style="font-size:11px; color:var(--text-secondary); font-weight:500;">Investment</p>
-                        <p style="font-size:14px; font-weight:700; color:var(--text-primary);">${trade.percentage}% <span style="font-size:11px;color:var(--text-secondary);font-weight:400;">bal</span></p>
+                <div style="width:100%; height:6px; background:rgba(255,255,255,0.05); border-radius:4px; margin-bottom:14px; overflow:hidden; position:relative; z-index:1;">
+                    <div class="live-copy-bar" data-exec="${lockedExecutionTimeMs}" style="width:100%; height:100%; background:linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius:4px; transition:width 1s linear;"></div>
+                </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; position:relative; z-index:1;">
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:10px;">
+                        <p style="font-size:11px; color:var(--text-secondary); font-weight:600;">Investment</p>
+                        <p style="font-size:15px; font-weight:800; color:#f0f4ff;">${trade.percentage}% <span style="font-size:11px;color:#8899bb;font-weight:500;">of balance</span></p>
                     </div>
-                    <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:10px;">
-                        <p style="font-size:11px; color:var(--text-secondary); font-weight:500;">Est. Profit</p>
-                        <p style="font-size:14px; font-weight:700; color:var(--accent-green);">~85 - 90%</p>
+                    <div style="background:rgba(16,185,129,0.05); border:1px solid rgba(16,185,129,0.1); border-radius:10px; padding:10px;">
+                        <p style="font-size:11px; color:var(--text-secondary); font-weight:600;">Est. Profit</p>
+                        <p style="font-size:15px; font-weight:800; color:#10b981;">~85 - 90%</p>
                     </div>
                 </div>
-                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn ${isAlreadyCopied ? 'copied' : ''}" ${isAlreadyCopied ? 'disabled' : ''}>
-                    ${isAlreadyCopied ? 'Copied' : 'Copy Trade'}
+                <button data-id="${trade._id}" data-asset="${trade.tradingPair || trade.asset}" class="copy-btn ${isAlreadyCopied ? 'copied' : ''}" style="position:relative; z-index:1; display:flex; align-items:center; justify-content:center; gap:8px;" ${isAlreadyCopied ? 'disabled' : ''}>
+                    ${isAlreadyCopied ?
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅` :
+                    `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`}
                 </button>
             `;
             copyTradesContainer.appendChild(card);
@@ -1078,7 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.copy-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.classList.contains('copied')) return;
-                btn.innerHTML = `Linking...`;
+                btn.innerHTML = `Copying...`;
                 btn.disabled = true;
                 socket.emit('copy_trade', { copyTradeId: btn.dataset.id, asset: btn.dataset.asset });
             });
@@ -1093,13 +1221,16 @@ document.addEventListener('DOMContentLoaded', () => {
         el.className = 'trade-row';
         el.addEventListener('click', () => showTradeDetails(trade._id));
         const isUp = trade.direction === 'UP' || trade.direction === 'CALL';
-        const clr = isUp ? '#0ECB81' : '#F6465D';
         el.innerHTML = `
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="width:4px; height:24px; background:${clr}; border-radius:2px;"></div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div style="width:34px;height:34px;border-radius:10px;background:${isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};border:1px solid ${isUp ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg style="width:14px;height:14px;color:${isUp ? '#10b981' : '#ef4444'};" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${isUp ? 'M5 10l7-7m0 0l7 7m-7-7v18' : 'M19 14l-7 7m0 0l-7-7m7 7V3'}"/>
+                    </svg>
+                </div>
                 <div>
-                    <p style="font-weight:700; font-size:14px; color:var(--text-primary);">${trade.asset || trade.tradingPair}</p>
-                    <p style="font-size:12px; color:var(--text-secondary); font-family:'JetBrains Mono';">$${trade.amount.toFixed(2)}</p>
+                    <p style="font-weight:700; font-size:13px; color:var(--text-primary);">${trade.asset || trade.tradingPair}</p>
+                    <p style="font-size:11px; color:var(--text-secondary);">$${trade.amount.toFixed(2)}</p>
                 </div>
             </div>
             <div id="status-${trade._id}" style="text-align:right;"></div>
@@ -1116,7 +1247,6 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (result === 'LOSS') badgeClass = 'badge-loss';
         else if (status.toLowerCase() === 'active') badgeClass = 'badge-active';
         else if (['pending','scheduled'].includes(status.toLowerCase())) badgeClass = 'badge-pending';
-        
         let html = `<span class="badge ${badgeClass}">${text}</span>`;
         if (['pending','scheduled'].includes(status.toLowerCase())) {
             html += `<button onclick="event.stopPropagation();cancelTrade('${tradeId}')" class="cancel-btn">Cancel</button>`;
@@ -1134,7 +1264,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         visibleHistoryCount += TRADES_PER_PAGE;
         loadMoreBtn.style.display = 'block';
-        if (visibleHistoryCount >= fullTradeHistory.length) { loadMoreBtn.textContent = 'End of History'; loadMoreBtn.disabled = true; }
+        if (visibleHistoryCount >= fullTradeHistory.length) { loadMoreBtn.textContent = 'No More Trades'; loadMoreBtn.disabled = true; }
         else { loadMoreBtn.textContent = 'Load More'; loadMoreBtn.disabled = false; }
     }
     loadMoreBtn.addEventListener('click', loadMoreTrades);
@@ -1208,9 +1338,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (countdown <= 10) countdownSecondsElem.classList.add('critical');
             else if (countdown <= 30) countdownSecondsElem.classList.add('warning');
 
+            /* UPDATE CHART — ONLY UPDATE CANDLE, NO AUTO-SCROLL */
             const cc = marketData[pair].currentCandle;
             if (cc) {
                 candleSeries.update(candleToTV(cc));
+                // NO scrollToRealTime() here — this is the core fix
             }
         }
     });
@@ -1244,16 +1376,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeTab === 'copy-trade') fetchCopyTrades();
     });
     socket.on('copy_trade_success', (data) => {
-        showCopySuccessPopup(data.copyTrade?.tradingPair || 'that asset');
+        showCopySuccessPopup(data.copyTrade?.tradingPair || 'that trade');
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            if (btn.textContent.includes('Linking')) {
-                btn.innerHTML = `Copied`;
+            if (btn.textContent.includes('Copying')) {
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Copied ✅`;
                 btn.disabled = true;
                 btn.classList.add('copied');
             } else if (!btn.classList.contains('copied')) { btn.disabled = false; }
         });
     });
     socket.on('copy_trade_executed', (data) => {
+        document.getElementById('copy-executed-text').textContent = `Copy trade for ${data.trade.asset || data.trade.tradingPair} is active!`;
         showToast(document.getElementById('toast-copy-executed'));
         updateBalance(data.balance);
         addTradeToHistory(data.trade);
@@ -1262,28 +1395,28 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus(`Error: ${data.message}`, 'red');
         setTradeButtonsDisabled(false);
         document.querySelectorAll('.copy-btn').forEach(btn => {
-            if (btn.textContent.includes('Linking')) {
+            if (btn.textContent.includes('Copying')) {
                 btn.disabled = false;
-                btn.innerHTML = `Copy Trade`;
+                btn.innerHTML = `<svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Copy Expert Trade`;
             }
         });
     });
-    socket.on('disconnect', () => showStatus('Disconnected', 'red'));
+    socket.on('disconnect', () => showStatus('Disconnected. Reconnecting...', 'red'));
 
     /* ===== TRADE ACTIONS ===== */
     const requestTrade = (direction) => {
         setTradeButtonsDisabled(true);
         const amount = parseFloat(investmentInput.value);
-        if (isNaN(amount) || amount < 0.5) { showStatus('Invalid amount', 'red'); setTradeButtonsDisabled(false); return; }
+        if (isNaN(amount) || amount < 0.5) { showStatus('Invalid amount. Minimum is $0.50.', 'red'); setTradeButtonsDisabled(false); return; }
         const currentPrice = assetPrices[currentAsset] || lastPrice;
-        if (!currentPrice) { showStatus('Waiting for price...', 'red'); setTradeButtonsDisabled(false); return; }
+        if (!currentPrice) { showStatus('Waiting for price data...', 'red'); setTradeButtonsDisabled(false); return; }
         socket.emit('trade', { direction, asset: currentAsset, amount, openingPrice: currentPrice });
     };
     tradeUpBtn.addEventListener('click', () => requestTrade('UP'));
     tradeDownBtn.addEventListener('click', () => requestTrade('DOWN'));
 
     /* ===== MODALS ===== */
-    function showModal(modal) { hideAllModals(); overlay.classList.add('show'); modal.classList.add('show'); }
+    function showModal(modal) { hideAllModals(); overlay.classList.add('show'); modal.classList.add('show'); if (modal.id === 'modal-win') triggerConfetti(); }
     function hideModal(modal) { overlay.classList.remove('show'); modal.classList.remove('show'); }
     function hideAllModals() { allModals.forEach(m => m.classList.remove('show')); overlay.classList.remove('show'); }
     function showToast(toast) { toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3000); }
@@ -1294,12 +1427,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function showPendingPopup(trade) {
+        document.getElementById('pending-title').textContent = 'Trade Pending';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
         document.getElementById('pending-asset').textContent = trade.asset;
         document.getElementById('pending-time-container').style.display = 'none';
         showModal(document.getElementById('modal-pending'));
     }
     function showScheduledPopup(trade) {
+        document.getElementById('pending-title').textContent = 'Trade Scheduled';
         document.getElementById('pending-amount').textContent = `$${trade.amount.toFixed(2)}`;
         document.getElementById('pending-asset').textContent = trade.asset;
         document.getElementById('pending-time').textContent = new Date(trade.scheduledTime).toLocaleTimeString();
@@ -1323,13 +1458,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (trade.pnl !== undefined && trade.pnl !== null) {
             const isPos = trade.pnl >= 0;
             pnlEl.textContent = `${isPos ? '+' : ''}$${trade.pnl.toFixed(2)}`;
-            pnlEl.style.color = isPos ? 'var(--accent-green)' : 'var(--accent-red)';
+            pnlEl.style.color = isPos ? '#10b981' : '#ef4444';
+            pnlContainer.style.background = isPos ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+            pnlContainer.style.borderColor = isPos ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)';
             pnlContainer.style.display = 'block';
         } else { pnlContainer.style.display = 'none'; }
         showModal(document.getElementById('modal-trade-details'));
     }
 
-    /* ===== PERIODIC TIMERS ===== */
+    function triggerConfetti() {
+        const container = document.getElementById('confetti-container');
+        container.innerHTML = '';
+        const colors = ['#10b981','#34d399','#f59e0b','#60a5fa','#a78bfa'];
+        for (let i = 0; i < 30; i++) {
+            const p = document.createElement('div');
+            p.className = 'confetti-particle';
+            p.style.left = `${Math.random() * 100}%`;
+            p.style.animationDelay = `${Math.random() * 0.5}s`;
+            p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            p.style.transform = `rotateZ(${Math.random() * 360}deg)`;
+            container.appendChild(p);
+        }
+        setTimeout(() => container.innerHTML = '', 2500);
+    }
+
+    /* ===== PERIODIC REFRESH ===== */
     setInterval(() => { if (activeTab === 'copy-trade') fetchCopyTrades(); }, 30000);
 
     setInterval(() => {
@@ -1339,6 +1492,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const execTimeMs = parseInt(el.getAttribute('data-exec'), 10);
             const diffMins = Math.max(0, (execTimeMs - currentMinuteMs) / 60000);
             el.textContent = diffMins <= 0 ? '0m' : `${diffMins}m`;
+            el.style.color = diffMins <= 0 ? '#ef4444' : diffMins <= 5 ? '#ef4444' : '#60a5fa';
+        });
+        document.querySelectorAll('.live-copy-bar').forEach(el => {
+            const execTimeMs = parseInt(el.getAttribute('data-exec'), 10);
+            const diffMs = execTimeMs - accurateNow;
+            const minsLeft = Math.max(0, diffMs / 60000);
+            const progressPercent = Math.max(2, Math.min(100, (minsLeft / 15) * 100));
+            el.style.width = `${progressPercent}%`;
+            if (minsLeft < 5) { el.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; el.style.boxShadow = '0 0 8px rgba(239,68,68,0.5)'; }
         });
     }, 1000);
 
